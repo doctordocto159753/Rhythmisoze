@@ -1,0 +1,62 @@
+/**
+ * The version list.
+ *
+ * Deliberately not a segmented control: each option needs a sentence and a
+ * tempo, and squeezing four of those into one row makes the choice look
+ * cosmetic. Four panels reads as four real interpretations.
+ */
+
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-3);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  inline-size: 100%;
+  padding: var(--space-3) var(--space-4);
+  text-align: start;
+  border: var(--border-hairline) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  transition:
+    background-color var(--motion-quick) var(--ease-out),
+    border-color var(--motion-quick) var(--ease-out);
+}
+
+.item:hover {
+  background-color: var(--color-well);
+}
+
+/* Selection is carried by fill, border and weight together, so colour is never
+ * the only signal (WCAG 1.4.1). */
+.itemSelected {
+  background-color: var(--color-accent-wash);
+  border-color: var(--color-accent);
+}
+
+.itemSelected .name {
+  font-weight: var(--weight-strong);
+}
+
+.name {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.hint {
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.tempo {
+  margin-block-start: var(--space-1);
+  font-size: var(--text-micro);
+  color: var(--color-text-faint);
+  font-variant-numeric: tabular-nums;
+}

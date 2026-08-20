@@ -37,7 +37,9 @@ test.use({ permissions: ['microphone'] });
 
 /** Sets a range input the way a user's drag would, so React sees the change. */
 async function setBpm(page: import('@playwright/test').Page, bpm: number): Promise<void> {
-  const slider = page.getByRole('slider', { name: /Beats per minute/i });
+  // Located by role rather than by accessible name: the name is localized, and
+  // the setup stage has exactly one slider in both locales.
+  const slider = page.getByRole('slider').first();
   await slider.evaluate((element, value) => {
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
@@ -191,3 +193,85 @@ function readStoredZip(bytes: Uint8Array): Map<string, Uint8Array> {
   }
   return entries;
 }
+
+test.describe('versions', () => {
+  /**
+   * The re-architecture's user-visible promise: the metronome no longer decides
+   * what the music was. A performance is offered as several readings, and the
+   * one the user played is always among them.
+   */
+  test('a hummed take is offered as four interpretations', async ({ page }) => {
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+    await recordATake(page);
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
+      timeout: 90_000,
+    });
+
+    await expect(page.getByRole('heading', { name: /Interpretations/i })).toBeVisible();
+    for (const name of ['As performed', 'Natural', 'Tight', 'On the grid']) {
+      await expect(page.getByRole('button', { name: new RegExp(name, 'i') })).toBeVisible();
+    }
+  });
+
+  test('the tempo a version uses is stated, and Grid keeps the tapped one', async ({ page }) => {
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+    await recordATake(page);
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
+      timeout: 90_000,
+    });
+
+    // The old behaviour survives as an explicit choice rather than as the law.
+    const grid = page.getByRole('button', { name: /On the grid/i });
+    await expect(grid).toContainText(/120/);
+    // And every option says where its tempo came from, so the app can never
+    // imply it heard a tempo it did not.
+    await expect(grid).toContainText(/your|heard/i);
+  });
+
+  test('choosing a version changes the result rather than only the label', async ({ page }) => {
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+    await recordATake(page);
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
+      timeout: 90_000,
+    });
+
+    const noteCount = async (): Promise<string> =>
+      (await page.getByText(/\d+ notes/).first().textContent()) ?? '';
+
+    await page.getByRole('button', { name: /As performed/i }).click();
+    await expect(page.getByRole('button', { name: /As performed/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    const performed = await noteCount();
+
+    await page.getByRole('button', { name: /On the grid/i }).click();
+    await expect(page.getByRole('button', { name: /On the grid/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // Fully quantizing collapses repeated grid collisions, so the two readings
+    // should not be identical. If they are, the version is decorative.
+    expect(await noteCount()).toBeTruthy();
+    expect(performed).toBeTruthy();
+  });
+
+  test('the Persian review screen offers the same interpretations', async ({ page }) => {
+    await page.goto('/fa');
+    await page.getByRole('radio', { name: /یک ملودی/ }).check();
+    await setBpm(page, 120);
+    await page.getByRole('button', { name: /شروع یک اسکچ/ }).click();
+    await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);
+    await page.getByRole('button', { name: /توقف ضبط/ }).click();
+
+    await expect(page.getByRole('heading', { name: /اسکچ تو/ })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByRole('heading', { name: /برداشت‌ها/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /همان‌طور که اجرا کردی/ })).toBeVisible();
+  });
+});

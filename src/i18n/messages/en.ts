@@ -123,6 +123,30 @@ export const en = {
     retry: 'Try again',
   },
 
+  versions: {
+    title: 'Interpretations',
+    help: 'Same performance, four readings of it. Your original is always the first.',
+    names: {
+      performed: 'As performed',
+      natural: 'Natural',
+      tight: 'Tight',
+      grid: 'On the grid',
+    },
+    hints: {
+      performed: 'Exactly what you played, with only obvious mistakes removed.',
+      natural: 'Your own pulse, gently settled.',
+      tight: 'Your own pulse, timing pulled in.',
+      grid: 'The speed you tapped, fully aligned.',
+    },
+    heardTempo: (bpm: number) => `heard at ${bpm} BPM`,
+    tappedTempo: (bpm: number) => `your ${bpm} BPM`,
+    tempoNotHeard: 'No clear pulse was heard, so your tapped speed is used.',
+    halfOrDouble: (heard: number, tapped: number) =>
+      `You tapped ${tapped} BPM and this sounds like ${heard} BPM — likely counted twice as fast or twice as slow.`,
+    different: (heard: number, tapped: number) =>
+      `You tapped ${tapped} BPM; this sounds like ${heard} BPM.`,
+  },
+
   review: {
     title: 'Your sketch',
     play: 'Play',

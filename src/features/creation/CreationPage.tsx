@@ -41,7 +41,8 @@ export interface CreationPageProps {
  */
 export function CreationPage({ publishEnabled }: CreationPageProps) {
   const { locale, t } = useLocale();
-  const { state, refined, actions } = useCreationFlow(locale);
+  const { state, refined, rhythm, versions, activeVersion, tempoDisagreement, actions } =
+    useCreationFlow(locale);
   const support = useCoreSupport();
 
   useEffect(() => {
@@ -256,6 +257,11 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
         {/* --- Review ----------------------------------------------------- */}
         {showReview && refined ? (
           <ReviewStage
+            versions={versions}
+            activeVersionId={activeVersion?.id ?? null}
+            rhythm={rhythm}
+            tempoDisagreement={tempoDisagreement}
+            onVersionChange={actions.setVersion}
             refined={refined}
             rawNotes={state.rawNotes}
             diagnostics={state.diagnostics}

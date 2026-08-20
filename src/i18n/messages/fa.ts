@@ -127,6 +127,30 @@ export const fa: Messages = {
     retry: 'تلاش دوباره',
   },
 
+  versions: {
+    title: 'برداشت‌ها',
+    help: 'یک اجرا، چهار خوانش از آن. نسخه‌ی اصلی خودت همیشه اولی است.',
+    names: {
+      performed: 'همان‌طور که اجرا کردی',
+      natural: 'طبیعی',
+      tight: 'منظم',
+      grid: 'روی شبکه',
+    },
+    hints: {
+      performed: 'دقیقاً همان چیزی که نواختی، فقط خطاهای آشکار حذف شده.',
+      natural: 'ضرب خودت، با کمی نظم.',
+      tight: 'ضرب خودت، با زمان‌بندی جمع‌شده.',
+      grid: 'سرعتی که تپ کردی، کاملاً هم‌تراز.',
+    },
+    heardTempo: (bpm: number) => `شنیده‌شده روی ${bpm} BPM`,
+    tappedTempo: (bpm: number) => `${bpm} BPM خودت`,
+    tempoNotHeard: 'ضرب روشنی شنیده نشد، پس سرعتی که تپ کردی استفاده می‌شود.',
+    halfOrDouble: (heard: number, tapped: number) =>
+      `تو ${tapped} BPM تپ کردی و این شبیه ${heard} BPM است — احتمالاً دو برابر تند یا دو برابر کند شمرده‌ای.`,
+    different: (heard: number, tapped: number) =>
+      `تو ${tapped} BPM تپ کردی؛ این شبیه ${heard} BPM است.`,
+  },
+
   review: {
     title: 'اسکچ تو',
     play: 'پخش',

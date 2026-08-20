@@ -48,6 +48,17 @@ import {
   type MetronomeHandle,
 } from '@audio-core';
 import { refine, RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
+import {
+  analyzeDrumRhythm,
+  analyzeMelodyRhythm,
+  compareTempos,
+  defaultVersion,
+  planVersions,
+  type PerformanceRhythm,
+  type TempoDisagreement,
+  type VersionId,
+  type VersionRecipe,
+} from '@rhythm-extraction';
 import { importMidi } from '@midi';
 import {
   DEFAULT_MASTER,
@@ -105,6 +116,8 @@ export interface FlowState {
   progress: TranscriptionProgress | null;
 
   retouchAmount: number;
+  /** Which performance version the user is listening to; null means the default. */
+  versionId: VersionId | null;
   keyOverride: { root: string; mode: 'major' | 'minor' } | null;
 
   instrumentId: string;
@@ -161,6 +174,7 @@ type Action =
       diagnostics: ProcessingDiagnostics;
     }
   | { type: 'setRetouch'; amount: number }
+  | { type: 'setVersion'; versionId: VersionId }
   | { type: 'setKey'; key: FlowState['keyOverride'] }
   | { type: 'setInstrument'; id: string }
   | { type: 'setMaster'; master: Partial<MasterSettings> }
@@ -200,6 +214,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     melodyQuality: null,
     progress: null,
     retouchAmount: RETOUCH_AMOUNT_DEFAULT,
+    versionId: null,
     keyOverride: null,
     instrumentId: resolveInstrument(undefined, mode).id,
     master: DEFAULT_MASTER,
@@ -291,6 +306,9 @@ function reducer(state: FlowState, action: Action): FlowState {
         diagnostics: action.diagnostics,
         melodyQuality: action.melodyQuality,
         progress: null,
+        // A new take has its own tempo and groove, so the previous choice of
+        // version described a performance that no longer exists.
+        versionId: null,
         // A new transcription invalidates any previous render.
         renderedAudio: null,
         renderRealtimeRatio: null,
@@ -317,6 +335,8 @@ function reducer(state: FlowState, action: Action): FlowState {
       };
     case 'setRetouch':
       return { ...state, retouchAmount: action.amount, renderedAudio: null };
+    case 'setVersion':
+      return { ...state, versionId: action.versionId, renderedAudio: null };
     case 'setKey':
       return { ...state, keyOverride: action.key, renderedAudio: null };
     case 'setInstrument':
@@ -373,6 +393,54 @@ export function useCreationFlow(locale: Locale) {
     track('error', { code: appError.code });
   }, []);
 
+  /**
+   * What the performance itself says about tempo, meter and groove.
+   *
+   * Derived from the take, not from the metronome. Recomputed only when the
+   * transcription changes, because it describes the recording rather than any
+   * of the choices made about it afterwards.
+   */
+  const rhythm = useMemo<PerformanceRhythm | null>(() => {
+    if (state.durationSec <= 0) return null;
+    if (state.mode === 'rhythm') {
+      return state.rawDrums.length > 0
+        ? analyzeDrumRhythm(state.rawDrums, state.durationSec)
+        : null;
+    }
+    return state.rawNotes.length > 0
+      ? analyzeMelodyRhythm(state.rawNotes, state.durationSec)
+      : null;
+  }, [state.mode, state.rawNotes, state.rawDrums, state.durationSec]);
+
+  /** The versions on offer. The original performance is always one of them. */
+  const versions = useMemo<VersionRecipe[]>(() => {
+    if (rhythm === null || state.bpm === null) return [];
+    return planVersions({
+      rhythm,
+      tappedBpm: state.bpm,
+      mode: state.mode,
+      amount: state.retouchAmount,
+    });
+  }, [rhythm, state.bpm, state.mode, state.retouchAmount]);
+
+  /** The version in effect: the user's choice, or the honest default. */
+  const activeVersion = useMemo<VersionRecipe | null>(() => {
+    if (versions.length === 0) return null;
+    const wanted = state.versionId ?? (rhythm ? defaultVersion(rhythm) : 'grid');
+    return versions.find((version) => version.id === wanted) ?? versions[0] ?? null;
+  }, [versions, state.versionId, rhythm]);
+
+  /**
+   * Whether the tapped tempo and the heard tempo disagree, and how.
+   * Surfaced rather than silently resolved: a half-or-double gap usually means
+   * the user tapped eighths while singing quarters, and saying so is more
+   * useful than picking one for them.
+   */
+  const tempoDisagreement = useMemo<TempoDisagreement | null>(
+    () => (rhythm && state.bpm !== null ? compareTempos(rhythm, state.bpm) : null),
+    [rhythm, state.bpm],
+  );
+
   /** The refined result. Pure and cheap, so it is derived rather than stored. */
   const refined = useMemo<RefineResult | null>(() => {
     if (state.bpm === null) return null;
@@ -382,9 +450,12 @@ export function useCreationFlow(locale: Locale) {
       return refine(
         { notes: state.rawNotes, drums: state.rawDrums },
         {
-          bpm: state.bpm,
+          // The version decides the tempo, which may be the one that was heard
+          // rather than the one that was tapped.
+          bpm: activeVersion?.bpm ?? state.bpm,
           mode: state.mode,
-          amount: state.retouchAmount,
+          amount: activeVersion?.amount ?? state.retouchAmount,
+          paramOverrides: activeVersion?.paramOverrides,
           keyOverride: state.keyOverride
             ? {
                 root: state.keyOverride.root as never,
@@ -411,6 +482,7 @@ export function useCreationFlow(locale: Locale) {
     state.keyOverride,
     state.instrumentId,
     sourceKind,
+    activeVersion,
   ]);
 
   // --- Tempo -------------------------------------------------------------
@@ -909,6 +981,13 @@ export function useCreationFlow(locale: Locale) {
   return {
     state,
     refined,
+    /** What the performance itself said about tempo, meter and groove. */
+    rhythm,
+    /** The versions on offer; the original performance is always one of them. */
+    versions,
+    activeVersion,
+    /** Set when the heard tempo and the tapped tempo disagree. */
+    tempoDisagreement,
     actions: {
       tap,
       setBpm,
@@ -924,6 +1003,7 @@ export function useCreationFlow(locale: Locale) {
       cancelProcessing,
       reprocess,
       setRetouch,
+      setVersion: (versionId: VersionId) => dispatch({ type: 'setVersion', versionId }),
       setKey: (key: FlowState['keyOverride']) => dispatch({ type: 'setKey', key }),
       setInstrument,
       setMaster: (master: Partial<MasterSettings>) => dispatch({ type: 'setMaster', master }),

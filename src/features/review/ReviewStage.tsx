@@ -13,7 +13,15 @@ import { useLocale } from '@/i18n/provider';
 import { PianoRoll } from './PianoRoll';
 import styles from './ReviewStage.module.css';
 
+import type { PerformanceRhythm, TempoDisagreement, VersionId, VersionRecipe } from '@rhythm-extraction';
+import { VersionPicker } from './VersionPicker';
+
 export interface ReviewStageProps {
+  versions: readonly VersionRecipe[];
+  activeVersionId: VersionId | null;
+  rhythm: PerformanceRhythm | null;
+  tempoDisagreement: TempoDisagreement | null;
+  onVersionChange(id: VersionId): void;
   refined: RefineResult;
   rawNotes: RefineResult['notes'];
   diagnostics: ProcessingDiagnostics | null;
@@ -43,6 +51,11 @@ export interface ReviewStageProps {
  * behind the current result, and the slider that moves them is directly under it.
  */
 export function ReviewStage({
+  versions,
+  activeVersionId,
+  rhythm,
+  tempoDisagreement,
+  onVersionChange,
   refined,
   rawNotes,
   diagnostics,
@@ -133,6 +146,14 @@ export function ReviewStage({
           </div>
         ) : null}
       </Well>
+
+      <VersionPicker
+        versions={versions}
+        activeId={activeVersionId}
+        rhythm={rhythm}
+        disagreement={tempoDisagreement}
+        onSelect={onVersionChange}
+      />
 
       <Well as="section" aria-labelledby="cleanup-heading">
         <Stack gap={3}>

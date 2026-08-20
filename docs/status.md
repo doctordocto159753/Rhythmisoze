@@ -50,7 +50,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | US-0301 normalize audio | Done | `MonoAudio`, deterministic downmix, diagnostics, resampling |
 | US-0302 model load and cache | Built, unverified | Self-hosted 0.9 MB model, versioned, warmed on record hover; load time not measured |
 | US-0303 off the main thread | Done | Worker with typed protocol, real cancellation, an escaped-error trap and a watchdog; verified end to end in Chromium by `tests/e2e/capture.spec.ts` |
-| US-0304 result contract | Done | Basic Pitch candidates are register-constrained and selected against a monophonic YIN guide; fallback and MIDI import remain explicit |
+| US-0304 result contract | Done | Voice uses the isolated Human Melody Extraction Engine; Instrument Mode keeps polyphonic Basic Pitch; rhythm and MIDI import remain explicit |
 | US-0305 progress and recovery | Done | Real stages, typed errors, retry without re-recording |
 | US-0306 server adapter | **Not done** | Correctly conditional on ADR-001 selecting a server path. It did not. |
 
@@ -199,4 +199,5 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 The product is complete as a working application and is **not** ready for a
 production release. The two things standing between those states are the
 architecture quality gate and real-device verification, both of which need
-inputs (an audio corpus, physical devices) that were not available here.
+more inputs (a broader labelled audio corpus and physical devices) than the
+current human regression set provides.

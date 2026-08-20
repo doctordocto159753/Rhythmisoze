@@ -101,6 +101,32 @@ bytes are not checked into Git. A local run against the supplied 20.288 s M4A
 produced 28 monophonic YIN notes, median MIDI 56 (G♯3), adaptive range
 48.17–67.74, and no A1/A2 event.
 
+### 2026-08-20 dedicated Human Melody Extraction Engine
+
+The guided-candidate design above fixed the first subharmonic case, but a second
+human regression (`test22.webm`) showed the architectural limit: Basic Pitch was
+still deciding the primary notes, while the monophonic layer only selected and
+cleaned its candidates. That is the inverse of the product requirement to
+recover a person's intended melody.
+
+The voice path is now superseded by an isolated engine in
+`src/packages/melody-extraction/`:
+
+- YIN directly produces nullable, confidence-bearing f0 frames;
+- an adaptive percentile vocal window and octave-aware smoothing create the
+  trusted contour;
+- stable-region segmentation creates the raw melody notes;
+- the MIDI-note generator enforces maximum polyphony one; and
+- a score derived from voiced coverage, continuity, octave stability and
+  segmentation confidence drives the user-facing clarity notice.
+
+Basic Pitch is retained, unchanged in purpose, behind the explicit Instrument
+Mode for polyphonic guitar/piano/general-audio transcription. It no longer
+participates in Melody Mode. Retouch receives the voice engine's notes and stays
+responsible for quantization, scale correction and musical refinement rather
+than primary pitch recovery. Both human source cases are permanent normalized
+audio regressions under `tests/fixtures/audio/`.
+
 ## What has NOT been measured
 
 Stated explicitly rather than implied, because Playbook §7 makes this gate

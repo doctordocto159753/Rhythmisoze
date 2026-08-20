@@ -109,7 +109,7 @@ test.describe('melody', () => {
     // Whichever engine ran, the user is told. A silent fallback is the failure
     // mode ADR-001 forbids.
     await expect(
-      page.getByText(/note model|pitch tracker|a server/i).first(),
+      page.getByText(/human melody engine|note model|pitch tracker|a server/i).first(),
     ).toBeVisible();
   });
 

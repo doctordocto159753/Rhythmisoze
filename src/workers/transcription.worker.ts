@@ -7,14 +7,12 @@
  * and for the rhythm path onset detection and classification. The main thread
  * only ever sees typed messages.
  *
- * Two engines live behind one protocol:
+ * Three engines live behind one protocol:
  *
- *   basic-pitch    the PRD's primary path. Loaded by dynamic import so its
- *                  TensorFlow.js dependency is not in the initial bundle and
- *                  is never fetched by a user who does not record.
- *   pitch-tracker  the built-in YIN tracker. Pure TypeScript, no model, and
- *                  the automatic fallback when the model cannot be loaded or
- *                  the backend will not initialise.
+ *   melody-extraction  the dedicated YIN/contour/segmentation path for voice.
+ *   basic-pitch        the multipitch path for Instrument Mode, dynamically
+ *                      imported so TensorFlow.js stays out of the initial bundle.
+ *   rhythm             onset detection/classification for beatbox input.
  *
  * The fallback is honest, not silent: the result carries `transcriberId`, the
  * UI shows which engine produced it, and a `model_unavailable` warning is
@@ -26,26 +24,23 @@ import {
   type MonoAudio,
   type NoteEvent,
   type ProcessingDiagnostics,
+  type TranscriptionInputMode,
   type TranscriptionResult,
 } from '@contracts';
 import { peakNormalize, resample } from '@/packages/audio-core/normalize';
-import {
-  buildMelodyGuide,
-  guideMelodyCandidates,
-  type MelodyGuide,
-} from '@/packages/audio-core/melodyGuide';
 import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
+import { extractHumanMelody } from '@/packages/melody-extraction';
 
 export interface TranscribeRequest {
   type: 'transcribe';
   id: string;
-  mode: 'melody' | 'rhythm';
+  mode: TranscriptionInputMode;
   /** Transferred, not copied. */
   samples: Float32Array;
   sampleRate: number;
   durationSec: number;
   modelUrl: string;
-  /** `false` forces the built-in tracker, used by the design catalog and tests. */
+  /** `false` forces the local monophonic fallback in Instrument Mode. */
   allowModel: boolean;
   noteThreshold: number;
   onsetThreshold: number;
@@ -99,7 +94,7 @@ const now = (): number => (typeof performance !== 'undefined' ? performance.now(
  */
 function reportEscapedError(detail: string): void {
   // A model attempt is in progress: turn the escaped error into a rejection of
-  // that attempt, so `runMelody` can fall back to the built-in tracker. Posting
+  // that attempt, so Instrument Mode can fall back locally. Posting
   // a failure here instead would deny the user a result the app can still
   // produce perfectly well.
   const attempt = modelAttempt;
@@ -155,10 +150,11 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
 
   inFlight = request.id;
   try {
-    const result =
-      request.mode === 'rhythm'
-        ? await runRhythm(request, audio)
-        : await runMelody(request, audio);
+    const result = request.mode === 'rhythm'
+      ? await runRhythm(request, audio)
+      : request.mode === 'voice'
+        ? runVoiceMelody(request, audio)
+        : await runInstrument(request, audio);
 
     if (cancelled.has(request.id)) {
       cancelled.delete(request.id);
@@ -209,14 +205,50 @@ function modelBudgetMs(durationSec: number): number {
   return Math.max(20_000, durationSec * 8_000);
 }
 
-async function runMelody(
+function runVoiceMelody(
+  request: TranscribeRequest,
+  audio: MonoAudio,
+  warnings: string[] = [],
+  started = now(),
+): TranscriptionResult {
+  post({ type: 'progress', id: request.id, stage: 'preparing_audio', progress: 0.08 });
+  const extraction = extractHumanMelody(audio, {
+    segmentation: { minDurationSec: request.minNoteLengthSec },
+  });
+  throwIfCancelled(request.id);
+  post({ type: 'progress', id: request.id, stage: 'collecting', progress: 0.9 });
+  post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
+  return {
+    notes: extraction.notes,
+    referenceNotes: extraction.notes.map((note) => ({ ...note })),
+    melodyQuality: extraction.quality,
+    durationSec: audio.durationSec,
+    diagnostics: {
+      transcriberId: 'melody-extraction',
+      backend: 'browser',
+      elapsedMs: now() - started,
+      modelLoadMs: 0,
+      modelFromCache: true,
+      notesBeforeFilter: extraction.frames.filter((frame) => frame.midiPitch !== null).length,
+      notesAfterFilter: extraction.notes.length,
+      warnings: [
+        ...warnings,
+        ...(extraction.range
+          ? [`adaptive_vocal_range:${extraction.range.lowMidi.toFixed(1)}-${extraction.range.highMidi.toFixed(1)}`]
+          : []),
+        ...(!extraction.quality.clear
+          ? [`unclear_melody:${extraction.quality.melodyConfidence.toFixed(2)}`]
+          : []),
+      ],
+    },
+  };
+}
+
+async function runInstrument(
   request: TranscribeRequest,
   audio: MonoAudio,
 ): Promise<TranscriptionResult> {
   const melodyStarted = now();
-  post({ type: 'progress', id: request.id, stage: 'preparing_audio', progress: 0.01 });
-  const guide = buildMelodyGuide(audio);
-  throwIfCancelled(request.id);
   if (request.allowModel) {
     try {
       // `escapable` is rejected by the global error trap, so an error thrown
@@ -225,7 +257,7 @@ async function runMelody(
         modelAttempt = { reject };
       });
       return await withTimeout(
-        Promise.race([runBasicPitch(request, audio, guide, melodyStarted), escapable]),
+        Promise.race([runBasicPitch(request, audio, melodyStarted), escapable]),
         modelBudgetMs(audio.durationSec),
         'model_timeout',
       );
@@ -234,10 +266,9 @@ async function runMelody(
       // a cancelled run must not be "recovered" into a second inference.
       if (cancelled.has(request.id)) throw error;
       const detail = error instanceof AppError ? error.detail : 'load failed';
-      return resultFromGuide(
+      return runVoiceMelody(
         request,
         audio,
-        guide,
         [`model_unavailable:${detail ?? 'unknown'}`],
         melodyStarted,
       );
@@ -245,32 +276,7 @@ async function runMelody(
       modelAttempt = null;
     }
   }
-  return resultFromGuide(request, audio, guide, [], melodyStarted);
-}
-
-function resultFromGuide(
-  request: TranscribeRequest,
-  audio: MonoAudio,
-  guide: MelodyGuide,
-  warnings: string[],
-  started: number,
-): TranscriptionResult {
-  post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
-  return {
-    notes: guide.notes,
-    referenceNotes: guide.notes.map((note) => ({ ...note })),
-    durationSec: audio.durationSec,
-    diagnostics: {
-      transcriberId: 'pitch-tracker',
-      backend: 'browser',
-      elapsedMs: now() - started,
-      modelLoadMs: 0,
-      modelFromCache: true,
-      notesBeforeFilter: guide.notes.length,
-      notesAfterFilter: guide.notes.length,
-      warnings,
-    },
-  };
+  return runVoiceMelody(request, audio, ['instrument_model_disabled'], melodyStarted);
 }
 
 interface BasicPitchModule {
@@ -311,7 +317,6 @@ interface BasicPitchModule {
 async function runBasicPitch(
   request: TranscribeRequest,
   audio: MonoAudio,
-  guide: MelodyGuide,
   started: number,
 ): Promise<TranscriptionResult> {
   post({ type: 'progress', id: request.id, stage: 'loading_model', progress: 0.02 });
@@ -385,9 +390,9 @@ async function runBasicPitch(
     // The library counts note length in model frames, not seconds.
     Math.max(1, Math.round(request.minNoteLengthSec / MODEL_FRAME_SEC)),
     true,
-    guide.register?.maxFrequencyHz ?? null,
-    guide.register?.minFrequencyHz ?? null,
-    true,
+    null,
+    null,
+    false,
   );
   const timed = basicPitch.noteFramesToTime(raw);
 
@@ -402,29 +407,23 @@ async function runBasicPitch(
     }))
     .filter((note) => note.endSec > note.startSec)
     .sort((a, b) => a.startSec - b.startSec);
-  const notes = guideMelodyCandidates(candidates, guide);
+  const notes = candidates;
 
   post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
 
   const diagnostics: ProcessingDiagnostics = {
-    transcriberId: 'basic-pitch-yin',
+    transcriberId: 'basic-pitch',
     backend: 'browser',
     elapsedMs: now() - started,
     modelLoadMs,
     modelFromCache: fromCache,
     notesBeforeFilter: timed.length,
     notesAfterFilter: notes.length,
-    warnings: [
-      'yin_guided_monophonic',
-      ...(guide.register
-        ? [`adaptive_register:${guide.register.lowMidi.toFixed(1)}-${guide.register.highMidi.toFixed(1)}`]
-        : []),
-    ],
+    warnings: [],
   };
 
   return {
     notes,
-    referenceNotes: guide.notes.map((note) => ({ ...note })),
     durationSec: audio.durationSec,
     diagnostics,
   };

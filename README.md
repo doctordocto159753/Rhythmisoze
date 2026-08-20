@@ -43,6 +43,7 @@ src/
     contracts/         the vocabulary: notes, onsets, audio, errors, sketches
     retouch/           the humtool.py port + the Raw→Clean macro
     audio-core/        capture, metronome, YIN, onsets, drum classification, WAV
+    melody-extraction/ human-voice f0, contour, segmentation, confidence
     midi/              Standard MIDI File import/export, safe filenames
     synthesis/         sample + synth engines, registry, offline render
   features/            product behaviour, one directory per stage of the flow
@@ -59,12 +60,16 @@ tests/                 398 unit tests, golden fixtures, E2E specs
 ## The pipeline
 
 ```
-microphone ─► MonoAudio ─► transcriber ─► NoteEvent[] ─► refine() ─► synth ─► WAV
-                (mono float PCM)   │                       │            │
-                                   │                       │            └─ OfflineAudioContext
-                                   │                       └─ pure, deterministic, 181 parity tests
-                                   └─ Basic Pitch in a worker, YIN as fallback
+microphone ─► MonoAudio ─► voice melody engine ─► NoteEvent[] ─► refine() ─► synth ─► WAV
+                (mono float PCM)      │                         │            │
+                                      │                         │            └─ OfflineAudioContext
+                                      │                         └─ pure, deterministic, 181 parity tests
+                                      └─ YIN → contour → segmentation → monophonic notes
 ```
+
+Instrument Mode is deliberately separate: guitar, piano and other potentially
+polyphonic audio continues through Basic Pitch in the worker. See
+[`docs/melody-engine.md`](docs/melody-engine.md).
 
 Rhythm is a separate path, not melody with the pitch discarded:
 
@@ -114,9 +119,9 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 Stated here rather than left to be discovered. The full list with detail is in
 `docs/product-decisions.md`.
 
-- **The architecture quality gate has not been run** (ADR-001). No audio corpus
-  existed to run it against, so Basic Pitch's accuracy and speed on real devices
-  are unverified. The built-in pitch tracker exists as a working fallback.
+- **The complete architecture quality gate has not been run** (ADR-001). The
+  checked-in human regressions cover the known failures, but the corpus is still
+  too small for a general accuracy claim or a blinded listening result.
 - **Recorded instruments still need a human listening panel** (ADR-002). Six
   licensed multisample packs now ship and the technical loading/rendering gates
   pass, but the documented subjective >=4/5 score has not been claimed without

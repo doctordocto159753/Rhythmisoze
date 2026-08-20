@@ -151,6 +151,26 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                 onChange={actions.setMode}
               />
 
+              {state.mode === 'melody' ? (
+                <Choice<'voice' | 'instrument'>
+                  legend={t.melodyInput.label}
+                  value={state.melodyInputMode}
+                  options={[
+                    {
+                      value: 'voice',
+                      title: t.melodyInput.voice,
+                      hint: t.melodyInput.voiceHint,
+                    },
+                    {
+                      value: 'instrument',
+                      title: t.melodyInput.instrument,
+                      hint: t.melodyInput.instrumentHint,
+                    },
+                  ]}
+                  onChange={actions.setMelodyInputMode}
+                />
+              ) : null}
+
               <Raised as="section" aria-labelledby="setup-heading">
                 <Text variant="heading" as="h2" id="setup-heading" className={styles.srHeading}>
                   {t.tempo.label}
@@ -165,7 +185,9 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                   onBpmChange={actions.setBpm}
                   onMeterChange={actions.setMeter}
                   onToggleMetronome={actions.toggleMetronome}
-                  onWarm={warmModel}
+                  onWarm={state.mode === 'melody' && state.melodyInputMode === 'instrument'
+                    ? warmModel
+                    : undefined}
                 />
               </Raised>
 
@@ -237,6 +259,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             refined={refined}
             rawNotes={state.rawNotes}
             diagnostics={state.diagnostics}
+            melodyQuality={state.melodyQuality}
             mode={state.mode}
             bpm={state.bpm ?? 100}
             meter={state.meter}

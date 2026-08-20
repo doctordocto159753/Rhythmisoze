@@ -17,13 +17,14 @@ import {
   type AppErrorCode,
   type MonoAudio,
   type RecoveryAction,
+  type TranscriptionInputMode,
   type TranscriptionProgress,
   type TranscriptionResult,
 } from '@contracts';
 import type { WorkerRequest, WorkerResponse } from '@/workers/transcription.worker';
 
 export interface TranscribeOptions {
-  mode: 'melody' | 'rhythm';
+  mode: TranscriptionInputMode;
   /** `false` forces the built-in tracker. */
   allowModel?: boolean;
   noteThreshold?: number;
@@ -36,10 +37,9 @@ export interface TranscribeOptions {
 /**
  * Defaults.
  *
- * `noteThreshold` and `onsetThreshold` are the model's own confidence gates.
- * Melody uses the library's conservative baseline. A YIN guide now fills gaps
- * and rejects octave/sub-octave activations, so lowering these gates only adds
- * breath and transition noise without buying recall.
+ * `noteThreshold` and `onsetThreshold` are Basic Pitch's confidence gates for
+ * Instrument Mode. Voice Melody Mode owns its thresholds inside the dedicated
+ * extraction package; rhythm uses onsetThreshold only.
  */
 const DEFAULTS = {
   noteThreshold: 0.3,

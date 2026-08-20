@@ -23,10 +23,12 @@ import {
   type CreationMode,
   type Locale,
   type LocalSourceAsset,
+  type MelodyConfidence,
   type Meter,
   type MonoAudio,
   type NoteEvent,
   type ProcessingDiagnostics,
+  type TranscriptionInputMode,
   type TranscriptionProgress,
 } from '@contracts';
 import {
@@ -71,12 +73,14 @@ export const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_MIDI_UPLOAD_BYTES = 5 * 1024 * 1024;
 /** PRD R-04: one measure. */
 export const COUNT_IN_BARS = 1;
+export type MelodyInputMode = Exclude<TranscriptionInputMode, 'rhythm'>;
 
 export interface FlowState {
   machine: MachineContext;
   sketchId: string;
   title: string;
   mode: CreationMode;
+  melodyInputMode: MelodyInputMode;
   bpm: number | null;
   meter: Meter;
   metronomeMuted: boolean;
@@ -97,6 +101,7 @@ export interface FlowState {
   referenceNotes: NoteEvent[];
   rawDrums: RefineResult['drums'];
   diagnostics: ProcessingDiagnostics | null;
+  melodyQuality: MelodyConfidence | null;
   progress: TranscriptionProgress | null;
 
   retouchAmount: number;
@@ -121,6 +126,7 @@ export interface FlowState {
 type Action =
   | { type: 'machine'; event: CreationEvent; payload?: { code: AppError['code']; recovery: AppError['recovery'] } }
   | { type: 'setMode'; mode: CreationMode }
+  | { type: 'setMelodyInputMode'; mode: MelodyInputMode }
   | { type: 'setBpm'; bpm: number }
   | { type: 'setMeter'; meter: Meter }
   | { type: 'tap'; history: number[]; bpm: number | null; tapCount: number }
@@ -141,6 +147,7 @@ type Action =
       drums: RefineResult['drums'];
       diagnostics: ProcessingDiagnostics;
       referenceNotes: NoteEvent[];
+      melodyQuality: MelodyConfidence | null;
     }
   | {
       type: 'midiImported';
@@ -173,6 +180,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     sketchId,
     title: '',
     mode,
+    melodyInputMode: 'voice',
     bpm: null,
     meter: DEFAULT_METER,
     metronomeMuted: false,
@@ -189,6 +197,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     referenceNotes: [],
     rawDrums: [],
     diagnostics: null,
+    melodyQuality: null,
     progress: null,
     retouchAmount: RETOUCH_AMOUNT_DEFAULT,
     keyOverride: null,
@@ -223,9 +232,24 @@ function reducer(state: FlowState, action: Action): FlowState {
         rawNotes: [],
         referenceNotes: [],
         rawDrums: [],
+        melodyQuality: null,
         audio: null,
         source: null,
         durationSec: 0,
+        renderedAudio: null,
+      };
+    case 'setMelodyInputMode':
+      return {
+        ...state,
+        melodyInputMode: action.mode,
+        rawNotes: [],
+        referenceNotes: [],
+        rawDrums: [],
+        audio: null,
+        source: null,
+        durationSec: 0,
+        diagnostics: null,
+        melodyQuality: null,
         renderedAudio: null,
       };
     case 'setBpm':
@@ -265,6 +289,7 @@ function reducer(state: FlowState, action: Action): FlowState {
         referenceNotes: action.referenceNotes,
         rawDrums: action.drums,
         diagnostics: action.diagnostics,
+        melodyQuality: action.melodyQuality,
         progress: null,
         // A new transcription invalidates any previous render.
         renderedAudio: null,
@@ -285,6 +310,7 @@ function reducer(state: FlowState, action: Action): FlowState {
         referenceNotes: [],
         rawDrums: action.drums,
         diagnostics: action.diagnostics,
+        melodyQuality: null,
         progress: null,
         renderedAudio: null,
         renderRealtimeRatio: null,
@@ -417,6 +443,15 @@ export function useCreationFlow(locale: Locale) {
     [send],
   );
 
+  const setMelodyInputMode = useCallback(
+    (mode: MelodyInputMode) => {
+      dispatch({ type: 'setMelodyInputMode', mode });
+      send('MODE_CHANGED');
+      track('melody_input_mode_selected', { mode });
+    },
+    [send],
+  );
+
   const setMeter = useCallback((meter: Meter) => dispatch({ type: 'setMeter', meter }), []);
   const toggleMetronome = useCallback(() => dispatch({ type: 'toggleMetronome' }), []);
 
@@ -448,7 +483,7 @@ export function useCreationFlow(locale: Locale) {
 
       try {
         const result = await transcribe(audio, {
-          mode: state.mode,
+          mode: state.mode === 'rhythm' ? 'rhythm' : state.melodyInputMode,
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
         });
@@ -458,6 +493,7 @@ export function useCreationFlow(locale: Locale) {
           referenceNotes: result.referenceNotes ?? [],
           drums: result.drums ?? [],
           diagnostics: result.diagnostics,
+          melodyQuality: result.melodyQuality ?? null,
         });
         send('PROCESS_DONE');
         track('processing_completed', {
@@ -467,7 +503,10 @@ export function useCreationFlow(locale: Locale) {
         });
 
         if (result.notes.length === 0 && (result.drums?.length ?? 0) === 0) {
-          fail(new AppError('transcription_empty', 'rerecord', 'no events'));
+          const code = result.melodyQuality && !result.melodyQuality.clear
+            ? 'melody_unclear'
+            : 'transcription_empty';
+          fail(new AppError(code, 'rerecord', 'no events'));
         }
       } catch (error) {
         if (error instanceof AppError && error.code === 'transcription_cancelled') {
@@ -479,7 +518,7 @@ export function useCreationFlow(locale: Locale) {
         abortRef.current = null;
       }
     },
-    [state.mode, send, fail],
+    [state.mode, state.melodyInputMode, send, fail],
   );
 
   const ingestAudioBlob = useCallback(
@@ -874,6 +913,7 @@ export function useCreationFlow(locale: Locale) {
       tap,
       setBpm,
       setMode,
+      setMelodyInputMode,
       setMeter,
       toggleMetronome,
       arm,

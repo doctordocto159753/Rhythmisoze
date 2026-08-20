@@ -9,6 +9,7 @@ test('audio upload follows the real transcription path and packages the untouche
   page,
 }) => {
   await page.goto('/en');
+  await expect(page.getByRole('radio', { name: /Melody mode/i })).toBeChecked();
   const audioInput = page.getByLabel('Choose a recording to upload');
   await expect(audioInput).toBeDisabled();
   await setBpm(page, 120);
@@ -19,7 +20,7 @@ test('audio upload follows the real transcription path and packages the untouche
     timeout: 90_000,
   });
   await page.getByRole('button', { name: /^Details$/ }).click();
-  await expect(page.getByText(/melody contour|pitch tracker/i).first()).toBeVisible();
+  await expect(page.getByText(/human melody engine/i).first()).toBeVisible();
 
   await page.getByRole('button', { name: /Take it with you/i }).click();
   await expect(page.getByRole('heading', { name: /Complete package/i })).toBeVisible({
@@ -77,6 +78,21 @@ test('a rejected audio file can be replaced without losing the configured tempo'
   await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
     timeout: 90_000,
   });
+});
+
+test('Instrument Mode keeps the Basic Pitch transcription path', async ({ page }) => {
+  await page.goto('/en');
+  const instrumentMode = page.getByRole('radio', { name: /Instrument mode/i });
+  await instrumentMode.check();
+  await expect(instrumentMode).toBeChecked();
+  await setBpm(page, 120);
+  await page.getByLabel('Choose a recording to upload').setInputFiles(AUDIO_FIXTURE);
+
+  await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
+    timeout: 90_000,
+  });
+  await page.getByRole('button', { name: /^Details$/ }).click();
+  await expect(page.getByText(/^the note model, in your browser$/i)).toBeVisible();
 });
 
 test('MIDI import works before tempo setup, persists its source and renders a package', async ({

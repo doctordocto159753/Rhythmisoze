@@ -73,19 +73,23 @@
 
 .input {
   position: absolute;
+  inset: 0;
   opacity: 0;
-  inline-size: 1px;
-  block-size: 1px;
+  inline-size: 100%;
+  block-size: 100%;
+  cursor: inherit;
 }
 
 .optionTitle {
   font-weight: var(--weight-medium);
   color: var(--color-text);
+  pointer-events: none;
 }
 
 .optionHint {
   font-size: var(--text-micro);
   color: var(--color-text-muted);
+  pointer-events: none;
 }
 
 /**

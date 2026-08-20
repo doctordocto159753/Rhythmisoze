@@ -21,6 +21,7 @@ export const APP_ERROR_CODES = [
   'model_load_failed',
   'transcription_failed',
   'transcription_empty',
+  'melody_unclear',
   'transcription_cancelled',
   'worker_unavailable',
   'retouch_failed',

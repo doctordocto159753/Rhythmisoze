@@ -60,6 +60,14 @@ export const fa: Messages = {
     changeWarning: 'با تغییر این گزینه، ضبط فعلی پاک می‌شود.',
   },
 
+  melodyInput: {
+    label: 'چه چیزی ضبط می‌کنی؟',
+    voice: 'حالت ملودی',
+    voiceHint: 'برای زمزمه، آواز یا سوت؛ یک خط ملودی را دنبال می‌کند.',
+    instrument: 'حالت ساز',
+    instrumentHint: 'برای گیتار، پیانو یا صداهایی که ممکن است چند نت را هم‌زمان بنوازند.',
+  },
+
   tempo: {
     label: 'سرعت',
     tapPrompt: 'چهار بار با سرعت خودت تپ کن',
@@ -127,6 +135,8 @@ export const fa: Messages = {
     cleanup: 'تمیزکاری',
     cleanupHelp: 'یک سر، دقیقاً همان چیزی است که خواندی. سر دیگر، کاملاً تمیز شده.',
     qualityGuard: 'شکل ملودی‌ات حفظ شد، چون تمیزکاری شدیدتر آن را تغییر می‌داد.',
+    unclearMelody:
+      'ملودی روشنی در ضبط پیدا نشد. نت‌ها را یکی‌یکی زمزمه کن و دوباره امتحان کن.',
     cleanupLevels: {
       raw: 'دقیقاً همان‌طور که خواندی',
       light: 'کمی مرتب',
@@ -152,6 +162,7 @@ export const fa: Messages = {
       merged: 'تکه‌های ادغام‌شده',
       stepwise: 'حرکت پله‌ای',
       tempoMismatch: 'این با سرعتی که تپ کردی فرق دارد. اگر نتیجه درست حس نمی‌شود، دوباره تپ کن.',
+      melodyConfidence: 'اطمینان ملودی',
     },
     empty: 'در این ضبط نتی پیدا نشد.',
     emptyHelp: 'کمی بلندتر زمزمه کن و بین نت‌ها فاصله‌ی کوتاه بگذار.',
@@ -301,6 +312,7 @@ export const fa: Messages = {
     model_load_failed: 'مدل شنیدن دانلود نشد.',
     transcription_failed: 'ضبط تو به نت تبدیل نشد.',
     transcription_empty: 'در این ضبط نتی پیدا نشد.',
+    melody_unclear: 'ملودی روشنی در ضبط پیدا نشد. نت‌ها را یکی‌یکی زمزمه کن.',
     transcription_cancelled: 'متوقف شد.',
     worker_unavailable: 'این مرورگر نمی‌تواند مرحله‌ی پردازش را اجرا کند.',
     retouch_failed: 'مرحله‌ی تمیزکاری شکست خورد.',
@@ -331,6 +343,7 @@ export const fa: Messages = {
         'روی قفل کنار نوار آدرس بزن، میکروفون را مجاز کن و صفحه را دوباره بارگذاری کن.',
       audio_silent: 'مطمئن شو میکروفون درست انتخاب شده، بعد دوباره ضبط کن.',
       audio_too_short: 'دست‌کم یک ثانیه ضبط کن.',
+      melody_unclear: 'هر بار یک نت را واضح نگه دار و بین نت‌ها کمی فاصله بگذار.',
       model_load_failed: 'اتصالت را بررسی کن و دوباره تلاش کن.',
       storage_quota_exceeded: 'یک اسکچ قدیمی را حذف کن، یا دانلود و بعد حذفش کن.',
       unsupported_browser: 'آخرین نسخه‌ی کروم، اج، فایرفاکس یا سافاری را امتحان کن.',
@@ -374,6 +387,7 @@ export const fa: Messages = {
     uploadTitle: 'این مرحله صدا را آپلود می‌کند',
     processedBy: (backend: string) => `پردازش‌شده با: ${backend}`,
     backends: {
+      'melody-extraction': 'موتور ملودی انسانی، در مرورگر تو',
       'basic-pitch': 'مدل نت، در مرورگر تو',
       'basic-pitch-yin': 'مدل نت با مسیر ملودی، در مرورگر تو',
       'pitch-tracker': 'ردیاب زیروبمی داخلی، در مرورگر تو',

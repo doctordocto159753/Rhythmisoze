@@ -56,6 +56,14 @@ export const en = {
     changeWarning: 'Changing this clears the current take.',
   },
 
+  melodyInput: {
+    label: 'What will you record?',
+    voice: 'Melody mode',
+    voiceHint: 'For humming, singing or whistling. Follows one melody line.',
+    instrument: 'Instrument mode',
+    instrumentHint: 'For guitar, piano or other sounds that may play several notes.',
+  },
+
   tempo: {
     label: 'Speed',
     tapPrompt: 'Tap four times at your speed',
@@ -123,6 +131,8 @@ export const en = {
     cleanup: 'Cleanup',
     cleanupHelp: 'Left is exactly what you sang. Right is fully tidied up.',
     qualityGuard: 'Your melody contour was kept because stronger cleanup would have changed it.',
+    unclearMelody:
+      'Your recording does not contain a clear melody. Try humming one note after another.',
     cleanupLevels: {
       raw: 'Exactly as sung',
       light: 'Lightly tidied',
@@ -148,6 +158,7 @@ export const en = {
       merged: 'Fragments merged',
       stepwise: 'Stepwise movement',
       tempoMismatch: 'That differs from your tapped speed. If the result feels off, retap.',
+      melodyConfidence: 'Melody confidence',
     },
     empty: 'No notes were found in that take.',
     emptyHelp: 'Try humming a little louder, and leave small gaps between notes.',
@@ -297,6 +308,8 @@ export const en = {
     model_load_failed: 'The listener could not be downloaded.',
     transcription_failed: 'Your take could not be read as notes.',
     transcription_empty: 'No notes were found in that take.',
+    melody_unclear:
+      'Your recording does not contain a clear melody. Try humming one note after another.',
     transcription_cancelled: 'Stopped.',
     worker_unavailable: 'This browser cannot run the processing step.',
     retouch_failed: 'The cleanup step failed.',
@@ -327,6 +340,7 @@ export const en = {
         'Open the padlock in the address bar, allow the microphone, then reload.',
       audio_silent: 'Check that the right microphone is selected, then record again.',
       audio_too_short: 'Record for at least a second.',
+      melody_unclear: 'Use one steady note at a time and leave a small gap between notes.',
       model_load_failed: 'Check your connection and try again.',
       storage_quota_exceeded: 'Delete an old sketch, or download and remove one.',
       unsupported_browser: 'Try the latest Chrome, Edge, Firefox or Safari.',
@@ -370,6 +384,7 @@ export const en = {
     uploadTitle: 'This step uploads audio',
     processedBy: (backend: string) => `Processed by: ${backend}`,
     backends: {
+      'melody-extraction': 'the human melody engine, in your browser',
       'basic-pitch': 'the note model, in your browser',
       'basic-pitch-yin': 'the note model with melody contour, in your browser',
       'pitch-tracker': 'the built-in pitch tracker, in your browser',

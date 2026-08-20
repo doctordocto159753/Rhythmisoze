@@ -54,6 +54,18 @@
   color: var(--color-text);
 }
 
+.clarityNotice {
+  margin: 0 var(--space-4) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-accent-wash);
+  border-inline-start: var(--border-firm) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.clarityNotice p {
+  color: var(--color-text);
+}
+
 /* Persian has no italic tradition; a synthesised oblique looks like a rendering
  * fault rather than an emphasis. */
 :global(:root[lang='fa']) .keyUnknown {

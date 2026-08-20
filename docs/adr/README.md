@@ -12,7 +12,7 @@ above the current implementation in the source-of-truth order, which means:
 | ADR | Decision | Status |
 |---|---|---|
 | [ADR-001](ADR-001-processing-backend.md) | Transcription backend | Accepted for development, **not for release** |
-| [ADR-002](ADR-002-synthesis-engine.md) | Synthesis engine and instrument sound source | Accepted, with a known gap |
+| [ADR-002](ADR-002-synthesis-engine.md) | Hybrid sample/procedural instrument sound source | Accepted; human listening score open |
 | [ADR-003](ADR-003-styling-system.md) | CSS Modules and design tokens instead of Tailwind | Accepted |
 | [ADR-004](ADR-004-publish-identity.md) | Anonymous publishing with a management token | Accepted |
 

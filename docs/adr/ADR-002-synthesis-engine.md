@@ -1,95 +1,76 @@
-# ADR-002 — Synthesis engine and instrument sound source
+# ADR-002 — Hybrid sample and procedural instrument engine
 
-**Status:** Accepted, with a known gap
-**Date:** 2026-08-19
-**Related:** US-0601, US-0602, US-0603, PRD §6.4, questionnaire Q-D4
-
----
+**Status:** Accepted and implemented
+**Date:** 2026-08-20
+**Related:** US-0601–US-0607, US-INST-001–US-INST-010
 
 ## Context
 
-The PRD proposes `js-synthesizer` (FluidSynth on WebAssembly) or `smplr` with
-FluidR3_GM / VSCO-2 CE SoundFonts. US-0601 requires the choice to be made on
-quality, performance, mobile behaviour and licence compatibility, and US-0602
-requires every sound asset to carry documented provenance.
-
-Two constraints shape the answer:
-
-1. **Asset weight.** FluidR3_GM is ~150 MB. Even split per instrument and lazily
-   loaded, the first instrument a user picks would be a multi-megabyte download
-   before they hear anything — on top of the model.
-2. **Provenance.** US-0602 makes an undocumented asset a release blocker. A
-   SoundFont assembled from mixed sources cannot be shipped until every voice in
-   it has a traced licence, and that is curation work, not code.
-
-Questionnaire Q-D4 asks for **realistic / acoustic** instruments, which points
-at samples.
-
-## Options considered
-
-| Option | Buys | Costs |
-|---|---|---|
-| `js-synthesizer` + FluidR3_GM | Recognisable GM sounds immediately | ~150 MB of assets with mixed provenance; WASM on low-end mobile unmeasured |
-| `smplr` + a hosted sample set | Small integration | Runtime dependency on a third-party host; CSP must be opened; provenance is someone else's |
-| Procedural Web Audio synthesis | Zero assets, zero network, deterministic output, provenance trivially clean | Stylised rather than realistic; will not satisfy Q-D4 on its own |
-| Procedural now, samples behind the same adapter | Ships a working product; the realistic path is a data change, not a rewrite | Two engines to maintain |
+Rhythmisoze must turn a vocal gesture into a convincing musical sketch without
+changing the stable `NoteEvent` contract, uploading unpublished audio, or
+blocking creation when a sound asset cannot be fetched. Procedural Web Audio
+voices met reliability and privacy goals but not the chosen realistic/acoustic
+quality direction.
 
 ## Decision
 
-**One adapter, two engines, procedural as the default.**
+Use one public instrument abstraction over two implementations:
 
-- `SynthEngine` / `PreparedInstrument` (`src/packages/synthesis/types.ts`) is the
-  only thing playback, the offline render and the gallery know about. US-0601's
-  "UI depends on a synth adapter, not engine-specific calls" is satisfied
-  structurally.
-- `ProceduralEngine` synthesises every registered instrument from the recipes in
-  `voices.ts`: a harmonic series, an ADSR, an optional filter sweep, an optional
-  breath/pluck noise component, an optional vibrato. Deterministic — the noise
-  buffer is seeded — so a render is reproducible and regression-testable.
-- `SampleEngine` is fully implemented: a documented manifest format, per-zone
-  multisampling by playback rate, per-instrument caching, per-file progress. It
-  activates automatically for any instrument that declares a `samplePack`.
-- `ENGINES` in `render.ts` is ordered: the sample engine wins wherever a pack
-  exists, the procedural engine is the floor that always answers.
+- `SampleEngine` is preferred for registered sample instruments. It uses
+  same-origin, manifest-driven multisamples with per-note pitch zones, velocity
+  layers, round robin, natural or gated release, concurrent decoding, progress,
+  and an in-memory promise cache.
+- `ProceduralEngine` remains available for every registry entry. It is the
+  deterministic fallback when the pack is unavailable or the device is in the
+  minimal synthesis tier.
+- Realtime audition and `OfflineAudioContext` rendering use the same scheduling
+  and master-bus path. The renderer sees only `PreparedInstrument`; it does not
+  know whether a source is a decoded recording or an oscillator graph.
+- Pack manifests are runtime-validated against the registry licence before any
+  sample URL is fetched. Unsafe relative paths and malformed ranges fail closed.
 
-## Evidence
+The implementation stays browser-native instead of adding Tone.js. The existing
+Web Audio sampler already supports the realtime/offline graph without an extra
+runtime dependency, and this phase filled its quality and reliability gaps
+rather than replacing one adapter with another.
 
-- `tests/unit/synthesis.test.ts` asserts the registry audit, that every
-  registered instrument has a voice the engine can actually produce, and that
-  the two kits differ audibly rather than by name.
-- Render performance against the PRD's ≤ 0.25 × clip target: **not measured on
-  the device matrix.** `renderSketch` returns `realtimeRatio` on every call so
-  the number is available, and telemetry records it (US-1103), but no device run
-  has been performed.
+## Pack decision
+
+The focused MVP contains six recorded instruments:
+
+1. Warm Grand
+2. Cedar Steel acoustic guitar
+3. Tender Violin
+4. Deep Cello
+5. Midnight Trumpet
+6. Live Room acoustic kit
+
+The five melodic packs are curated per-note browser files from FluidR3_GM. The
+kit uses two velocity layers for kick/snare and round-robin shaker hits from
+VSCO 2 Community Edition. Exact provenance, versions, byte counts and licence
+obligations are in `docs/licenses/instruments.md`.
 
 ## Consequences
 
-**Positive**
+- Initial navigation fetches no instrument audio. Selection or preview starts
+  only that pack, and later use reuses decoded buffers.
+- A pack failure does not lose the user's notes or block WAV export; the same
+  instrument id is voiced by its procedural fallback.
+- Natural piano, guitar and drum decays increase offline render tail and memory
+  use. Desktop is the release priority; the minimal device tier uses synth.
+- Sample renders are not byte-identical across browser decoders. Structural WAV
+  metadata and non-silence are regression-tested; procedural fallback remains
+  deterministic.
+- Subjective quality remains a human gate. The protocol is in
+  `docs/instruments/listening-test.md`; no ≥4/5 claim is made without completed
+  score sheets.
 
-- First render works with no network at all; nothing to fail, nothing to cache.
-- The licence ledger is trivially complete: every voice is original work in this
-  repository, MIT, listed in `docs/licenses/instruments.md`.
-- Deterministic output makes render regression testing possible.
-- Lazy loading is moot for the default engine (there is nothing to load), and
-  real for the sample engine, which is where it matters.
+## Evidence
 
-**Negative — stated plainly**
-
-- **The shipped sounds are synthesised approximations, not recordings.** They are
-  recognisable; they are not realistic. Questionnaire Q-D4 asked for realistic
-  acoustic instruments, and the default engine does not deliver that. This is a
-  known, deliberate gap, not an oversight.
-- No sample pack ships. `SampleEngine.supports()` returns false for every
-  registered instrument today, which the test suite asserts so the state cannot
-  drift silently.
-
-## Follow-up
-
-1. Curate CC0 / OFL-compatible sample packs for the eight PRD instruments.
-   Candidates worth evaluating: VSCO-2 Community Edition (CC0), Philharmonia
-   Orchestra samples (CC BY-NC — check the licence against commercial intent),
-   Sonatina Symphonic Orchestra (CC Sampling Plus).
-2. Record each pack in `docs/licenses/instruments.md` with source and licence.
-3. Add `samplePack` and `samplePackBytes` to the registry entries. No other code
-   changes.
-4. A/B the two engines on the benchmark corpus and record the result here.
+- `tests/synthesis/manifest.test.ts` audits every shipped file and SHA-256.
+- `tests/synthesis/loading.test.ts` covers lazy loading, progress, cache and
+  procedural fallback.
+- `tests/synthesis/scheduling.test.ts` covers velocity layers and release.
+- `tests/synthesis/wav-metadata.test.ts` snapshots the exported PCM contract.
+- `tests/e2e/instruments.spec.ts` covers browser requests, progress, preview and
+  rendered WAV on the real product path.

@@ -27,7 +27,7 @@ empty `.env`. Publishing is the only part that needs configuration; see
 `docs/runbooks/deployment.md`.
 
 ```bash
-npm run verify       # typecheck + lint + 372 unit tests
+npm run verify       # typecheck + lint + 389 unit tests
 npm run build        # production build
 npm run test:e2e     # browser matrix (run `npx playwright install` once first)
 ```
@@ -43,7 +43,7 @@ src/
     retouch/           the humtool.py port + the Raw→Clean macro
     audio-core/        capture, metronome, YIN, onsets, drum classification, WAV
     midi/              Standard MIDI File export, safe filenames
-    synthesis/         the synth adapter, instrument registry, offline render
+    synthesis/         sample + synth engines, registry, offline render
   features/            product behaviour, one directory per stage of the flow
   components/          design-system primitives
   workers/             the transcription worker
@@ -52,7 +52,7 @@ src/
   app/                 routes — two root layouts, creation and share
 docs/                  ADRs, design decisions, benchmarks, licences, runbooks
 reference/humtool.py   the Python source the retouch engine was ported from
-tests/                 372 unit tests, golden fixtures, E2E specs
+tests/                 389 unit tests, golden fixtures, E2E specs
 ```
 
 ## The pipeline
@@ -116,9 +116,10 @@ Stated here rather than left to be discovered. The full list with detail is in
 - **The architecture quality gate has not been run** (ADR-001). No audio corpus
   existed to run it against, so Basic Pitch's accuracy and speed on real devices
   are unverified. The built-in pitch tracker exists as a working fallback.
-- **The instruments are synthesised, not sampled** (ADR-002). Questionnaire Q-D4
-  asked for realistic acoustic instruments; the sample engine is complete and
-  waiting on licensed audio.
+- **Recorded instruments still need a human listening panel** (ADR-002). Six
+  licensed multisample packs now ship and the technical loading/rendering gates
+  pass, but the documented subjective >=4/5 score has not been claimed without
+  listeners.
 - **No real-device testing has been performed** (US-1203). The checklist is in
   `docs/runbooks/manual-device-checks.md`.
 - **No privacy policy or error monitoring** (Q-F2, Q-G3, both unanswered).
@@ -135,6 +136,7 @@ Stated here rather than left to be discovered. The full list with detail is in
 | `npm run db:migrate` | Apply SQL migrations, idempotent |
 | `npm run fixtures:golden` | Regenerate golden fixtures from Python |
 | `npm run model:sync` | Re-copy the Basic Pitch model into `public/` |
+| `npm run instruments:sync` | Rebuild the six pinned sample packs and manifests |
 
 ## Licence
 

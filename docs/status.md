@@ -81,12 +81,12 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 
 | Story | State | Where |
 |---|---|---|
-| US-0601 engine selection | Done | Two engines compared in ADR-002; UI depends only on the adapter |
-| US-0602 registry and licences | Done | 11 instruments, ledger complete, audited by a test |
-| US-0603 lazy loading | Done | Real for the sample engine; moot for the procedural one, which has no assets |
+| US-0601 engine selection | Done | Sample-first with deterministic procedural fallback; UI depends only on neutral registry metadata |
+| US-0602 registry and licences | Done | 14 instruments, including six recorded acoustic packs; manifests, hashes and licence ledger are audited |
+| US-0603 lazy loading | Done | Initial navigation fetches no packs; explicit selection reports progress and caches the decoded pack |
 | US-0604 preview | Done | One at a time, keyboard reachable, per-instrument gesture |
 | US-0605 playback | Done | Deterministic; instrument change never mutates note data |
-| US-0606 offline render | Built, unverified | `OfflineAudioContext`; ratio returned every call; not measured on device |
+| US-0606 offline render | Done on desktop | Browser E2E exports non-silent stereo 44.1 kHz/16-bit WAV from a selected sample pack; real-device matrix remains open |
 | US-0607 volume/reverb | Done | Two controls, sensible defaults, generated impulse |
 
 ## WP-07 — Review
@@ -147,7 +147,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | US-1201 keyboard and SR | Built, unverified | Full keyboard path, live regions, canvas equivalents; no manual SR test run |
 | US-1202 reduced motion and 3D fallback | Done | Three tiers, designed fallback, identical interactions |
 | US-1203 browser matrix | Built, unverified | Playwright across five projects, plus a capture project driving a fake microphone; no real-device microphone run |
-| US-1204 budgets | Built, unverified | All instrumented; none measured on the matrix |
+| US-1204 budgets | Built, desktop instrument gate verified | Selected sample pack passes the automated <5 s Chromium gate; the wider real-device matrix remains open |
 | US-1205 security review | Done | Threats and mitigations in ADR-004; 34 tests written as attacks |
 | US-1206 failure and recovery | Done | Offline creation intact, retry paths, localized errors |
 

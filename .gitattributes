@@ -7,6 +7,7 @@
 # Binary: never normalised, never diffed as text.
 *.bin  binary
 *.wav  binary
+*.mp3  binary
 *.mid  binary
 *.png  binary
 *.woff2 binary

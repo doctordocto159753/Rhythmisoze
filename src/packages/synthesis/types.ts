@@ -11,9 +11,12 @@
  * `js-synthesizer` or SpessaSynth engine implements the same three methods.
  */
 
-import type { DrumClass } from '@contracts';
+import type { DrumClass, NoteEvent } from '@contracts';
 
 export type InstrumentFamily = 'keys' | 'strings' | 'winds' | 'reeds' | 'percussion';
+export type InstrumentCategory = 'melodic' | 'percussion';
+export type InstrumentType = 'synth' | 'sample';
+export type InstrumentQuality = 'auto' | 'sample' | 'synth';
 
 export interface InstrumentLicense {
   /** SPDX identifier or an explicit human-readable grant. */
@@ -23,12 +26,19 @@ export interface InstrumentLicense {
   url?: string;
   /** Attribution string that must appear in `docs/licenses` and the UI credits. */
   attribution?: string;
+  /** Whether the product must show the attribution when it ships the sound. */
+  attributionRequired: boolean;
+  /** Explicit permission to redistribute the sound files with the application. */
+  redistribution: boolean;
 }
 
 export interface InstrumentDefinition {
   id: string;
   /** Localized display names. Persian is authored, not machine-translated. */
   name: { en: string; fa: string };
+  category: InstrumentCategory;
+  /** Preferred sound source. The procedural engine remains a fallback for every entry. */
+  type: InstrumentType;
   family: InstrumentFamily;
   /** Which creation mode this instrument belongs to. */
   mode: 'melody' | 'rhythm';
@@ -38,6 +48,11 @@ export interface InstrumentDefinition {
   range: { low: number; high: number };
   /** Notes for the preview gesture, relative to the instrument's centre. */
   previewPattern: ReadonlyArray<{ pitch: number; startSec: number; endSec: number; velocity: number }>;
+  /** Feeling-first metadata shown in the picker rather than sampler terminology. */
+  mood: { en: readonly string[]; fa: readonly string[] };
+  bestFor: { en: readonly string[]; fa: readonly string[] };
+  /** Neutral visual fingerprint; the UI must not import procedural voice recipes. */
+  visualProfile: readonly number[];
   license: InstrumentLicense;
   /**
    * Relative path to a sample-pack manifest, when one exists. `null` means the
@@ -47,6 +62,27 @@ export interface InstrumentDefinition {
   samplePack: string | null;
   /** Approximate download size in bytes when `samplePack` is set. */
   samplePackBytes?: number;
+  /** Maximum natural sample/release tail used to size OfflineAudioContext. */
+  renderTailSec?: number;
+}
+
+/**
+ * Product-level instrument contract.
+ *
+ * OfflineAudioContext renders asynchronously, so the story's synchronous
+ * `render(): AudioBuffer` sketch is represented honestly as a Promise. The
+ * renderer depends on this contract, never on a sampler or oscillator class.
+ */
+export interface Instrument {
+  readonly id: string;
+  readonly name: { en: string; fa: string };
+  readonly category: InstrumentCategory;
+  readonly type: InstrumentType;
+  preload(
+    context: BaseAudioContext,
+    onProgress?: (fraction: number) => void,
+  ): Promise<void>;
+  render(notes: readonly NoteEvent[], durationSec: number): Promise<AudioBuffer>;
 }
 
 export interface ScheduledNote {

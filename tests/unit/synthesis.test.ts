@@ -94,6 +94,10 @@ describe('instrument registry', () => {
       }
     }
   });
+
+  it('ships the six focused recorded instruments', () => {
+    expect(INSTRUMENTS.filter((instrument) => instrument.type === 'sample')).toHaveLength(6);
+  });
 });
 
 describe('instrument resolution', () => {
@@ -130,9 +134,7 @@ describe('engine selection', () => {
     }
   });
 
-  it('leaves the sample engine inactive until an instrument declares a pack', () => {
-    // Documented state, not an oversight: no licensed sample pack ships yet.
-    // See ADR-002 and docs/licenses/instruments.md.
+  it('activates the sample engine only for instruments with a declared pack', () => {
     for (const instrument of INSTRUMENTS) {
       expect(sample.supports(instrument)).toBe(instrument.samplePack !== null);
     }

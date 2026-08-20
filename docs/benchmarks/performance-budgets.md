@@ -11,6 +11,7 @@ actually been observed.
 | Transcription | ≤ 0.5 × clip | `ProcessingDiagnostics.elapsedMs` | Not on device |
 | Render | ≤ 0.25 × clip | `RenderResult.realtimeRatio`, returned on every render | Not on device |
 | Main thread responsive during inference | required | Worker architecture | Not on device |
+| First selected sample pack | < 5 s on desktop | Browser request/progress E2E | Pass in local Chromium, with an added 25 ms delay per audio response |
 
 Every one of these is *reported* by the running app and sampled by telemetry
 (US-1103), so the numbers become available as soon as there is a device to run
@@ -32,8 +33,9 @@ Some of these are structural rather than hopeful:
   special-casing.
 - **The 3D scene is demand-driven.** It renders only while a value is still
   settling, so a still object costs nothing.
-- **The default instruments have no assets at all.** First render works with no
-  network.
+- **Instrument assets are interaction-gated.** Initial navigation requests no
+  `/instruments/` resource. Only the explicitly selected pack is fetched, with
+  six-way bounded concurrency and an in-memory decoded-audio cache.
 
 ## Where the risk actually is
 

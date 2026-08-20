@@ -10,14 +10,21 @@ import { AppError, type DrumEvent, type NoteEvent } from '@contracts';
 import { ProceduralEngine } from './procedural';
 import { getInstrument } from './registry';
 import { SampleEngine } from './sample';
-import type { InstrumentDefinition, PreparedInstrument, SynthEngine } from './types';
+import type {
+  InstrumentDefinition,
+  InstrumentQuality,
+  PreparedInstrument,
+  SynthEngine,
+} from './types';
 
 /**
  * Engines in preference order. The sample engine wins wherever an instrument
  * declares a pack; the procedural engine is the floor that always answers.
  * Adding `js-synthesizer` later means adding one entry here.
  */
-export const ENGINES: readonly SynthEngine[] = [new SampleEngine(), new ProceduralEngine()];
+const sampleEngine = new SampleEngine();
+const proceduralEngine = new ProceduralEngine();
+export const ENGINES: readonly SynthEngine[] = [sampleEngine, proceduralEngine];
 
 export function selectEngine(instrument: InstrumentDefinition): SynthEngine {
   const engine = ENGINES.find((candidate) => candidate.supports(instrument));
@@ -25,6 +32,70 @@ export function selectEngine(instrument: InstrumentDefinition): SynthEngine {
     throw new AppError('instrument_load_failed', 'choose_other_instrument', instrument.id);
   }
   return engine;
+}
+
+export interface InstrumentPreparation {
+  prepared: PreparedInstrument;
+  engineId: string;
+  fellBack: boolean;
+}
+
+export interface PrepareInstrumentOptions {
+  quality?: InstrumentQuality;
+  onProgress?: (fraction: number) => void;
+}
+
+/** Minimal devices keep a reliable synth floor; desktop remains sample-first. */
+export function recommendedInstrumentQuality(): Exclude<InstrumentQuality, 'auto'> {
+  if (typeof navigator === 'undefined') return 'sample';
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  if ((nav.deviceMemory !== undefined && nav.deviceMemory <= 2) || nav.hardwareConcurrency <= 2) {
+    return 'synth';
+  }
+  return 'sample';
+}
+
+async function prepareInstrumentDefinition(
+  instrument: InstrumentDefinition,
+  context: BaseAudioContext,
+  options: PrepareInstrumentOptions = {},
+): Promise<InstrumentPreparation> {
+  const quality = options.quality === undefined || options.quality === 'auto'
+    ? recommendedInstrumentQuality()
+    : options.quality;
+  const candidates = quality === 'synth' || instrument.type === 'synth'
+    ? [proceduralEngine]
+    : [sampleEngine, proceduralEngine];
+  let lastError: unknown = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const engine = candidates[index] as SynthEngine;
+    if (!engine.supports(instrument)) continue;
+    try {
+      const prepared = await engine.prepare(instrument, context, options.onProgress);
+      options.onProgress?.(1);
+      return {
+        prepared,
+        engineId: engine.id,
+        fellBack: index > 0 || (quality === 'synth' && instrument.type === 'sample'),
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new AppError('instrument_load_failed', 'choose_other_instrument', instrument.id);
+}
+
+/** Explicit lazy-load API used by the gallery on selection and preview. */
+export async function preloadInstrument(
+  context: BaseAudioContext,
+  instrumentId: string,
+  options: PrepareInstrumentOptions = {},
+): Promise<Omit<InstrumentPreparation, 'prepared'>> {
+  const instrument = getInstrument(instrumentId);
+  if (!instrument) throw new AppError('instrument_load_failed', 'choose_other_instrument', instrumentId);
+  const result = await prepareInstrumentDefinition(instrument, context, options);
+  result.prepared.dispose();
+  return { engineId: result.engineId, fellBack: result.fellBack };
 }
 
 export interface MasterSettings {
@@ -132,6 +203,7 @@ export interface RenderRequest {
   durationSec: number;
   master?: MasterSettings;
   sampleRate?: number;
+  quality?: InstrumentQuality;
   onProgress?: (fraction: number) => void;
   signal?: AbortSignal;
 }
@@ -142,6 +214,8 @@ export interface RenderResult {
   elapsedMs: number;
   /** Ratio of render time to clip duration. The PRD target is <= 0.25. */
   realtimeRatio: number;
+  engineId: string;
+  fellBack: boolean;
 }
 
 /**
@@ -163,18 +237,18 @@ export async function renderSketch(request: RenderRequest): Promise<RenderResult
 
   const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const sampleRate = request.sampleRate ?? 44100;
-  const engine = selectEngine(instrument);
-
-  // Probe the tail before sizing the context. Two seconds covers the longest
-  // release plus the reverb, and the exact figure comes from the instrument.
-  const tail = 2;
+  // Natural sample tail plus the generated room. Procedural instruments retain
+  // the original two-second floor; the recorded kit needs its full room decay.
+  const tail = Math.max(2, (instrument.renderTailSec ?? 0.4) + 1.6);
   const length = Math.max(1, Math.ceil((request.durationSec + tail) * sampleRate));
   const context = new OfflineAudioContext(2, length, sampleRate);
 
   request.onProgress?.(0.1);
-  const prepared = await engine.prepare(instrument, context, (fraction) =>
-    request.onProgress?.(0.1 + fraction * 0.3),
-  );
+  const preparation = await prepareInstrumentDefinition(instrument, context, {
+    quality: request.quality,
+    onProgress: (fraction) => request.onProgress?.(0.1 + fraction * 0.3),
+  });
+  const prepared = preparation.prepared;
   throwIfAborted(request.signal);
 
   const bus = createMasterBus(context, context.destination, request.master ?? DEFAULT_MASTER);
@@ -192,6 +266,8 @@ export async function renderSketch(request: RenderRequest): Promise<RenderResult
     buffer,
     elapsedMs,
     realtimeRatio: request.durationSec > 0 ? elapsedMs / 1000 / request.durationSec : 0,
+    engineId: preparation.engineId,
+    fellBack: preparation.fellBack,
   };
 }
 
@@ -230,6 +306,8 @@ export interface PlaybackHandle {
   stop(): void;
   /** Context time the playback started, for the piano-roll cursor. */
   readonly startedAtSec: number;
+  readonly engineId: string;
+  readonly fellBack: boolean;
 }
 
 /**
@@ -248,8 +326,10 @@ export async function playSketch(
   if (!instrument) {
     throw new AppError('render_failed', 'choose_other_instrument', request.instrumentId);
   }
-  const engine = selectEngine(instrument);
-  const prepared = await engine.prepare(instrument, context);
+  const preparation = await prepareInstrumentDefinition(instrument, context, {
+    quality: request.quality,
+  });
+  const prepared = preparation.prepared;
   const bus = createMasterBus(context, context.destination, request.master ?? DEFAULT_MASTER);
 
   // Small lead so the first note is never scheduled in the past.
@@ -258,6 +338,8 @@ export async function playSketch(
 
   return {
     startedAtSec: origin,
+    engineId: preparation.engineId,
+    fellBack: preparation.fellBack,
     stop() {
       prepared.dispose();
       bus.dispose();

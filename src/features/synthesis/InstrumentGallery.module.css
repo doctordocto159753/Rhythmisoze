@@ -1,90 +1,244 @@
 /**
- * D-0501 / D-0502 - listening-first instrument selection.
+ * D-0501 / D-0502 - a shelf of sound specimens.
  *
- * No photographs, no clip art. Each instrument is represented by a small
- * spectral figure derived from its own voice recipe - the same partial pattern
- * that produces its timbre, drawn. That keeps the visual signature honest
- * (it *is* the instrument's material) and subordinate to the audible preview,
- * which is what the story asks for.
+ * The surrounding Well remains the single recessed surface. Cards are divided
+ * by quiet rules rather than lifted shadows, and the brass edge belongs only to
+ * recorded sound. Their individual rhythm comes from registry metadata.
  */
+
+.gallery {
+  min-inline-size: 0;
+}
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
   gap: var(--space-3);
 }
 
-.item {
+.card {
+  position: relative;
   display: flex;
+  min-inline-size: 0;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
   border: var(--border-hairline) solid var(--color-line-strong);
   border-radius: var(--radius-md);
   background-color: transparent;
-  text-align: start;
+  overflow: hidden;
   transition:
     background-color var(--motion-quick) var(--ease-out),
     border-color var(--motion-quick) var(--ease-out);
 }
 
-.item:hover {
-  background-color: var(--color-well);
+.recordedCard {
+  border-inline-start-color: var(--color-accent);
 }
 
-/* Selected is marked by fill, border and a text badge - never colour alone. */
-.itemSelected {
+.card:hover,
+.card:focus-within {
+  background-color: var(--color-raised);
+}
+
+/* Fill, a firm rule and a text marker make selection clear without colour. */
+.cardSelected {
+  border: var(--border-firm) solid var(--color-accent);
   background-color: var(--color-accent-wash);
-  border-color: var(--color-accent);
 }
 
-.itemLoading {
-  opacity: 0.6;
-  cursor: progress;
+.item {
+  display: flex;
+  inline-size: 100%;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  text-align: start;
+}
+
+.sourceLine,
+.titleLine {
+  display: flex;
+  min-inline-size: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sourceLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.sourceLabel::before {
+  content: '';
+  inline-size: var(--space-1);
+  block-size: var(--space-1);
+  flex: none;
+  border: var(--border-hairline) solid currentColor;
+}
+
+.recordedCard .sourceLabel::before {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+}
+
+.packSize {
+  flex: none;
+  font-size: var(--text-micro);
+  /* Micro text needs the stronger muted ink: it stays quiet while maintaining
+   * AA contrast on canvas, hover, selected brass wash and their dark variants. */
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .figure {
-  display: block;
+  display: flex;
+  direction: ltr;
+  align-items: flex-end;
+  gap: var(--space-1);
   inline-size: 100%;
-  block-size: 2.5rem;
+  block-size: var(--space-7);
+  padding: var(--space-2);
   color: var(--color-text-faint);
+  background-color: var(--color-well);
+  border-block-end: var(--border-hairline) solid var(--color-well-line);
+  box-shadow: var(--shadow-inset);
 }
 
-.itemSelected .figure {
+.figureBar {
+  min-inline-size: 2px;
+  flex: 1;
+  background-color: currentColor;
+  opacity: 0.72;
+  transition:
+    block-size var(--motion-settle) var(--ease-out),
+    color var(--motion-quick) var(--ease-out);
+}
+
+.cardSelected .figure {
   color: var(--color-accent);
 }
 
 .name {
-  font-size: var(--text-label);
-  font-weight: var(--weight-medium);
+  min-inline-size: 0;
+  font-size: var(--text-heading);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
   color: var(--color-text);
 }
 
-.meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  font-size: var(--text-micro);
-  color: var(--color-text-muted);
-}
-
 .badge {
+  flex: none;
+  padding-inline-start: var(--space-2);
+  border-inline-start: var(--border-hairline) solid currentColor;
   font-size: var(--text-micro);
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-strong);
   color: var(--color-accent);
 }
 
-.previewButton {
-  display: inline-flex;
+.moodList {
+  display: flex;
+  min-block-size: 1.25rem;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  margin-inline-start: auto;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-micro);
   color: var(--color-text-muted);
-  border: var(--border-hairline) solid transparent;
+}
+
+.moodWord {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+
+.moodWord + .moodWord {
+  margin-inline-start: var(--space-2);
+  padding-inline-start: var(--space-2);
+  border-inline-start: var(--border-hairline) solid var(--color-line-strong);
+}
+
+.bestFor {
+  margin-block-start: auto;
+  font-size: var(--text-micro);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.cardFooter {
+  display: flex;
+  min-block-size: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-block-start: var(--border-hairline) solid var(--color-line);
+}
+
+.loadStatus {
+  display: grid;
+  min-inline-size: 0;
+  flex: 1;
+  gap: var(--space-1);
+}
+
+.progress {
+  direction: ltr;
+  inline-size: 100%;
+  block-size: var(--space-1);
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background-color: var(--color-line);
+  color: var(--color-accent);
+  appearance: none;
+}
+
+.progress::-webkit-progress-bar {
+  background-color: var(--color-line);
+}
+
+.progress::-webkit-progress-value {
+  background-color: var(--color-accent);
+}
+
+.progress::-moz-progress-bar {
+  background-color: var(--color-accent);
+}
+
+.statusText {
+  min-inline-size: 0;
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+  color: var(--color-success);
+}
+
+.loadStatus .statusText {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusError {
+  color: var(--color-danger);
+}
+
+.statusPlaceholder {
+  flex: 1;
+}
+
+.previewButton {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border-block-end: var(--border-hairline) solid transparent;
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  transition:
+    color var(--motion-quick) var(--ease-out),
+    border-color var(--motion-quick) var(--ease-out);
 }
 
 .previewButton:hover {
@@ -97,7 +251,61 @@
   border-color: var(--color-accent);
 }
 
-.familyLabel {
+.credits {
+  margin-block-start: var(--space-4);
+  padding-block-start: var(--space-3);
+  border-block-start: var(--border-hairline) solid var(--color-line);
+  color: var(--color-text-muted);
+}
+
+.creditsSummary {
+  inline-size: fit-content;
   font-size: var(--text-micro);
-  color: var(--color-text-faint);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: color var(--motion-quick) var(--ease-out);
+}
+
+.creditsSummary:hover,
+.credits[open] .creditsSummary {
+  color: var(--color-text);
+}
+
+.creditsBody {
+  display: grid;
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+  padding-inline-start: var(--space-3);
+  border-inline-start: var(--border-hairline) solid var(--color-line-strong);
+}
+
+.creditLine {
+  font-size: var(--text-micro);
+  line-height: var(--leading-body);
+  color: var(--color-text-muted);
+}
+
+.creditLink {
+  color: var(--color-text);
+  text-decoration-color: var(--color-line-strong);
+}
+
+.creditLink:hover {
+  text-decoration-color: currentColor;
+}
+
+@media (max-width: 40rem) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  }
+
+  .item {
+    padding: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figureBar {
+    transition: none;
+  }
 }

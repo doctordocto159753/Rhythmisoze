@@ -17,13 +17,14 @@ import {
   type AppErrorCode,
   type MonoAudio,
   type RecoveryAction,
+  type TranscriptionInputMode,
   type TranscriptionProgress,
   type TranscriptionResult,
 } from '@contracts';
 import type { WorkerRequest, WorkerResponse } from '@/workers/transcription.worker';
 
 export interface TranscribeOptions {
-  mode: 'melody' | 'rhythm';
+  mode: TranscriptionInputMode;
   /** `false` forces the built-in tracker. */
   allowModel?: boolean;
   noteThreshold?: number;
@@ -36,16 +37,14 @@ export interface TranscribeOptions {
 /**
  * Defaults.
  *
- * `noteThreshold` and `onsetThreshold` are the model's own confidence gates.
- * They sit slightly below Basic Pitch's library defaults because the input here
- * is one quiet human voice rather than a mixed recording, and the retouch stage
- * downstream is far better at removing a spurious note than at inventing a
- * missing one.
+ * `noteThreshold` and `onsetThreshold` are Basic Pitch's confidence gates for
+ * Instrument Mode. Voice Melody Mode owns its thresholds inside the dedicated
+ * extraction package; rhythm uses onsetThreshold only.
  */
 const DEFAULTS = {
-  noteThreshold: 0.25,
-  onsetThreshold: 0.45,
-  minNoteLengthSec: 0.058,
+  noteThreshold: 0.3,
+  onsetThreshold: 0.5,
+  minNoteLengthSec: 0.12,
 } as const;
 
 export const MODEL_URL =

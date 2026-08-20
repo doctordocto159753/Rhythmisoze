@@ -40,6 +40,32 @@
   font-style: italic;
 }
 
+/* A protective confirmation, not a warning. The green edge says that the app
+ * intervened successfully while the quiet wash keeps the cleanup control in
+ * charge of the hierarchy. */
+.qualityGuard {
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-success-wash);
+  border-inline-start: var(--border-firm) solid var(--color-success);
+  border-radius: var(--radius-sm);
+}
+
+.qualityGuard p {
+  color: var(--color-text);
+}
+
+.clarityNotice {
+  margin: 0 var(--space-4) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-accent-wash);
+  border-inline-start: var(--border-firm) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.clarityNotice p {
+  color: var(--color-text);
+}
+
 /* Persian has no italic tradition; a synthesised oblique looks like a rendering
  * fault rather than an emphasis. */
 :global(:root[lang='fa']) .keyUnknown {

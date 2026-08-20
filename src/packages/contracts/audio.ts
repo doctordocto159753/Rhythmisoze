@@ -49,12 +49,32 @@ export interface AudioValidation {
   diagnostics: AudioDiagnostics;
 }
 
-export type TranscriberId = 'basic-pitch' | 'pitch-tracker' | 'server';
+export type TranscriberId =
+  | 'melody-extraction'
+  | 'basic-pitch'
+  | 'basic-pitch-yin'
+  | 'pitch-tracker'
+  | 'midi-import'
+  | 'server';
 
 export type ProcessingBackend = 'browser' | 'server';
 
+/** Which acoustic assumption the transcription engine should make. */
+export type TranscriptionInputMode = 'voice' | 'instrument' | 'rhythm';
+
+export interface MelodyConfidence {
+  melodyConfidence: number;
+  estimatedNotes: number;
+  range: string | null;
+  clear: boolean;
+  voicedFramePercentage: number;
+  pitchContinuity: number;
+  octaveStability: number;
+  segmentationConfidence: number;
+}
+
 export interface TranscriptionOptions {
-  mode: 'melody' | 'rhythm';
+  mode: TranscriptionInputMode;
   /** Confidence floor for accepting a note, 0..1. */
   noteThreshold?: number;
   /** Onset sensitivity, 0..1. Higher means fewer, stronger onsets. */
@@ -80,6 +100,14 @@ export interface ProcessingDiagnostics {
 
 export interface TranscriptionResult {
   notes: NoteEvent[];
+  /**
+   * Independent monophonic reference extracted from the source audio.
+   * Retouch uses it as a quality guard; it is never rendered directly unless
+   * the model has no trustworthy candidate for a voiced segment.
+   */
+  referenceNotes?: NoteEvent[];
+  /** Present for Human Voice Melody Extraction results. */
+  melodyQuality?: MelodyConfidence;
   onsets?: OnsetEvent[];
   drums?: DrumEvent[];
   durationSec: number;

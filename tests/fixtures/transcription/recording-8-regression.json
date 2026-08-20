@@ -1,0 +1,35 @@
+{
+  "case": "recording-8-octave-subharmonic",
+  "sourceSha256": "89D765A99F6A09B142DEE161F7CEACBEE5601F12832FB7976FD8C0C4A7EC53DD",
+  "observedLegacyMidi": {
+    "leastCleanSha256": "F2C5A621770FCCB6D08220B33530CACC3A0C57210B1A6C4C259F7EC480058A7B",
+    "mostCleanSha256": "12C4FA48845D432404230F8FF182F0AB74CCC9E95942D7E916D9666A5B56D85F",
+    "leastCleanNoteCount": 81,
+    "mostCleanNoteCount": 37,
+    "legacyMedianPitch": 45,
+    "legacyMaxPolyphony": 4
+  },
+  "referenceNotes": [
+    { "startSec": 0, "endSec": 2.1, "pitch": 60, "velocity": 82, "confidence": 0.91 },
+    { "startSec": 2.1, "endSec": 4.2, "pitch": 61, "velocity": 84, "confidence": 0.9 },
+    { "startSec": 4.2, "endSec": 6.4, "pitch": 62, "velocity": 87, "confidence": 0.92 },
+    { "startSec": 6.4, "endSec": 8.5, "pitch": 63, "velocity": 86, "confidence": 0.89 },
+    { "startSec": 8.5, "endSec": 10.6, "pitch": 65, "velocity": 90, "confidence": 0.93 },
+    { "startSec": 10.6, "endSec": 12.8, "pitch": 63, "velocity": 84, "confidence": 0.9 },
+    { "startSec": 12.8, "endSec": 15.1, "pitch": 62, "velocity": 82, "confidence": 0.91 },
+    { "startSec": 15.1, "endSec": 17.6, "pitch": 60, "velocity": 80, "confidence": 0.9 }
+  ],
+  "basicPitchCandidates": [
+    { "startSec": 0, "endSec": 17.6, "pitch": 45, "velocity": 78, "confidence": 0.72 },
+    { "startSec": 2.8, "endSec": 4.1, "pitch": 33, "velocity": 41, "confidence": 0.31 },
+    { "startSec": 0.1, "endSec": 2, "pitch": 60, "velocity": 80, "confidence": 0.78 },
+    { "startSec": 2.2, "endSec": 4.1, "pitch": 61, "velocity": 82, "confidence": 0.75 },
+    { "startSec": 4.3, "endSec": 6.3, "pitch": 62, "velocity": 86, "confidence": 0.81 },
+    { "startSec": 6.5, "endSec": 8.4, "pitch": 63, "velocity": 84, "confidence": 0.76 },
+    { "startSec": 8.6, "endSec": 10.5, "pitch": 65, "velocity": 89, "confidence": 0.83 },
+    { "startSec": 10.7, "endSec": 12.7, "pitch": 63, "velocity": 83, "confidence": 0.79 },
+    { "startSec": 12.9, "endSec": 15, "pitch": 62, "velocity": 81, "confidence": 0.8 },
+    { "startSec": 15.2, "endSec": 17.5, "pitch": 60, "velocity": 79, "confidence": 0.77 },
+    { "startSec": 8.7, "endSec": 9, "pitch": 77, "velocity": 42, "confidence": 0.33 }
+  ]
+}

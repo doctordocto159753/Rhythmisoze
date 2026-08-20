@@ -59,7 +59,7 @@ export default defineConfig({
     // `docs/runbooks/manual-device-checks.md`.
     {
       name: 'capture',
-      testMatch: /(?:capture|instruments)\.spec\.ts/,
+      testMatch: /(?:capture|instruments|source-import)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: { args: FAKE_MEDIA_ARGS },
@@ -67,13 +67,13 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      testIgnore: /(?:capture|instruments)\.spec\.ts/,
+      testIgnore: /(?:capture|instruments|source-import)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
-    { name: 'firefox', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chrome', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Pixel 7'] } },
-    { name: 'mobile-safari', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['iPhone 14'] } },
+    { name: 'firefox', testIgnore: /(?:capture|instruments|source-import)\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', testIgnore: /(?:capture|instruments|source-import)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
+    { name: 'mobile-chrome', testIgnore: /(?:capture|instruments|source-import)\.spec\.ts/, use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-safari', testIgnore: /(?:capture|instruments|source-import)\.spec\.ts/, use: { ...devices['iPhone 14'] } },
   ],
 
   webServer: process.env.E2E_BASE_URL

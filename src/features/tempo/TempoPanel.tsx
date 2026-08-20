@@ -127,7 +127,7 @@ export function TempoPanel({
             max={BPM_MAX}
             step={1}
             disabled={disabled}
-            valueText={t.units.bpm(bpm ?? 100)}
+            valueText={bpm === null ? t.tempo.notSet : t.units.bpm(bpm)}
             onChange={onBpmChange}
           />
         </Stack>

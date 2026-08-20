@@ -19,7 +19,7 @@ number, because it stops anyone from measuring it.
 ## How to run what exists
 
 ```bash
-npm run test                 # 389 unit tests, including the humtool parity suite
+npm run test                 # 398 unit tests, including the humtool parity suite
 npm run fixtures:golden      # regenerate golden fixtures from the Python reference
 npm run test:e2e             # browser matrix (needs `npx playwright install`)
 npm run build                # production build, reports route sizes

@@ -56,6 +56,14 @@ export const en = {
     changeWarning: 'Changing this clears the current take.',
   },
 
+  melodyInput: {
+    label: 'What will you record?',
+    voice: 'Melody mode',
+    voiceHint: 'For humming, singing or whistling. Follows one melody line.',
+    instrument: 'Instrument mode',
+    instrumentHint: 'For guitar, piano or other sounds that may play several notes.',
+  },
+
   tempo: {
     label: 'Speed',
     tapPrompt: 'Tap four times at your speed',
@@ -63,11 +71,24 @@ export const en = {
     tapAgain: 'Tap again',
     unit: 'BPM',
     sliderLabel: 'Beats per minute',
+    notSet: 'Not set yet',
     metronome: 'Click',
     metronomeOn: 'Click on',
     metronomeOff: 'Click off',
     meter: 'Beats in a bar',
     why: 'The click keeps your timing steady. It makes everything after this work.',
+  },
+
+  sourceInput: {
+    title: 'Or begin with a file',
+    audio: 'Upload a recording',
+    audioInputLabel: 'Choose a recording to upload',
+    audioNeedsTempo: 'Move the slider or tap four times to set tempo first.',
+    audioReadyHint: 'Uses the tempo you set above.',
+    midi: 'Import MIDI',
+    midiInputLabel: 'Choose a MIDI file to import',
+    midiHint: 'Its embedded tempo is imported with the notes.',
+    reading: 'Reading file',
   },
 
   record: {
@@ -109,6 +130,9 @@ export const en = {
     restart: 'Back to start',
     cleanup: 'Cleanup',
     cleanupHelp: 'Left is exactly what you sang. Right is fully tidied up.',
+    qualityGuard: 'Your melody contour was kept because stronger cleanup would have changed it.',
+    unclearMelody:
+      'Your recording does not contain a clear melody. Try humming one note after another.',
     cleanupLevels: {
       raw: 'Exactly as sung',
       light: 'Lightly tidied',
@@ -134,6 +158,7 @@ export const en = {
       merged: 'Fragments merged',
       stepwise: 'Stepwise movement',
       tempoMismatch: 'That differs from your tapped speed. If the result feels off, retap.',
+      melodyConfidence: 'Melody confidence',
     },
     empty: 'No notes were found in that take.',
     emptyHelp: 'Try humming a little louder, and leave small gaps between notes.',
@@ -190,10 +215,23 @@ export const en = {
 
   exportPanel: {
     title: 'Take it with you',
+    package: 'Complete package',
+    packageHint:
+      'A ZIP with the instrument render, editable notes, sketch details and your original source when available.',
+    packageContents: 'Inside the package',
+    renderedAudio: 'Instrument render',
+    editableNotes: 'Editable notes',
+    original: 'Original source',
+    untouched: 'Kept untouched',
+    downloadPackage: 'Download complete package',
+    individualFiles: 'Individual files',
     wav: 'Audio file',
     wavHint: 'A WAV you can play anywhere or send to someone.',
     midi: 'Note file',
     midiHint: 'A MIDI file you can open in music software.',
+    originalHint: 'The exact file you began with, unchanged.',
+    sourcePrivacy:
+      'Your original stays untouched and on this device. It is included only in your downloads, never when publishing.',
     preparing: 'Preparing',
     ready: 'Ready',
     download: 'Download',
@@ -259,12 +297,19 @@ export const en = {
     mic_in_use: 'Another app is using the microphone.',
     recording_failed: 'The recording did not save.',
     decode_failed: 'That recording could not be read.',
+    unsupported_file: 'Choose an audio or MIDI file in a supported format.',
+    file_too_large: 'That file is too large to open here.',
     audio_silent: 'Nothing was recorded.',
     audio_clipped: 'The recording is distorted.',
     audio_too_short: 'That was too short to work with.',
+    audio_too_long: 'That file is longer than the 60-second limit.',
+    midi_invalid: 'That MIDI file could not be read.',
+    midi_empty: 'No playable notes were found in that MIDI file.',
     model_load_failed: 'The listener could not be downloaded.',
     transcription_failed: 'Your take could not be read as notes.',
     transcription_empty: 'No notes were found in that take.',
+    melody_unclear:
+      'Your recording does not contain a clear melody. Try humming one note after another.',
     transcription_cancelled: 'Stopped.',
     worker_unavailable: 'This browser cannot run the processing step.',
     retouch_failed: 'The cleanup step failed.',
@@ -295,6 +340,7 @@ export const en = {
         'Open the padlock in the address bar, allow the microphone, then reload.',
       audio_silent: 'Check that the right microphone is selected, then record again.',
       audio_too_short: 'Record for at least a second.',
+      melody_unclear: 'Use one steady note at a time and leave a small gap between notes.',
       model_load_failed: 'Check your connection and try again.',
       storage_quota_exceeded: 'Delete an old sketch, or download and remove one.',
       unsupported_browser: 'Try the latest Chrome, Edge, Firefox or Safari.',
@@ -338,8 +384,11 @@ export const en = {
     uploadTitle: 'This step uploads audio',
     processedBy: (backend: string) => `Processed by: ${backend}`,
     backends: {
+      'melody-extraction': 'the human melody engine, in your browser',
       'basic-pitch': 'the note model, in your browser',
+      'basic-pitch-yin': 'the note model with melody contour, in your browser',
       'pitch-tracker': 'the built-in pitch tracker, in your browser',
+      'midi-import': 'your imported MIDI file, in your browser',
       server: 'a server',
     },
   },

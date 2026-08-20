@@ -11,6 +11,7 @@ import { track } from '@/features/analytics/track';
 import { ExportPanel } from '@/features/export/ExportPanel';
 import { PublishPanel } from '@/features/publish/PublishPanel';
 import { RecordStage } from '@/features/recording/RecordStage';
+import { SourceInput } from '@/features/recording/SourceInput';
 import { ReviewStage } from '@/features/review/ReviewStage';
 import { canExport, hasResult, isRecordingPhase, stageOf } from '@/features/state/machine';
 import { TempoPanel } from '@/features/tempo/TempoPanel';
@@ -125,7 +126,10 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                 if (state.audio !== null) actions.reprocess();
               } else actions.retry();
             }}
-            onDismiss={actions.clearError}
+            // Dismissing a failed-state alert must also restore its last safe
+            // state; otherwise the visible setup controls accept input while
+            // the state machine silently rejects their events.
+            onDismiss={machineState === 'failed' ? actions.retry : actions.clearError}
           />
         ) : null}
 
@@ -147,6 +151,26 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                 onChange={actions.setMode}
               />
 
+              {state.mode === 'melody' ? (
+                <Choice<'voice' | 'instrument'>
+                  legend={t.melodyInput.label}
+                  value={state.melodyInputMode}
+                  options={[
+                    {
+                      value: 'voice',
+                      title: t.melodyInput.voice,
+                      hint: t.melodyInput.voiceHint,
+                    },
+                    {
+                      value: 'instrument',
+                      title: t.melodyInput.instrument,
+                      hint: t.melodyInput.instrumentHint,
+                    },
+                  ]}
+                  onChange={actions.setMelodyInputMode}
+                />
+              ) : null}
+
               <Raised as="section" aria-labelledby="setup-heading">
                 <Text variant="heading" as="h2" id="setup-heading" className={styles.srHeading}>
                   {t.tempo.label}
@@ -161,7 +185,9 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                   onBpmChange={actions.setBpm}
                   onMeterChange={actions.setMeter}
                   onToggleMetronome={actions.toggleMetronome}
-                  onWarm={warmModel}
+                  onWarm={state.mode === 'melody' && state.melodyInputMode === 'instrument'
+                    ? warmModel
+                    : undefined}
                 />
               </Raised>
 
@@ -172,6 +198,12 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                   </Button>
                 </Row>
               ) : null}
+
+              <SourceInput
+                tempoReady={state.bpm !== null}
+                onUploadAudio={actions.uploadAudio}
+                onUploadMidi={actions.uploadMidi}
+              />
             </Stack>
           </section>
         ) : null}
@@ -227,10 +259,11 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             refined={refined}
             rawNotes={state.rawNotes}
             diagnostics={state.diagnostics}
+            melodyQuality={state.melodyQuality}
             mode={state.mode}
             bpm={state.bpm ?? 100}
             meter={state.meter}
-            durationSec={state.audio?.durationSec ?? 0}
+            durationSec={state.durationSec}
             retouchAmount={state.retouchAmount}
             instrumentId={state.instrumentId}
             playing={state.playing}
@@ -270,6 +303,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               notes={refined.notes}
               drums={refined.drums}
               renderedAudio={state.renderedAudio}
+              source={state.source}
               cleanupLabel={t.review.cleanupLevels[retouchLabel(state.retouchAmount)]}
               onRender={() => actions.render()}
               onError={actions.fail}
@@ -286,7 +320,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               drums={refined.drums}
               keyRoot={refined.keyIsReliable ? refined.key.root : null}
               keyMode={refined.keyIsReliable ? refined.key.mode : null}
-              durationSec={state.audio?.durationSec ?? 0}
+              durationSec={state.durationSec}
               renderedAudio={state.renderedAudio}
               publishedId={state.publishedId}
               shareUrl={state.shareUrl}

@@ -2,10 +2,11 @@
 
 **Turn your voice into an instrument** · **صدات رو به ساز تبدیل کن**
 
-Hum, sing or beatbox a musical idea. Rhythmisoze transcribes it, tidies it into
-something musically usable, plays it back on an instrument, and gives you a WAV
-and a MIDI file — all of it in your browser, with nothing uploaded until you
-choose to publish.
+Hum, sing or beatbox a musical idea, upload an existing recording, or import a
+MIDI sketch. Rhythmisoze turns it into something musically usable, plays it back
+on an instrument, and gives you a complete ZIP (rendered WAV, MIDI and untouched
+source) plus individual downloads — all in your browser, with nothing uploaded
+until you choose to publish.
 
 The product's value is not raw audio-to-MIDI. It is the **retouch layer** that
 closes the gap between an imperfect vocal gesture and material that feels
@@ -21,13 +22,13 @@ npm ci
 npm run dev          # http://localhost:3000 → redirects to /fa or /en
 ```
 
-No environment variables are needed. The entire creation flow — record,
+No environment variables are needed. The entire creation flow — record/import,
 transcribe, retouch, choose an instrument, render, download — works with an
 empty `.env`. Publishing is the only part that needs configuration; see
 `docs/runbooks/deployment.md`.
 
 ```bash
-npm run verify       # typecheck + lint + 389 unit tests
+npm run verify       # typecheck + lint + 398 unit tests
 npm run build        # production build
 npm run test:e2e     # browser matrix (run `npx playwright install` once first)
 ```
@@ -42,7 +43,8 @@ src/
     contracts/         the vocabulary: notes, onsets, audio, errors, sketches
     retouch/           the humtool.py port + the Raw→Clean macro
     audio-core/        capture, metronome, YIN, onsets, drum classification, WAV
-    midi/              Standard MIDI File export, safe filenames
+    melody-extraction/ human-voice f0, contour, segmentation, confidence
+    midi/              Standard MIDI File import/export, safe filenames
     synthesis/         sample + synth engines, registry, offline render
   features/            product behaviour, one directory per stage of the flow
   components/          design-system primitives
@@ -52,18 +54,22 @@ src/
   app/                 routes — two root layouts, creation and share
 docs/                  ADRs, design decisions, benchmarks, licences, runbooks
 reference/humtool.py   the Python source the retouch engine was ported from
-tests/                 389 unit tests, golden fixtures, E2E specs
+tests/                 398 unit tests, golden fixtures, E2E specs
 ```
 
 ## The pipeline
 
 ```
-microphone ─► MonoAudio ─► transcriber ─► NoteEvent[] ─► refine() ─► synth ─► WAV
-                (mono float PCM)   │                       │            │
-                                   │                       │            └─ OfflineAudioContext
-                                   │                       └─ pure, deterministic, 181 parity tests
-                                   └─ Basic Pitch in a worker, YIN as fallback
+microphone ─► MonoAudio ─► voice melody engine ─► NoteEvent[] ─► refine() ─► synth ─► WAV
+                (mono float PCM)      │                         │            │
+                                      │                         │            └─ OfflineAudioContext
+                                      │                         └─ pure, deterministic, 181 parity tests
+                                      └─ YIN → contour → segmentation → monophonic notes
 ```
+
+Instrument Mode is deliberately separate: guitar, piano and other potentially
+polyphonic audio continues through Basic Pitch in the worker. See
+[`docs/melody-engine.md`](docs/melody-engine.md).
 
 Rhythm is a separate path, not melody with the pitch discarded:
 
@@ -113,9 +119,9 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 Stated here rather than left to be discovered. The full list with detail is in
 `docs/product-decisions.md`.
 
-- **The architecture quality gate has not been run** (ADR-001). No audio corpus
-  existed to run it against, so Basic Pitch's accuracy and speed on real devices
-  are unverified. The built-in pitch tracker exists as a working fallback.
+- **The complete architecture quality gate has not been run** (ADR-001). The
+  checked-in human regressions cover the known failures, but the corpus is still
+  too small for a general accuracy claim or a blinded listening result.
 - **Recorded instruments still need a human listening panel** (ADR-002). Six
   licensed multisample packs now ship and the technical loading/rendering gates
   pass, but the documented subjective >=4/5 score has not been claimed without

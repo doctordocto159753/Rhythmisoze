@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Meter, ProcessingDiagnostics } from '@contracts';
+import type { MelodyConfidence, Meter, ProcessingDiagnostics } from '@contracts';
 import { RETOUCH_AMOUNT_MAX, RETOUCH_AMOUNT_MIN, pitchName, retouchLabel, type RefineResult } from '@retouch';
 import { getAudioContext } from '@audio-core';
 import { Button } from '@/components/Button';
@@ -17,6 +17,7 @@ export interface ReviewStageProps {
   refined: RefineResult;
   rawNotes: RefineResult['notes'];
   diagnostics: ProcessingDiagnostics | null;
+  melodyQuality: MelodyConfidence | null;
   mode: 'melody' | 'rhythm';
   bpm: number;
   meter: Meter;
@@ -45,6 +46,7 @@ export function ReviewStage({
   refined,
   rawNotes,
   diagnostics,
+  melodyQuality,
   mode,
   bpm,
   meter,
@@ -124,6 +126,12 @@ export function ReviewStage({
             </span>
           ) : null}
         </div>
+
+        {mode === 'melody' && melodyQuality && !melodyQuality.clear ? (
+          <div className={styles.clarityNotice} role="status">
+            <Text variant="micro">{t.review.unclearMelody}</Text>
+          </div>
+        ) : null}
       </Well>
 
       <Well as="section" aria-labelledby="cleanup-heading">
@@ -143,6 +151,13 @@ export function ReviewStage({
             endLabel={t.review.cleanupLevels.clean}
             onChange={onRetouchChange}
           />
+
+          {refined.qualityGuard?.triggered ? (
+            <div className={styles.qualityGuard} role="status">
+              <Text variant="micro">{t.review.qualityGuard}</Text>
+            </div>
+          ) : null}
+
           <Text variant="micro" muted>
             {t.review.cleanupHelp}
           </Text>
@@ -186,6 +201,12 @@ export function ReviewStage({
               }
             />
             <DetailRow label={t.review.analysis.yourTempo} value={<Readout value={bpm} small />} />
+            {melodyQuality ? (
+              <DetailRow
+                label={t.review.analysis.melodyConfidence}
+                value={t.units.percent(Math.round(melodyQuality.melodyConfidence * 100))}
+              />
+            ) : null}
             <DetailRow
               label={t.review.analysis.detectedTempo}
               value={<Readout value={Math.round(analysis.detectedBpm)} small />}

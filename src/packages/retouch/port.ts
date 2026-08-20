@@ -56,9 +56,16 @@ export interface OctaveFilterResult {
  * "Pitch trackers commonly report harmonics an octave or two up. Drop them."
  * Keeps notes within `tol` semitones of the median pitch.
  */
-export function stripOctaveErrors(notes: readonly NoteEvent[], tol = 12): OctaveFilterResult {
+export function stripOctaveErrors(
+  notes: readonly NoteEvent[],
+  tol = 12,
+  trustedCenterPitch?: number,
+): OctaveFilterResult {
   if (notes.length === 0) return { kept: [], dropped: 0 };
-  const median = pyMedian(notes.map((n) => n.pitch));
+  const median =
+    trustedCenterPitch !== undefined && Number.isFinite(trustedCenterPitch)
+      ? trustedCenterPitch
+      : pyMedian(notes.map((n) => n.pitch));
   const kept = notes.filter((n) => Math.abs(n.pitch - median) <= tol);
   return { kept, dropped: notes.length - kept.length };
 }

@@ -182,8 +182,13 @@ export function segmentNotes(
   const smoothed = medianFilter(midi, 5);
 
   const notes: NoteEvent[] = [];
-  let current: { values: number[]; rms: number[]; startIndex: number; lastVoiced: number } | null =
-    null;
+  let current: {
+    values: number[];
+    rms: number[];
+    clarity: number[];
+    startIndex: number;
+    lastVoiced: number;
+  } | null = null;
 
   const close = (endIndex: number): void => {
     if (!current) return;
@@ -197,7 +202,7 @@ export function segmentNotes(
         endSec,
         pitch: Math.max(0, Math.min(127, pitch)),
         velocity: rmsToVelocity(peakRms),
-        confidence: Math.min(1, medianOf(current.rms.map(() => 1))),
+        confidence: Math.max(0, Math.min(1, medianOf(current.clarity))),
       });
     }
     current = null;
@@ -213,19 +218,32 @@ export function segmentNotes(
     }
 
     if (!current) {
-      current = { values: [value], rms: [(frames[i] as PitchFrame).rms], startIndex: i, lastVoiced: i };
+      current = {
+        values: [value],
+        rms: [(frames[i] as PitchFrame).rms],
+        clarity: [(frames[i] as PitchFrame).clarity],
+        startIndex: i,
+        lastVoiced: i,
+      };
       continue;
     }
 
     const reference = medianOf(current.values);
     if (Math.abs(value - reference) > options.maxDriftSemitones) {
       close(current.lastVoiced);
-      current = { values: [value], rms: [(frames[i] as PitchFrame).rms], startIndex: i, lastVoiced: i };
+      current = {
+        values: [value],
+        rms: [(frames[i] as PitchFrame).rms],
+        clarity: [(frames[i] as PitchFrame).clarity],
+        startIndex: i,
+        lastVoiced: i,
+      };
       continue;
     }
 
     current.values.push(value);
     current.rms.push((frames[i] as PitchFrame).rms);
+    current.clarity.push((frames[i] as PitchFrame).clarity);
     current.lastVoiced = i;
   }
   if (current) close((current as { lastVoiced: number }).lastVoiced);

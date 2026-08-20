@@ -35,6 +35,7 @@ import type {
   NoteEvent,
   PitchClassName,
   SketchAnalysis,
+  SourceKind,
 } from '@contracts';
 import {
   clampToPlayableRange,
@@ -46,6 +47,11 @@ import {
   toGridNotes,
 } from './extensions';
 import { resolveRetouchParams, stepSeconds, type RetouchParams } from './macro';
+import {
+  assessMelodyQuality,
+  durationWeightedMedianPitch,
+  type MelodyQualityAssessment,
+} from './qualityGuard';
 import {
   buildReport,
   detectKey,
@@ -68,6 +74,10 @@ export interface RefineOptions {
   keyOverride?: { root: PitchClassName; mode: KeyMode };
   /** Lowest and highest MIDI note the chosen instrument can voice. */
   playableRange?: { low: number; high: number };
+  /** Independent monophonic contour used to prevent destructive cleanup. */
+  referenceNotes?: readonly NoteEvent[];
+  /** MIDI imports may be intentionally polyphonic/wide-register. */
+  sourceKind?: SourceKind;
 }
 
 export interface RefineResult {
@@ -88,6 +98,8 @@ export interface RefineResult {
   report: MusicalReport;
   analysis: SketchAnalysis;
   params: RetouchParams;
+  /** Null when there is no independent audio contour to compare against. */
+  qualityGuard: MelodyQualityAssessment | null;
 }
 
 /**
@@ -131,9 +143,12 @@ interface ResolvedOptions extends RefineOptions {
 function refineMelody(rawNotes: readonly NoteEvent[], options: ResolvedOptions): RefineResult {
   const { params, stepSec } = options;
   const sorted = sortNotes(rawNotes);
+  const reference = options.referenceNotes ?? [];
+  const trustedCenter = durationWeightedMedianPitch(reference);
 
-  const octave = params.octaveFilterEnabled
-    ? stripOctaveErrors(sorted, params.octaveToleranceSemitones)
+  const octaveFilterEnabled = params.octaveFilterEnabled && options.sourceKind !== 'midi-upload';
+  const octave = octaveFilterEnabled
+    ? stripOctaveErrors(sorted, params.octaveToleranceSemitones, trustedCenter)
     : { kept: sorted, dropped: 0 };
 
   // Key comes from the same note set the Python reference uses, before the
@@ -162,9 +177,31 @@ function refineMelody(rawNotes: readonly NoteEvent[], options: ResolvedOptions):
     : { notes: timed.map((n) => ({ ...n })), moved: 0 };
 
   const dynamics = smoothVelocities(snapped.notes, params.velocitySmoothing);
-  const notes = options.playableRange
-    ? clampToPlayableRange(dynamics, options.playableRange.low, options.playableRange.high)
+  const playableRange = options.sourceKind === 'midi-upload' ? undefined : options.playableRange;
+  let notes = playableRange
+    ? clampToPlayableRange(dynamics, playableRange.low, playableRange.high)
     : dynamics;
+  let qualityGuard =
+    reference.length > 0 ? assessMelodyQuality(sorted, notes, reference) : null;
+
+  if (qualityGuard?.triggered) {
+    // Roll back pitch-destructive stages but retain the requested timing feel.
+    // If even range folding harms the contour, the untouched monophonic path
+    // wins; a clean-looking wrong melody is never preferable to the take.
+    const timingOnly = quantizeWithStrength(sorted, {
+      stepSec,
+      strength: params.timingStrength,
+    });
+    const rangedTiming = playableRange
+      ? clampToPlayableRange(timingOnly, playableRange.low, playableRange.high)
+      : timingOnly;
+    const safeAssessment = assessMelodyQuality(sorted, rangedTiming, reference);
+    notes = safeAssessment.triggered ? sorted.map((note) => ({ ...note })) : rangedTiming;
+    qualityGuard = {
+      ...qualityGuard,
+      cleanedAgreement: pitchAgreementForChosen(notes, reference),
+    };
+  }
 
   // The port's own quantize, at reference settings, drives the report so the
   // diagnostics stay comparable with the Python tool.
@@ -208,6 +245,7 @@ function refineMelody(rawNotes: readonly NoteEvent[], options: ResolvedOptions):
     report,
     analysis,
     params,
+    qualityGuard,
   };
 }
 
@@ -257,5 +295,13 @@ function refineRhythm(rawDrums: readonly DrumEvent[], options: ResolvedOptions):
     report,
     analysis,
     params,
+    qualityGuard: null,
   };
+}
+
+function pitchAgreementForChosen(
+  notes: readonly NoteEvent[],
+  reference: readonly NoteEvent[],
+): number {
+  return assessMelodyQuality(notes, notes, reference).cleanedAgreement;
 }

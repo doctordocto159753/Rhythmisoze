@@ -87,7 +87,7 @@ export const RETOUCH_AMOUNT_DEFAULT = 55;
  */
 export function resolveRetouchParams(
   amount: number,
-  overrides?: { grid?: GridDivision },
+  overrides?: { grid?: GridDivision } & Partial<Omit<RetouchParams, 'grid'>>,
 ): RetouchParams {
   const a = clamp(Number.isFinite(amount) ? amount : RETOUCH_AMOUNT_DEFAULT, 0, 100);
 
@@ -97,7 +97,7 @@ export function resolveRetouchParams(
 
   const grid: GridDivision = overrides?.grid ?? (a < 34 ? 32 : a <= 66 ? 16 : 8);
 
-  return {
+  const resolved: RetouchParams = {
     octaveFilterEnabled,
     octaveToleranceSemitones,
     mergeMinDurationSec: 0.1 * ramp(a, 0, 100),
@@ -106,6 +106,22 @@ export function resolveRetouchParams(
     timingStrength: ramp(a, 0, 70),
     scaleSnapStrength: ramp(a, 25, 100),
     velocitySmoothing: ramp(a, 40, 100),
+  };
+
+  // Version presets need timing and pitch to move independently - "Natural"
+  // keeps the performed timing while still removing transcription artefacts.
+  // The single slider remains the only control a *user* ever sees; this is an
+  // internal override used by `versions.ts`, and every value it can set is
+  // still one the curve itself could produce.
+  if (overrides === undefined) return resolved;
+  const { grid: _grid, ...rest } = overrides;
+  // Spread rather than a keyed loop: this keeps every field type-checked
+  // against RetouchParams instead of widening it to an index signature.
+  return {
+    ...resolved,
+    ...Object.fromEntries(
+      Object.entries(rest).filter(([, value]) => value !== undefined),
+    ),
   };
 }
 

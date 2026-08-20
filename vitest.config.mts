@@ -21,6 +21,8 @@ export default defineConfig({
       'server-only': r('./tests/stubs/server-only.ts'),
       '@contracts': r('./src/packages/contracts/index.ts'),
       '@retouch': r('./src/packages/retouch/index.ts'),
+      '@rhythm-extraction': r('./src/packages/rhythm-extraction/index.ts'),
+      '@intent': r('./src/packages/intent/index.ts'),
       '@audio-core': r('./src/packages/audio-core/index.ts'),
       '@midi': r('./src/packages/midi/index.ts'),
       '@synthesis': r('./src/packages/synthesis/index.ts'),

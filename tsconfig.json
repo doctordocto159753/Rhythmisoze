@@ -39,6 +39,12 @@
       "@retouch": [
         "./src/packages/retouch/index.ts"
       ],
+      "@rhythm-extraction": [
+        "./src/packages/rhythm-extraction/index.ts"
+      ],
+      "@intent": [
+        "./src/packages/intent/index.ts"
+      ],
       "@audio-core": [
         "./src/packages/audio-core/index.ts"
       ],

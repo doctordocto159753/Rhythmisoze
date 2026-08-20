@@ -63,7 +63,12 @@ import {
 } from './port';
 
 export interface RefineOptions {
-  /** Authoritative tempo. Comes from the user's taps, never from estimateTempo. */
+  /**
+   * The tempo this result is built on.
+   *
+   * No longer necessarily the tapped value: a version may supply the tempo
+   * detected from the performance instead. See `rhythm-extraction/versions.ts`.
+   */
   bpm: number;
   mode: CreationMode;
   /** The single Raw-to-Clean control, 0..100. */
@@ -78,6 +83,12 @@ export interface RefineOptions {
   referenceNotes?: readonly NoteEvent[];
   /** MIDI imports may be intentionally polyphonic/wide-register. */
   sourceKind?: SourceKind;
+  /**
+   * Direct parameter overrides, used by the version presets so that timing and
+   * pitch correction can move independently. Not reachable from the UI: the
+   * user still has exactly one cleanup control.
+   */
+  paramOverrides?: Partial<Omit<RetouchParams, 'grid'>>;
 }
 
 export interface RefineResult {
@@ -127,7 +138,10 @@ export function refine(
   input: { notes: readonly NoteEvent[]; drums: readonly DrumEvent[] },
   options: RefineOptions,
 ): RefineResult {
-  const params = resolveRetouchParams(options.amount, { grid: options.gridOverride });
+  const params = resolveRetouchParams(options.amount, {
+    grid: options.gridOverride,
+    ...options.paramOverrides,
+  });
   const stepSec = stepSeconds(options.bpm, params.grid);
 
   return options.mode === 'rhythm'

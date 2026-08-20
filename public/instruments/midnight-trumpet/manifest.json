@@ -1,0 +1,386 @@
+{
+  "version": 2,
+  "id": "midnight-trumpet",
+  "name": "Midnight Trumpet",
+  "type": "sample",
+  "license": {
+    "spdx": "CC-BY-3.0",
+    "source": "FluidR3_GM by Frank Wen, pre-rendered by midi-js-soundfonts",
+    "url": "https://github.com/gleitz/midi-js-soundfonts/tree/gh-pages/FluidR3_GM",
+    "attribution": "FluidR3_GM by Frank Wen; browser files prepared by Benjamin Gleitzman.",
+    "attributionRequired": true,
+    "redistribution": true
+  },
+  "playback": {
+    "mode": "gated",
+    "releaseSec": 0.18,
+    "tailSec": 0.18
+  },
+  "samples": {
+    "E3": "samples/E3.mp3",
+    "F3": "samples/F3.mp3",
+    "Gb3": "samples/Gb3.mp3",
+    "G3": "samples/G3.mp3",
+    "Ab3": "samples/Ab3.mp3",
+    "A3": "samples/A3.mp3",
+    "Bb3": "samples/Bb3.mp3",
+    "B3": "samples/B3.mp3",
+    "C4": "samples/C4.mp3",
+    "Db4": "samples/Db4.mp3",
+    "D4": "samples/D4.mp3",
+    "Eb4": "samples/Eb4.mp3",
+    "E4": "samples/E4.mp3",
+    "F4": "samples/F4.mp3",
+    "Gb4": "samples/Gb4.mp3",
+    "G4": "samples/G4.mp3",
+    "Ab4": "samples/Ab4.mp3",
+    "A4": "samples/A4.mp3",
+    "Bb4": "samples/Bb4.mp3",
+    "B4": "samples/B4.mp3",
+    "C5": "samples/C5.mp3",
+    "Db5": "samples/Db5.mp3",
+    "D5": "samples/D5.mp3",
+    "Eb5": "samples/Eb5.mp3",
+    "E5": "samples/E5.mp3",
+    "F5": "samples/F5.mp3",
+    "Gb5": "samples/Gb5.mp3",
+    "G5": "samples/G5.mp3",
+    "Ab5": "samples/Ab5.mp3",
+    "A5": "samples/A5.mp3",
+    "Bb5": "samples/Bb5.mp3",
+    "B5": "samples/B5.mp3",
+    "C6": "samples/C6.mp3"
+  },
+  "zones": [
+    {
+      "file": "samples/E3.mp3",
+      "rootMidi": 52,
+      "lowMidi": 52,
+      "highMidi": 52,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "5768a9f8a552a1b401e1ab6c742f47812040ad1fca917e22d12b86f606540e76"
+    },
+    {
+      "file": "samples/F3.mp3",
+      "rootMidi": 53,
+      "lowMidi": 53,
+      "highMidi": 53,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "b64d7256afb5b5041630433ce65b47e8511c9943c893427808b199dbbbf11ae1"
+    },
+    {
+      "file": "samples/Gb3.mp3",
+      "rootMidi": 54,
+      "lowMidi": 54,
+      "highMidi": 54,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "d9d8adf5ba842fb8dfcc737b3bf2669eb2cd0e270ac06ceeb20e6b0f6ac2ae80"
+    },
+    {
+      "file": "samples/G3.mp3",
+      "rootMidi": 55,
+      "lowMidi": 55,
+      "highMidi": 55,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25039,
+      "sha256": "71eb73748407e7939b7736376df55cc32b259781a5d4998e00db4ec634d45b17"
+    },
+    {
+      "file": "samples/Ab3.mp3",
+      "rootMidi": 56,
+      "lowMidi": 56,
+      "highMidi": 56,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 23479,
+      "sha256": "6c2ed344718dc49df50d0201f2d0e9272f32cc0bb319264878eaf5b6ffde8adc"
+    },
+    {
+      "file": "samples/A3.mp3",
+      "rootMidi": 57,
+      "lowMidi": 57,
+      "highMidi": 57,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 22959,
+      "sha256": "aa3802937ad6e29287a150fb29e91c6d3869cf200bdf3434c137ddedc1304776"
+    },
+    {
+      "file": "samples/Bb3.mp3",
+      "rootMidi": 58,
+      "lowMidi": 58,
+      "highMidi": 58,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 23141,
+      "sha256": "2033cf7f5e7490a94753f039112efb052f8d9c03ffd34cc17be44ad3600ff7ea"
+    },
+    {
+      "file": "samples/B3.mp3",
+      "rootMidi": 59,
+      "lowMidi": 59,
+      "highMidi": 59,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 24441,
+      "sha256": "846d46b348b279228637525aacf6533b76f4850e5579a9ae4fb7fc3dce91ab71"
+    },
+    {
+      "file": "samples/C4.mp3",
+      "rootMidi": 60,
+      "lowMidi": 60,
+      "highMidi": 60,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25351,
+      "sha256": "d8741f42a2d514dbbf80aff2550dac4d1282901c4b215dcc18c020c64ca4d6d5"
+    },
+    {
+      "file": "samples/Db4.mp3",
+      "rootMidi": 61,
+      "lowMidi": 61,
+      "highMidi": 61,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 24935,
+      "sha256": "074c67d3ea5e64ffc1cfc3f100468291a3c07dec21faa94771bdb78281945d17"
+    },
+    {
+      "file": "samples/D4.mp3",
+      "rootMidi": 62,
+      "lowMidi": 62,
+      "highMidi": 62,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25559,
+      "sha256": "a84825a5aba3edb92f7ded2673bcfdeff869f9937d987c33f4016ddeaf4949d4"
+    },
+    {
+      "file": "samples/Eb4.mp3",
+      "rootMidi": 63,
+      "lowMidi": 63,
+      "highMidi": 63,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25325,
+      "sha256": "29e52f70b7e52d3e1bc02ebc777252036afee3d797193ac2f0baa5f6163af9d7"
+    },
+    {
+      "file": "samples/E4.mp3",
+      "rootMidi": 64,
+      "lowMidi": 64,
+      "highMidi": 64,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "55df596417458ea74107b451fa61695b1a0f009d69525a25681aa1c193976a7f"
+    },
+    {
+      "file": "samples/F4.mp3",
+      "rootMidi": 65,
+      "lowMidi": 65,
+      "highMidi": 65,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "e4800c5e79cc3d2028701d9373226a9386b9fbb44bda455785948e18f0a8cdbc"
+    },
+    {
+      "file": "samples/Gb4.mp3",
+      "rootMidi": 66,
+      "lowMidi": 66,
+      "highMidi": 66,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25481,
+      "sha256": "58e3c1a84dd50bf3f11d65fcf8044a7d66c0328a238ecaf140f74dec3d2d1e5b"
+    },
+    {
+      "file": "samples/G4.mp3",
+      "rootMidi": 67,
+      "lowMidi": 67,
+      "highMidi": 67,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25533,
+      "sha256": "42118cde0591594f506bc7ba7c05df9294060e5d6843cd6b0e345c4de9d7465e"
+    },
+    {
+      "file": "samples/Ab4.mp3",
+      "rootMidi": 68,
+      "lowMidi": 68,
+      "highMidi": 68,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25481,
+      "sha256": "e9671a80745d93d9d353eef9daff3df70513eddbfc529db1fcb740b74939a3db"
+    },
+    {
+      "file": "samples/A4.mp3",
+      "rootMidi": 69,
+      "lowMidi": 69,
+      "highMidi": 69,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "84aae8d0fbef015c3b7b18a726a731a88f1ede655b5bb49f46fa47f26b810d07"
+    },
+    {
+      "file": "samples/Bb4.mp3",
+      "rootMidi": 70,
+      "lowMidi": 70,
+      "highMidi": 70,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25195,
+      "sha256": "23a7b3dcd063f1f3af413244d0d8d53dd389417fdc665b2e8f69754211fe9d86"
+    },
+    {
+      "file": "samples/B4.mp3",
+      "rootMidi": 71,
+      "lowMidi": 71,
+      "highMidi": 71,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25559,
+      "sha256": "27c65d37560f53c4bc12813043955a8533ff346f29f5ddd1b5954b3949e17ce0"
+    },
+    {
+      "file": "samples/C5.mp3",
+      "rootMidi": 72,
+      "lowMidi": 72,
+      "highMidi": 72,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "4ea6680974d2814c59f21819fc26d9afba9dc43d56005fe659d478378bbc5510"
+    },
+    {
+      "file": "samples/Db5.mp3",
+      "rootMidi": 73,
+      "lowMidi": 73,
+      "highMidi": 73,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25507,
+      "sha256": "d8c9a1170183ed2d02d42bee5ddb087de0627647114d87d34f450267ca62f4ad"
+    },
+    {
+      "file": "samples/D5.mp3",
+      "rootMidi": 74,
+      "lowMidi": 74,
+      "highMidi": 74,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "33bf529ce0dd26d5bfc4d2dd285a1423574b57940a2f06f856e7aacfdb035a7c"
+    },
+    {
+      "file": "samples/Eb5.mp3",
+      "rootMidi": 75,
+      "lowMidi": 75,
+      "highMidi": 75,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "a77a0bb295223bc363171a1ff3c8c94a9436e6de2505f90feac224354fed57b7"
+    },
+    {
+      "file": "samples/E5.mp3",
+      "rootMidi": 76,
+      "lowMidi": 76,
+      "highMidi": 76,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "72796d06233581a79df89aec1a83c7cba08d5247176179896dca2a99dcf9347c"
+    },
+    {
+      "file": "samples/F5.mp3",
+      "rootMidi": 77,
+      "lowMidi": 77,
+      "highMidi": 77,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "009b7e28f209b2c04bff6580d072c1af5b6877c79d4e5bb7668a01de0195a2a9"
+    },
+    {
+      "file": "samples/Gb5.mp3",
+      "rootMidi": 78,
+      "lowMidi": 78,
+      "highMidi": 78,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "3c56a0ca783a11a7cffe89da19587dadbfac7f154d72856c2a3c5ce284a071cb"
+    },
+    {
+      "file": "samples/G5.mp3",
+      "rootMidi": 79,
+      "lowMidi": 79,
+      "highMidi": 79,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "3a2b24b603db294abd8ed09c6b19ca9c7a4f621501b2af806ff439b10c2ea9bc"
+    },
+    {
+      "file": "samples/Ab5.mp3",
+      "rootMidi": 80,
+      "lowMidi": 80,
+      "highMidi": 80,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "bcd04f266b53817bb5d9851d01eb8be422c250e91ac9c043cf81a33a6c28d294"
+    },
+    {
+      "file": "samples/A5.mp3",
+      "rootMidi": 81,
+      "lowMidi": 81,
+      "highMidi": 81,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "d875cdd76d4393505d95c83dbd9506c1ee075571564b722541dce1115111def0"
+    },
+    {
+      "file": "samples/Bb5.mp3",
+      "rootMidi": 82,
+      "lowMidi": 82,
+      "highMidi": 82,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "a61c681542187b3a77a3691a21fc26016e16c45fa9f9cddc900653add3850d61"
+    },
+    {
+      "file": "samples/B5.mp3",
+      "rootMidi": 83,
+      "lowMidi": 83,
+      "highMidi": 83,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "133f65ca772ece58dedfac714c54d3c1e3a1f410f6c3cb8da4ac3d3fd9088e6e"
+    },
+    {
+      "file": "samples/C6.mp3",
+      "rootMidi": 84,
+      "lowMidi": 84,
+      "highMidi": 84,
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "bytes": 25585,
+      "sha256": "213b7103c2077d7926961062186d59a25b43be8a756dbac839a18fdc0ea65d98"
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "version": 2,
+  "id": "live-room-kit",
+  "name": "Live Room Kit",
+  "type": "sample",
+  "license": {
+    "spdx": "CC0-1.0",
+    "source": "VSCO 2 Community Edition by Versilian Studios",
+    "url": "https://github.com/sgossner/VSCO-2-CE",
+    "attribution": "Recorded by Sam Gossner and Simon Dalzell; sample cutting by Elan Hickler.",
+    "attributionRequired": false,
+    "redistribution": true
+  },
+  "playback": {
+    "mode": "natural",
+    "releaseSec": 0.18,
+    "tailSec": 7
+  },
+  "samples": {
+    "kick-soft.wav": "samples/kick-soft.wav",
+    "kick-hard.wav": "samples/kick-hard.wav",
+    "snare-soft.wav": "samples/snare-soft.wav",
+    "snare-hard.wav": "samples/snare-hard.wav",
+    "hat-1.wav": "samples/hat-1.wav",
+    "hat-2.wav": "samples/hat-2.wav"
+  },
+  "zones": [
+    {
+      "file": "samples/kick-soft.wav",
+      "rootMidi": 36,
+      "lowMidi": 35,
+      "highMidi": 36,
+      "drum": "kick",
+      "minVelocity": 1,
+      "maxVelocity": 80,
+      "bytes": 1711570,
+      "sha256": "68d537aba29277925f028eab9d3494a9316b48c2ddf3031f3af5460c150a1cb0"
+    },
+    {
+      "file": "samples/kick-hard.wav",
+      "rootMidi": 36,
+      "lowMidi": 35,
+      "highMidi": 36,
+      "drum": "kick",
+      "minVelocity": 81,
+      "maxVelocity": 127,
+      "bytes": 1763962,
+      "sha256": "549c1190c3da0a8a8f252f427f7ed03e22efc2e1f62ae86b01f6c3d27eca9bf0"
+    },
+    {
+      "file": "samples/snare-soft.wav",
+      "rootMidi": 38,
+      "lowMidi": 38,
+      "highMidi": 40,
+      "drum": "snare",
+      "minVelocity": 1,
+      "maxVelocity": 80,
+      "bytes": 135556,
+      "sha256": "a8342d77693782430feb2ec0b88c02015bae4724202f39858ef4375368bfeff4"
+    },
+    {
+      "file": "samples/snare-hard.wav",
+      "rootMidi": 38,
+      "lowMidi": 38,
+      "highMidi": 40,
+      "drum": "snare",
+      "minVelocity": 81,
+      "maxVelocity": 127,
+      "bytes": 154912,
+      "sha256": "88fcda74e24679bed36b1dc4de1a34abd5e3fc3204bdf788e02d478a658ca314"
+    },
+    {
+      "file": "samples/hat-1.wav",
+      "rootMidi": 42,
+      "lowMidi": 42,
+      "highMidi": 46,
+      "drum": "hat",
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "roundRobin": 1,
+      "bytes": 39210,
+      "sha256": "025ee4e9e80349cf1d593b02c39e14f17f643fd7f078da49e9b33989c53c0878"
+    },
+    {
+      "file": "samples/hat-2.wav",
+      "rootMidi": 42,
+      "lowMidi": 42,
+      "highMidi": 46,
+      "drum": "hat",
+      "minVelocity": 1,
+      "maxVelocity": 127,
+      "roundRobin": 2,
+      "bytes": 55446,
+      "sha256": "8be70d11d4387823c05c013fee580014eedd44d130760f1cae3847dcbdf646e1"
+    }
+  ]
+}

@@ -1,87 +1,47 @@
 # Instrument licence ledger
 
-**US-0602.** Every sound the product can make, with its licence and provenance.
-An instrument absent from `src/packages/synthesis/registry.ts` cannot be
-selected, previewed, rendered or exported, so nothing can reach a user without
-first appearing here. `auditRegistry()` checks the mechanical parts of this and
-`tests/unit/synthesis.test.ts` fails the build if an entry is incomplete.
+Every sound must be registered here and in
+`src/packages/synthesis/registry.ts` before it can reach playback or export.
+`tests/synthesis/manifest.test.ts` verifies that every shipped zone exists,
+matches its declared byte count and SHA-256, and agrees with the registry
+licence.
 
----
+## Recorded sample packs
 
-## Current sound source
+| Product ids | Pack directories | Bytes | Licence | Source and pinned revision | Attribution | Redistribution |
+|---|---|---:|---|---|---|---|
+| `piano`, `acoustic-guitar`, `violin`, `cello`, `trumpet` | `warm-grand`, `cedar-steel`, `tender-violin`, `deep-cello`, `midnight-trumpet` | 5,273,650 | CC BY 3.0 | [FluidR3_GM browser files](https://github.com/gleitz/midi-js-soundfonts/tree/gh-pages/FluidR3_GM), commit `044fab8e1456bfafc5776e86dfd6bb8697149aef` | Required: “FluidR3_GM by Frank Wen; browser files prepared by Benjamin Gleitzman.” | Permitted with attribution |
+| `acoustic-kit` | `live-room-kit` | 3,860,656 | CC0 1.0 | [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE), commit `440300901dfe9275fd84e0b7763af1f8443ae62e` | Not required; courtesy credit retained in the manifest | Permitted without restriction |
 
-All eleven instruments are voiced by the **procedural engine**
-(`src/packages/synthesis/procedural.ts`) from the recipes in `voices.ts`. Those
-recipes are original work in this repository, MIT-licensed with the rest of the
-codebase. No third-party audio ships.
+FluidR3_GM files are copied from the repository's per-instrument MP3 output,
+not fetched from that host at runtime. VSCO kit files are copied from the raw
+WAV library. All files are served from `public/instruments/` on the same origin
+as Rhythmisoze.
 
-That makes provenance trivially clean and is one of the reasons the procedural
-engine is the default (ADR-002). It also means **the instruments are synthesised
-approximations rather than recordings**, which does not yet satisfy the
-"realistic / acoustic" direction chosen in Q-D4.
+### FluidR3_GM attribution
 
-| id | Name (en / fa) | Family | Mode | GM | Range | Licence | Source |
-|---|---|---|---|---|---|---|---|
-| `piano` | Piano / پیانو | keys | melody | 0 | 28–96 | MIT | Own recipe |
-| `electric-piano` | Electric piano / پیانوی الکتریک | keys | melody | 4 | 28–96 | MIT | Own recipe |
-| `acoustic-guitar` | Acoustic guitar / گیتار آکوستیک | strings | melody | 24 | 40–84 | MIT | Own recipe |
-| `double-bass` | Bowed double bass / کنترباس آرشه‌ای | strings | melody | 43 | 28–62 | MIT | Own recipe |
-| `strings` | String section / گروه زهی | strings | melody | 48 | 36–88 | MIT | Own recipe |
-| `trumpet` | Trumpet / ترومپت | winds | melody | 56 | 52–84 | MIT | Own recipe |
-| `saxophone` | Saxophone / ساکسیفون | reeds | melody | 65 | 44–80 | MIT | Own recipe |
-| `harmonica` | Harmonica / سازدهنی | reeds | melody | 22 | 48–88 | MIT | Own recipe |
-| `flute` | Flute / فلوت | winds | melody | 73 | 59–96 | MIT | Own recipe |
-| `marching-drum` | Marching drum / طبل رژه | percussion | rhythm | — | 35–46 | MIT | Own recipe |
-| `trap-kit` | Trap kit / کیت ترپ | percussion | rhythm | — | 35–46 | MIT | Own recipe |
+FluidR3_GM by Frank Wen. Browser-ready files prepared by Benjamin Gleitzman and
+contributors to `midi-js-soundfonts`. Licensed under Creative Commons
+Attribution 3.0 Unported. Rhythmisoze selects and redistributes unmodified note
+files in per-instrument packs.
 
-Nine melody instruments against the PRD's minimum of eight (S-01), plus the two
-kits the PRD names.
+### VSCO 2 CE courtesy credit
 
-## Sample packs
+Recorded by Sam Gossner and Simon Dalzell; sample cutting by Elan
+Hickler/Soundemote. Dedicated to the public domain under CC0 1.0.
 
-**None ship.** Every registry entry has `samplePack: null`, and the test suite
-asserts that `SampleEngine.supports()` is false for all of them, so this state
-cannot drift silently.
+## Procedural fallback
 
-When packs are added, each one gets a row here before it is referenced from the
-registry:
+Every registered instrument also has a fallback voice in
+`src/packages/synthesis/voices.ts`. These recipes and generated noise/reverb are
+original Rhythmisoze work distributed under the repository MIT licence. No
+recorded user audio is part of an instrument pack.
 
-| id | Pack | Bytes | Licence | Source | Attribution required |
-|---|---|---|---|---|---|
-| — | — | — | — | — | — |
+## Maintainer rules
 
-### Candidate sources, unverified
-
-Listed as leads for the follow-up in ADR-002, not as approvals. Each needs its
-licence read against commercial intent before use:
-
-- **VSCO-2 Community Edition** — CC0. The PRD names it. Broad orchestral
-  coverage; recording quality varies by instrument.
-- **Philharmonia Orchestra samples** — CC BY-NC. The non-commercial clause has
-  to be reconciled with any paid tier before this is usable.
-- **Sonatina Symphonic Orchestra** — CC Sampling Plus 1.0. Older, but
-  well-organised and widely used.
-- **FluidR3_GM** — MIT. The PRD names it. Complete GM coverage; ~150 MB total,
-  so it would need per-instrument extraction.
-
-### Rules for adding a pack
-
-1. Record the exact source URL, licence identifier and any required attribution
-   in the table above, before writing any code.
-2. Put the audio under `public/instruments/<id>/` with a `manifest.json` in the
-   format documented in `src/packages/synthesis/sample.ts`.
-3. Set `samplePack` and `samplePackBytes` on the registry entry. Nothing else
-   changes — the engine selection in `render.ts` picks it up automatically.
-4. If the licence requires attribution, it must appear in the product UI, not
-   only in this file.
-
-## Other audio assets
-
-| Asset | Where | Licence | Notes |
-|---|---|---|---|
-| Metronome click | `metronome.ts` | MIT (own) | Synthesised square-wave click; no file |
-| Reverb impulse | `render.ts` | MIT (own) | Generated from a seeded noise decay; no file |
-| Preview patterns | `registry.ts` | MIT (own) | Note sequences, not audio |
-
-Nothing in the product plays a recorded sound that was not made by the code in
-this repository.
+1. Pin upstream revisions in `scripts/sync-instrument-packs.mjs`.
+2. Record source URL, SPDX id, attribution requirement and redistribution
+   permission in both registry and manifest.
+3. Run `npm run instruments:sync`; never hand-replace one zone.
+4. Run `npm test -- --run tests/synthesis` and review the exact Git diff.
+5. New packs must stay lazy and must not broaden this product into General MIDI.

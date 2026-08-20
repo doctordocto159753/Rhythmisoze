@@ -141,6 +141,24 @@ export const VOICE_SPECS: Readonly<Record<string, VoiceSpec>> = Object.freeze({
     unisonDetuneCents: 0,
     gain: 0.55,
   },
+  violin: {
+    partials: [0.92, 1, 0.73, 0.58, 0.4, 0.27, 0.18, 0.12],
+    envelope: { attackSec: 0.08, decaySec: 0.14, sustain: 0.86, releaseSec: 0.24 },
+    filter: { type: 'lowpass', startHz: 1500, endHz: 4300, sweepSec: 0.18, q: 1, keyTracking: 0.65 },
+    noise: { amount: 0.11, centreHz: 3600, q: 0.9, sustained: true, decaySec: 0.25 },
+    vibrato: { rateHz: 5.1, depthCents: 15, onsetSec: 0.22 },
+    unisonDetuneCents: 0,
+    gain: 0.58,
+  },
+  cello: {
+    partials: [1, 0.8, 0.51, 0.37, 0.25, 0.15, 0.09, 0.05],
+    envelope: { attackSec: 0.1, decaySec: 0.18, sustain: 0.82, releaseSec: 0.3 },
+    filter: { type: 'lowpass', startHz: 850, endHz: 2600, sweepSec: 0.22, q: 1, keyTracking: 0.52 },
+    noise: { amount: 0.12, centreHz: 2300, q: 0.9, sustained: true, decaySec: 0.28 },
+    vibrato: { rateHz: 4.6, depthCents: 14, onsetSec: 0.26 },
+    unisonDetuneCents: 0,
+    gain: 0.68,
+  },
   strings: {
     partials: [1, 0.68, 0.48, 0.34, 0.24, 0.16, 0.11, 0.07],
     envelope: { attackSec: 0.14, decaySec: 0.2, sustain: 0.85, releaseSec: 0.5 },
@@ -175,6 +193,23 @@ export interface DrumVoiceSpec {
  */
 export const DRUM_SPECS: Readonly<Record<string, Record<'kick' | 'snare' | 'hat', DrumVoiceSpec>>> =
   Object.freeze({
+    'acoustic-kit': {
+      kick: {
+        toneStartHz: 135, toneEndHz: 52, toneSweepSec: 0.08, toneLevel: 0.88, toneDecaySec: 0.34,
+        noiseLevel: 0.16, noiseType: 'lowpass', noiseHz: 780, noiseQ: 0.7, noiseDecaySec: 0.045,
+        gain: 0.82,
+      },
+      snare: {
+        toneStartHz: 230, toneEndHz: 176, toneSweepSec: 0.028, toneLevel: 0.36, toneDecaySec: 0.11,
+        noiseLevel: 0.82, noiseType: 'bandpass', noiseHz: 2100, noiseQ: 0.85, noiseDecaySec: 0.16,
+        gain: 0.76,
+      },
+      hat: {
+        toneStartHz: 0, toneEndHz: 0, toneSweepSec: 0, toneLevel: 0, toneDecaySec: 0,
+        noiseLevel: 0.64, noiseType: 'highpass', noiseHz: 6800, noiseQ: 0.65, noiseDecaySec: 0.045,
+        gain: 0.42,
+      },
+    },
     'marching-drum': {
       kick: {
         toneStartHz: 150, toneEndHz: 58, toneSweepSec: 0.07, toneLevel: 0.9, toneDecaySec: 0.32,

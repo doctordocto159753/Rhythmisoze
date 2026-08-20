@@ -1,39 +1,7 @@
 /**
- * The sample-playback engine.
- *
- * This is the path to the "realistic / acoustic" instrument direction the
- * product owner chose (questionnaire Q-D4). The mechanism is complete and
- * tested; what it is waiting on is licensed audio. No instrument in the registry
- * declares a `samplePack` yet, so this engine currently reports `supports()` as
- * false for all of them and the procedural engine handles everything - see
- * ADR-002 and `docs/licenses/instruments.md`.
- *
- * ## Manifest format
- *
- * `public/instruments/<id>/manifest.json`:
- *
- * ```json
- * {
- *   "version": 1,
- *   "license": { "spdx": "CC0-1.0", "source": "...", "url": "..." },
- *   "loopDefault": false,
- *   "zones": [
- *     { "file": "c3.opus", "rootMidi": 48, "lowMidi": 43, "highMidi": 53, "loop": null }
- *   ]
- * }
- * ```
- *
- * A zone is stretched by playback rate to cover its range. Recording every
- * semitone would sound better and cost far more to download; multisampling in
- * roughly a fifth is the usual compromise and is what the manifest assumes.
- *
- * ## Why this satisfies lazy loading (US-0603)
- *
- * Nothing is fetched until `prepare` is called for a specific instrument, the
- * decoded buffers are cached per instrument, and progress is reported per file
- * so the gallery can show a real bar rather than a spinner.
+ * Browser-native multisample engine. Packs are same-origin, manifest-driven,
+ * loaded only on selection/play/render, and decoded once per tab.
  */
-
 import { AppError } from '@contracts';
 import type {
   InstrumentDefinition,
@@ -48,63 +16,172 @@ export interface SampleZone {
   rootMidi: number;
   lowMidi: number;
   highMidi: number;
-  /** Drum class this zone voices, for percussion packs. */
   drum?: 'kick' | 'snare' | 'hat';
+  minVelocity?: number;
+  maxVelocity?: number;
+  roundRobin?: number;
   loop?: { startSec: number; endSec: number } | null;
+  bytes?: number;
+  sha256?: string;
 }
 
 export interface SampleManifest {
-  version: number;
-  license: { spdx: string; source: string; url?: string };
+  version: 1 | 2;
+  id?: string;
+  name?: string;
+  type?: 'sample';
+  license: {
+    spdx: string;
+    source: string;
+    url?: string;
+    attribution?: string;
+    attributionRequired?: boolean;
+    redistribution?: boolean;
+  };
+  playback?: { mode: 'natural' | 'gated'; releaseSec: number; tailSec?: number };
+  samples?: Record<string, string>;
   zones: SampleZone[];
 }
 
-interface LoadedZone extends SampleZone {
-  buffer: AudioBuffer;
+interface LoadedZone extends SampleZone { buffer: AudioBuffer }
+interface LoadedPack {
+  zones: LoadedZone[];
+  playback: { mode: 'natural' | 'gated'; releaseSec: number; tailSec?: number };
+}
+interface CacheEntry {
+  progress: number;
+  listeners: Set<(fraction: number) => void>;
+  promise: Promise<LoadedPack>;
 }
 
-/** Decoded packs, keyed by instrument id, shared across prepares. */
-const packCache = new Map<string, Promise<LoadedZone[]>>();
+const packCache = new Map<string, CacheEntry>();
+
+function appError(detail: string): AppError {
+  return new AppError('instrument_load_failed', 'choose_other_instrument', detail);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeRelativeFile(file: string): boolean {
+  return file.length > 0 && !file.startsWith('/') && !file.includes('\\') &&
+    file.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+}
+
+/** Runtime validation keeps a malformed or swapped manifest out of the audio graph. */
+export function validateSampleManifest(
+  input: unknown,
+  instrument: InstrumentDefinition,
+): SampleManifest {
+  if (!isObject(input)) throw appError('manifest is not an object');
+  if (input.version !== 1 && input.version !== 2) throw appError('unsupported manifest version');
+  if (!isObject(input.license) || typeof input.license.spdx !== 'string' ||
+      typeof input.license.source !== 'string') {
+    throw appError('manifest licence is incomplete');
+  }
+  if (input.license.spdx !== instrument.license.spdx) throw appError('manifest licence mismatch');
+  if (!Array.isArray(input.zones) || input.zones.length === 0) throw appError('manifest has no zones');
+
+  const packId = instrument.samplePack?.split('/')[0];
+  if (input.version === 2) {
+    if (input.id !== packId) throw appError('manifest id mismatch');
+    if (input.type !== 'sample') throw appError('manifest type mismatch');
+    if (typeof input.name !== 'string' || input.name.length === 0) throw appError('manifest name missing');
+    if (!isObject(input.samples)) throw appError('manifest sample map missing');
+  }
+
+  for (const candidate of input.zones) {
+    if (!isObject(candidate) || typeof candidate.file !== 'string' || !isSafeRelativeFile(candidate.file)) {
+      throw appError('unsafe sample path');
+    }
+    for (const field of ['rootMidi', 'lowMidi', 'highMidi'] as const) {
+      if (!Number.isInteger(candidate[field]) || Number(candidate[field]) < 0 || Number(candidate[field]) > 127) {
+        throw appError(`invalid ${field}`);
+      }
+    }
+    if (Number(candidate.lowMidi) > Number(candidate.highMidi)) throw appError('inverted sample range');
+    if (candidate.drum !== undefined && !['kick', 'snare', 'hat'].includes(String(candidate.drum))) {
+      throw appError('invalid drum class');
+    }
+    const lowVelocity = candidate.minVelocity === undefined ? 1 : Number(candidate.minVelocity);
+    const highVelocity = candidate.maxVelocity === undefined ? 127 : Number(candidate.maxVelocity);
+    if (!Number.isInteger(lowVelocity) || !Number.isInteger(highVelocity) ||
+        lowVelocity < 1 || highVelocity > 127 || lowVelocity > highVelocity) {
+      throw appError('invalid velocity layer');
+    }
+    if (candidate.loop !== undefined && candidate.loop !== null) {
+      if (!isObject(candidate.loop) || Number(candidate.loop.startSec) < 0 ||
+          Number(candidate.loop.endSec) <= Number(candidate.loop.startSec)) {
+        throw appError('invalid loop');
+      }
+    }
+  }
+
+  if (input.playback !== undefined) {
+    if (!isObject(input.playback) || !['natural', 'gated'].includes(String(input.playback.mode)) ||
+        !Number.isFinite(input.playback.releaseSec) || Number(input.playback.releaseSec) < 0) {
+      throw appError('invalid playback settings');
+    }
+  }
+  return input as unknown as SampleManifest;
+}
 
 class SampleInstrument implements PreparedInstrument {
   readonly engineId = 'sample';
-  readonly releaseTailSec = 0.6;
-
+  readonly releaseTailSec: number;
   private readonly nodes: AudioScheduledSourceNode[] = [];
+  private readonly roundRobinCursor = new Map<string, number>();
 
   constructor(
     readonly instrumentId: string,
     private readonly context: BaseAudioContext,
-    private readonly zones: readonly LoadedZone[],
-  ) {}
+    private readonly pack: LoadedPack,
+  ) {
+    this.releaseTailSec = pack.playback.tailSec ?? Math.max(
+      pack.playback.releaseSec,
+      ...pack.zones.map((zone) => zone.buffer.duration),
+    );
+  }
 
   scheduleNotes(destination: AudioNode, notes: readonly ScheduledNote[], originSec: number): void {
     for (const note of notes) {
-      const zone = this.pickZone(note.pitch);
-      if (!zone) continue;
-      this.play(destination, zone, note.pitch, note.velocity, originSec + note.startSec,
-        Math.max(0.05, note.endSec - note.startSec));
+      const zone = this.pickZone(note.pitch, note.velocity);
+      if (zone) this.play(
+        destination, zone, note.pitch, note.velocity, originSec + note.startSec,
+        Math.max(0.05, note.endSec - note.startSec),
+      );
     }
   }
 
   scheduleHits(destination: AudioNode, hits: readonly ScheduledHit[], originSec: number): void {
     for (const hit of hits) {
       const drum = hit.drum === 'unknown' ? 'hat' : hit.drum;
-      const zone = this.zones.find((z) => z.drum === drum);
-      if (!zone) continue;
-      // Percussion samples play to their natural end rather than being gated.
-      this.play(destination, zone, zone.rootMidi, hit.velocity, originSec + hit.startSec, null);
+      const zone = this.pickZone(drum === 'kick' ? 36 : drum === 'snare' ? 38 : 42, hit.velocity, drum);
+      if (zone) this.play(destination, zone, zone.rootMidi, hit.velocity, originSec + hit.startSec, null);
     }
   }
 
-  private pickZone(pitch: number): LoadedZone | undefined {
-    const inRange = this.zones.find((zone) => pitch >= zone.lowMidi && pitch <= zone.highMidi);
-    if (inRange) return inRange;
-    // Outside every zone: stretch the nearest root rather than going silent.
-    return this.zones.reduce<LoadedZone | undefined>((best, zone) => {
-      if (!best) return zone;
-      return Math.abs(zone.rootMidi - pitch) < Math.abs(best.rootMidi - pitch) ? zone : best;
-    }, undefined);
+  private pickZone(
+    pitch: number,
+    velocity: number,
+    drum?: 'kick' | 'snare' | 'hat',
+  ): LoadedZone | undefined {
+    const matchingKind = this.pack.zones.filter((zone) => drum ? zone.drum === drum : zone.drum === undefined);
+    if (matchingKind.length === 0) return undefined;
+    const matchingVelocity = matchingKind.filter((zone) =>
+      velocity >= (zone.minVelocity ?? 1) && velocity <= (zone.maxVelocity ?? 127));
+    const layered = matchingVelocity.length > 0 ? matchingVelocity : matchingKind;
+    const inRange = layered.filter((zone) => pitch >= zone.lowMidi && pitch <= zone.highMidi);
+    const candidates = inRange.length > 0 ? inRange : layered.filter((zone) => {
+      const nearest = Math.min(...layered.map((item) => Math.abs(item.rootMidi - pitch)));
+      return Math.abs(zone.rootMidi - pitch) === nearest;
+    });
+    if (candidates.length === 0) return undefined;
+    const key = `${drum ?? pitch}:${Math.floor(velocity / 16)}`;
+    const cursor = this.roundRobinCursor.get(key) ?? 0;
+    this.roundRobinCursor.set(key, cursor + 1);
+    return candidates[cursor % candidates.length];
   }
 
   private play(
@@ -123,33 +200,34 @@ class SampleInstrument implements PreparedInstrument {
       source.loopStart = zone.loop.startSec;
       source.loopEnd = zone.loop.endSec;
     }
-
     const gain = this.context.createGain();
-    const level = (Math.max(1, Math.min(127, velocity)) / 127) ** 1.6;
+    const level = (Math.max(1, Math.min(127, velocity)) / 127) ** 1.45;
     gain.gain.setValueAtTime(level, startSec);
 
     const naturalEnd = startSec + zone.buffer.duration / source.playbackRate.value;
-    const stopAt = heldSec === null ? naturalEnd : startSec + heldSec;
-    if (heldSec !== null) {
-      // 60 ms release so a gated sample does not click on note-off.
-      gain.gain.setValueAtTime(level, Math.max(startSec, stopAt - 0.06));
+    let stopAt = naturalEnd;
+    if (heldSec !== null && this.pack.playback.mode === 'gated') {
+      const noteOff = startSec + heldSec;
+      stopAt = Math.min(naturalEnd, noteOff + this.pack.playback.releaseSec);
+      gain.gain.setValueAtTime(level, noteOff);
+      gain.gain.linearRampToValueAtTime(0.0001, stopAt);
+    } else if (zone.loop && heldSec !== null) {
+      const noteOff = startSec + heldSec;
+      stopAt = noteOff + this.pack.playback.releaseSec;
+      gain.gain.setValueAtTime(level, noteOff);
       gain.gain.linearRampToValueAtTime(0.0001, stopAt);
     }
 
     source.connect(gain);
     gain.connect(destination);
     source.start(startSec);
-    source.stop(stopAt + 0.05);
+    source.stop(stopAt + 0.01);
     this.nodes.push(source);
   }
 
   dispose(): void {
     for (const node of this.nodes) {
-      try {
-        node.stop();
-      } catch {
-        // Already finished.
-      }
+      try { node.stop(); } catch { /* Already finished. */ }
     }
     this.nodes.length = 0;
   }
@@ -157,70 +235,84 @@ class SampleInstrument implements PreparedInstrument {
 
 export class SampleEngine implements SynthEngine {
   readonly id = 'sample';
-
   constructor(private readonly baseUrl = '/instruments') {}
 
-  supports(instrument: InstrumentDefinition): boolean {
-    return instrument.samplePack !== null;
-  }
+  supports(instrument: InstrumentDefinition): boolean { return instrument.samplePack !== null; }
 
   async prepare(
     instrument: InstrumentDefinition,
     context: BaseAudioContext,
     onProgress?: (fraction: number) => void,
   ): Promise<PreparedInstrument> {
-    if (instrument.samplePack === null) {
-      throw new AppError('instrument_load_failed', 'choose_other_instrument', 'no sample pack');
-    }
-    const zones = await this.loadPack(instrument, context, onProgress);
-    return new SampleInstrument(instrument.id, context, zones);
+    if (instrument.samplePack === null) throw appError('no sample pack');
+    const pack = await this.loadPack(instrument, context, onProgress);
+    return new SampleInstrument(instrument.id, context, pack);
   }
 
   private loadPack(
     instrument: InstrumentDefinition,
     context: BaseAudioContext,
     onProgress?: (fraction: number) => void,
-  ): Promise<LoadedZone[]> {
-    const cached = packCache.get(instrument.id);
+  ): Promise<LoadedPack> {
+    const packUrl = `${this.baseUrl}/${instrument.samplePack as string}`;
+    const cached = packCache.get(packUrl);
     if (cached) {
-      onProgress?.(1);
-      return cached;
+      onProgress?.(cached.progress);
+      if (onProgress && cached.progress < 1) cached.listeners.add(onProgress);
+      return cached.promise.finally(() => onProgress && cached.listeners.delete(onProgress));
     }
 
-    const promise = (async (): Promise<LoadedZone[]> => {
-      const packUrl = `${this.baseUrl}/${instrument.samplePack as string}`;
-      const manifestResponse = await fetch(packUrl);
-      if (!manifestResponse.ok) {
-        throw new AppError(
-          'instrument_load_failed',
-          'choose_other_instrument',
-          `manifest ${manifestResponse.status}`,
-        );
-      }
-      const manifest = (await manifestResponse.json()) as SampleManifest;
-      const directory = packUrl.slice(0, packUrl.lastIndexOf('/'));
+    const entry: CacheEntry = { progress: 0, listeners: new Set(), promise: Promise.resolve(null as never) };
+    if (onProgress) entry.listeners.add(onProgress);
+    const report = (fraction: number): void => {
+      entry.progress = Math.max(entry.progress, Math.min(1, fraction));
+      for (const listener of entry.listeners) listener(entry.progress);
+    };
 
-      const loaded: LoadedZone[] = [];
-      for (let i = 0; i < manifest.zones.length; i += 1) {
-        const zone = manifest.zones[i] as SampleZone;
+    entry.promise = (async () => {
+      const manifestResponse = await fetch(packUrl);
+      if (!manifestResponse.ok) throw appError(`manifest ${manifestResponse.status}`);
+      const manifest = validateSampleManifest(await manifestResponse.json(), instrument);
+      report(0.04);
+      const directory = packUrl.slice(0, packUrl.lastIndexOf('/'));
+      let finished = 0;
+      const zones = await mapWithConcurrency(manifest.zones, 6, async (zone) => {
         const response = await fetch(`${directory}/${zone.file}`);
-        if (!response.ok) {
-          throw new AppError(
-            'instrument_load_failed',
-            'choose_other_instrument',
-            `sample ${response.status}`,
-          );
-        }
+        if (!response.ok) throw appError(`sample ${response.status}`);
         const buffer = await context.decodeAudioData(await response.arrayBuffer());
-        loaded.push({ ...zone, buffer });
-        onProgress?.((i + 1) / manifest.zones.length);
-      }
-      return loaded;
+        finished += 1;
+        report(0.04 + (finished / manifest.zones.length) * 0.96);
+        return { ...zone, buffer };
+      });
+      return {
+        zones,
+        playback: manifest.playback ?? { mode: 'gated', releaseSec: 0.06 },
+      };
     })();
 
-    packCache.set(instrument.id, promise);
-    // A failed load must not poison the cache for the next attempt.
-    promise.catch(() => packCache.delete(instrument.id));
-    return promise;
+    packCache.set(packUrl, entry);
+    entry.promise.then(() => report(1)).catch(() => packCache.delete(packUrl)).finally(() => {
+      entry.listeners.clear();
+    });
+    return entry.promise;
   }
 }
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[], limit: number, mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(values[index] as T);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+  return results;
+}
+
+/** Test/dev hook; production retains decoded packs for the tab lifetime. */
+export function clearSampleCache(): void { packCache.clear(); }

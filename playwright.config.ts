@@ -50,9 +50,6 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000',
     trace: 'on-first-retry',
-    // Grants the permission so the flow can be driven past the prompt; the
-    // browser still has no real device, which the specs account for.
-    permissions: ['microphone'],
   },
 
   projects: [
@@ -62,7 +59,7 @@ export default defineConfig({
     // `docs/runbooks/manual-device-checks.md`.
     {
       name: 'capture',
-      testMatch: /capture\.spec\.ts/,
+      testMatch: /(?:capture|instruments)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: { args: FAKE_MEDIA_ARGS },
@@ -70,13 +67,13 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      testIgnore: /capture\.spec\.ts/,
+      testIgnore: /(?:capture|instruments)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
-    { name: 'firefox', testIgnore: /capture\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', testIgnore: /capture\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chrome', testIgnore: /capture\.spec\.ts/, use: { ...devices['Pixel 7'] } },
-    { name: 'mobile-safari', testIgnore: /capture\.spec\.ts/, use: { ...devices['iPhone 14'] } },
+    { name: 'firefox', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
+    { name: 'mobile-chrome', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-safari', testIgnore: /(?:capture|instruments)\.spec\.ts/, use: { ...devices['iPhone 14'] } },
   ],
 
   webServer: process.env.E2E_BASE_URL

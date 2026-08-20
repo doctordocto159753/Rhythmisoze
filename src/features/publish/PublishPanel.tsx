@@ -28,7 +28,7 @@ export interface PublishPanelProps {
   publishedId: string | null;
   shareUrl: string | null;
   onTitleChange(title: string): void;
-  onRender(): Promise<void> | void;
+  onRender(): Promise<Blob | null>;
   onStart(): void;
   onPublished(receipt: PublishReceipt): void;
   onUnpublished(): void;
@@ -82,8 +82,7 @@ export function PublishPanel({
     track('publish_started', { mode, instrument: instrumentId });
 
     try {
-      if (renderedAudio === null) await onRender();
-      const audio = renderedAudio;
+      const audio = renderedAudio ?? await onRender();
       if (audio === null) throw new AppError('publish_upload_failed', 'retry', 'no render');
 
       const instrument = getInstrument(instrumentId);

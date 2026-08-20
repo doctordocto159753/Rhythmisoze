@@ -21,7 +21,7 @@ export interface ExportPanelProps {
   drums: readonly DrumEvent[];
   renderedAudio: Blob | null;
   cleanupLabel: string;
-  onRender(): void | Promise<void>;
+  onRender(): Promise<Blob | null>;
   onError(error: unknown): void;
 }
 
@@ -73,8 +73,7 @@ export function ExportPanel({
     setBusy('wav');
     try {
       // Re-render only when the cached result was invalidated by a change.
-      if (renderedAudio === null) await onRender();
-      const blob = renderedAudio;
+      const blob = renderedAudio ?? await onRender();
       if (blob === null) return;
       download(blob, toSafeFilename(effectiveTitle, 'wav'));
       track('download_wav', { mode, instrument: instrumentId });

@@ -562,7 +562,7 @@ export function useCreationFlow(locale: Locale) {
   }, [refined, state.instrumentId, state.master, state.audio, stopPlayback, fail]);
 
   const render = useCallback(async () => {
-    if (!refined || state.audio === null) return;
+    if (!refined || state.audio === null) return null;
     stopPlayback();
     send('RENDER');
     track('render_started', { instrument: state.instrumentId });
@@ -580,9 +580,10 @@ export function useCreationFlow(locale: Locale) {
         channels.push(result.buffer.getChannelData(channel));
       }
       const wav = encodeWav(channels, { sampleRate: result.buffer.sampleRate });
+      const blob = new Blob([wav], { type: 'audio/wav' });
       dispatch({
         type: 'rendered',
-        blob: new Blob([wav], { type: 'audio/wav' }),
+        blob,
         ratio: result.realtimeRatio,
       });
       send('RENDER_DONE');
@@ -590,8 +591,10 @@ export function useCreationFlow(locale: Locale) {
         instrument: state.instrumentId,
         ratio: Number(result.realtimeRatio.toFixed(3)),
       });
+      return blob;
     } catch (error) {
       fail(error);
+      return null;
     }
   }, [refined, state.audio, state.instrumentId, state.master, send, stopPlayback, fail]);
 

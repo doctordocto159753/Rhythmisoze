@@ -44,7 +44,7 @@ an unanswered question.
 | D-1 | Spelling | **Rhythmisoze** / **ریتمیسوز** |
 | D-2 | Domain | `Rhythmisoze.behsazangame.info`. Misspelling redirects: **not answered**; the PRD's warning about the spelling stands unaddressed. |
 | D-3 | Tone | **Minimal and direct.** Applied in both catalogs: say the thing, offer the next action, stop. |
-| D-4 | Instrument direction | **Realistic / acoustic.** **Not met by the shipped default engine** — see ADR-002. |
+| D-4 | Instrument direction | **Realistic / acoustic.** Met by six recorded multisample instruments with procedural recovery; subjective listening validation remains open — see ADR-002. |
 
 ## E — Design
 
@@ -79,8 +79,8 @@ Collected in one place so they are not spread across four documents:
 
 1. **The architecture quality gate has not been run** (ADR-001). No corpus, no
    device measurements, no blinded listening comparison.
-2. **The instrument sounds are synthesised, not recorded** (ADR-002). Q-D4 asked
-   for realistic acoustic instruments.
+2. **The recorded-instrument listening panel has not been run** (ADR-002). Six
+   licensed sample packs ship, but subjective quality still needs human scores.
 3. **No privacy policy or terms** (Q-F2). The product collects almost nothing,
    which is a good position to write from, but the text does not exist.
 4. **No error monitoring** (Q-G3).

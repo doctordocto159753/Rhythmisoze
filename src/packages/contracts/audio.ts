@@ -98,6 +98,25 @@ export interface ProcessingDiagnostics {
   warnings: string[];
 }
 
+/**
+ * A faithfulness verdict, produced by `@musical-judge`.
+ *
+ * Deliberately structural rather than a bare number: a score with no account of
+ * what was wrong, or what was done about it, cannot be argued with.
+ */
+export interface JudgeVerdict {
+  /** Repaired notes. Equal to the candidate when nothing improved it. */
+  notes: NoteEvent[];
+  /** 0..1 faithfulness of the repaired notes. */
+  score: number;
+  /** 0..1 faithfulness of the candidate, before repair. */
+  scoreBefore: number;
+  /** Ordered, human-readable account of what was changed. */
+  repairs: string[];
+  unsupportedNotesRemoved: number;
+  octaveErrorsCorrected: number;
+}
+
 export interface TranscriptionResult {
   notes: NoteEvent[];
   /**
@@ -108,6 +127,14 @@ export interface TranscriptionResult {
   referenceNotes?: NoteEvent[];
   /** Present for Human Voice Melody Extraction results. */
   melodyQuality?: MelodyConfidence;
+  /**
+   * The Judge's verdict on `notes`, and its repair of them.
+   *
+   * Present only for the voice path, where a reference contour exists to judge
+   * against. `notes` above is always the untouched candidate: the repair lives
+   * here so the product can offer both without one overwriting the other.
+   */
+  judge?: JudgeVerdict;
   onsets?: OnsetEvent[];
   drums?: DrumEvent[];
   durationSec: number;

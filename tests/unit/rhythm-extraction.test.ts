@@ -192,26 +192,29 @@ describe('version planning', () => {
     expect(plan.map((version) => version.id)).toEqual([...VERSION_IDS]);
   });
 
-  it('builds Natural and Tight on the detected tempo, not the tapped one', () => {
+  it('builds every version on the detected tempo when one was heard', () => {
     const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
-    const natural = plan.find((version) => version.id === 'natural');
-    expect(natural?.tempoSource).toBe('detected');
-    expect(Math.abs((natural?.bpm ?? 0) - 96)).toBeLessThanOrEqual(3);
+    for (const version of plan) {
+      expect(version.tempoSource).toBe('detected');
+      expect(Math.abs(version.bpm - 96)).toBeLessThanOrEqual(3);
+    }
   });
 
-  it('keeps the tapped tempo available as Grid', () => {
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
-    const grid = plan.find((version) => version.id === 'grid');
-    expect(grid?.bpm).toBe(120);
-    expect(grid?.tempoSource).toBe('tapped');
-  });
-
-  it('never quantizes the Performed version', () => {
+  it('never quantizes or re-pitches the unprocessed version', () => {
     const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 100 });
-    const performed = plan.find((version) => version.id === 'performed');
-    // The whole promise: the original is preserved even at full cleanup.
-    expect(performed?.paramOverrides?.timingStrength).toBe(0);
-    expect(performed?.paramOverrides?.scaleSnapStrength).toBe(0);
+    const raw = plan.find((version) => version.id === 'unprocessed');
+    // The whole promise: the original survives even at full cleanup.
+    expect(raw?.paramOverrides?.timingStrength).toBe(0);
+    expect(raw?.paramOverrides?.scaleSnapStrength).toBe(0);
+    expect(raw?.amount).toBe(0);
+  });
+
+  it('leaves pitch alone in the Judge version', () => {
+    // The Judge answers "what did they play", not "what should it have been".
+    // Snapping to a scale there would be the Teacher's job done in the wrong
+    // place, and would make the faithfulness score unmeasurable.
+    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 100 });
+    expect(plan.find((v) => v.id === 'judge')?.paramOverrides?.scaleSnapStrength).toBe(0);
   });
 
   it('increases timing correction monotonically across the versions', () => {
@@ -229,12 +232,12 @@ describe('version planning', () => {
       expect(version.bpm).toBe(132);
       expect(version.tempoSource).toBe('tapped');
     }
-    // And the default becomes Grid, because there is no heard pulse to prefer.
-    expect(defaultVersion(sparse)).toBe('grid');
   });
 
-  it('defaults to Natural when the performance had a pulse', () => {
-    expect(defaultVersion(rhythm)).toBe('natural');
+  it('defaults to the Judge reading', () => {
+    // The most faithful account of what the person did is what they came to
+    // hear; the Teacher is a step they take, not one taken for them.
+    expect(defaultVersion(rhythm)).toBe('judge');
   });
 });
 

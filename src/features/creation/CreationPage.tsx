@@ -261,6 +261,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             activeVersionId={activeVersion?.id ?? null}
             rhythm={rhythm}
             tempoDisagreement={tempoDisagreement}
+            judge={state.judge}
             onVersionChange={actions.setVersion}
             refined={refined}
             rawNotes={state.rawNotes}

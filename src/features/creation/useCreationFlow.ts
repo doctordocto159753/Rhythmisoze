@@ -23,6 +23,7 @@ import {
   type CreationMode,
   type Locale,
   type LocalSourceAsset,
+  type JudgeVerdict,
   type MelodyConfidence,
   type Meter,
   type MonoAudio,
@@ -109,6 +110,8 @@ export interface FlowState {
   validation: AudioValidation | null;
 
   rawNotes: NoteEvent[];
+  /** The Judge's repair of `rawNotes`, and its verdict. Null outside the voice path. */
+  judge: JudgeVerdict | null;
   referenceNotes: NoteEvent[];
   rawDrums: RefineResult['drums'];
   diagnostics: ProcessingDiagnostics | null;
@@ -156,6 +159,7 @@ type Action =
   | { type: 'progress'; progress: TranscriptionProgress }
   | {
       type: 'transcribed';
+      judge: JudgeVerdict | null;
       notes: NoteEvent[];
       drums: RefineResult['drums'];
       diagnostics: ProcessingDiagnostics;
@@ -208,6 +212,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     durationSec: 0,
     validation: null,
     rawNotes: [],
+    judge: null,
     referenceNotes: [],
     rawDrums: [],
     diagnostics: null,
@@ -301,6 +306,7 @@ function reducer(state: FlowState, action: Action): FlowState {
       return {
         ...state,
         rawNotes: action.notes,
+        judge: action.judge,
         referenceNotes: action.referenceNotes,
         rawDrums: action.drums,
         diagnostics: action.diagnostics,
@@ -407,10 +413,11 @@ export function useCreationFlow(locale: Locale) {
         ? analyzeDrumRhythm(state.rawDrums, state.durationSec)
         : null;
     }
-    return state.rawNotes.length > 0
-      ? analyzeMelodyRhythm(state.rawNotes, state.durationSec)
-      : null;
-  }, [state.mode, state.rawNotes, state.rawDrums, state.durationSec]);
+    // Judged notes where available: a harmonic artifact and a fragmented note
+    // are not attacks, and letting them vote on the tempo skews it.
+    const notes = state.judge?.notes ?? state.rawNotes;
+    return notes.length > 0 ? analyzeMelodyRhythm(notes, state.durationSec) : null;
+  }, [state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
 
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
@@ -447,8 +454,17 @@ export function useCreationFlow(locale: Locale) {
     if (state.rawNotes.length === 0 && state.rawDrums.length === 0) return null;
     const instrument = resolveInstrument(state.instrumentId, state.mode);
     try {
+      // Which notes a version is built from is part of what the version *is*.
+      // Unprocessed shows the candidate exactly as it arrived; the Judge and
+      // the Teacher both build on the repaired reading, because tidying notes
+      // that still contain a harmonic artifact only produces a tidy mistake.
+      const sourceNotes =
+        activeVersion !== null && activeVersion.id !== 'unprocessed' && state.judge !== null
+          ? state.judge.notes
+          : state.rawNotes;
+
       return refine(
-        { notes: state.rawNotes, drums: state.rawDrums },
+        { notes: sourceNotes, drums: state.rawDrums },
         {
           // The version decides the tempo, which may be the one that was heard
           // rather than the one that was tapped.
@@ -483,6 +499,7 @@ export function useCreationFlow(locale: Locale) {
     state.instrumentId,
     sourceKind,
     activeVersion,
+    state.judge,
   ]);
 
   // --- Tempo -------------------------------------------------------------
@@ -562,6 +579,7 @@ export function useCreationFlow(locale: Locale) {
         dispatch({
           type: 'transcribed',
           notes: result.notes,
+          judge: result.judge ?? null,
           referenceNotes: result.referenceNotes ?? [],
           drums: result.drums ?? [],
           diagnostics: result.diagnostics,

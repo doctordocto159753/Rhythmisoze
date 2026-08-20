@@ -1,5 +1,6 @@
 'use client';
 
+import type { JudgeVerdict } from '@contracts';
 import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
 import type { TempoDisagreement } from '@rhythm-extraction';
 import { Row, Stack, Well } from '@/components/Layout';
@@ -12,6 +13,8 @@ export interface VersionPickerProps {
   activeId: VersionId | null;
   rhythm: PerformanceRhythm | null;
   disagreement: TempoDisagreement | null;
+  /** The Judge's verdict, shown against the reading it produced. */
+  judge: JudgeVerdict | null;
   onSelect(id: VersionId): void;
 }
 
@@ -36,6 +39,7 @@ export function VersionPicker({
   activeId,
   rhythm,
   disagreement,
+  judge,
   onSelect,
 }: VersionPickerProps) {
   const t = useMessages();
@@ -77,6 +81,16 @@ export function VersionPicker({
                 >
                   <span className={styles.name}>{t.versions.names[version.id]}</span>
                   <span className={styles.hint}>{t.versions.hints[version.id]}</span>
+                  {/* What the Judge actually did, against the reading it
+                      produced. A correction count with nothing behind it would
+                      be a claim; naming the repairs makes it checkable. */}
+                  {version.id === 'judge' && judge !== null ? (
+                    <span className={styles.repairs}>
+                      {judge.repairs.length === 0
+                        ? t.versions.judgeClean
+                        : t.versions.judgeRepaired(judge.repairs.length)}
+                    </span>
+                  ) : null}
                   {/* Tempo and its provenance, isolated so the Latin BPM value
                       cannot reorder the Persian sentence around it. */}
                   <span className={styles.tempo}>

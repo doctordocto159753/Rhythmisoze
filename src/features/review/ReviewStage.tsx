@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { MelodyConfidence, Meter, ProcessingDiagnostics } from '@contracts';
+import type { JudgeVerdict, MelodyConfidence, Meter, ProcessingDiagnostics } from '@contracts';
 import { RETOUCH_AMOUNT_MAX, RETOUCH_AMOUNT_MIN, pitchName, retouchLabel, type RefineResult } from '@retouch';
 import { getAudioContext } from '@audio-core';
 import { Button } from '@/components/Button';
@@ -21,6 +21,7 @@ export interface ReviewStageProps {
   activeVersionId: VersionId | null;
   rhythm: PerformanceRhythm | null;
   tempoDisagreement: TempoDisagreement | null;
+  judge: JudgeVerdict | null;
   onVersionChange(id: VersionId): void;
   refined: RefineResult;
   rawNotes: RefineResult['notes'];
@@ -55,6 +56,7 @@ export function ReviewStage({
   activeVersionId,
   rhythm,
   tempoDisagreement,
+  judge,
   onVersionChange,
   refined,
   rawNotes,
@@ -152,6 +154,7 @@ export function ReviewStage({
         activeId={activeVersionId}
         rhythm={rhythm}
         disagreement={tempoDisagreement}
+        judge={judge}
         onSelect={onVersionChange}
       />
 

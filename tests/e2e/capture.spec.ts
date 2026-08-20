@@ -200,7 +200,7 @@ test.describe('versions', () => {
    * what the music was. A performance is offered as several readings, and the
    * one the user played is always among them.
    */
-  test('a hummed take is offered as four interpretations', async ({ page }) => {
+  test('a hummed take is offered as three interpretations', async ({ page }) => {
     await page.goto('/en');
     await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
@@ -210,12 +210,12 @@ test.describe('versions', () => {
     });
 
     await expect(page.getByRole('heading', { name: /Interpretations/i })).toBeVisible();
-    for (const name of ['As performed', 'Natural', 'Tight', 'On the grid']) {
+    for (const name of ['Unprocessed', 'What you played', 'Tidied up']) {
       await expect(page.getByRole('button', { name: new RegExp(name, 'i') })).toBeVisible();
     }
   });
 
-  test('the tempo a version uses is stated, and Grid keeps the tapped one', async ({ page }) => {
+  test('every version states which tempo it uses and where that came from', async ({ page }) => {
     await page.goto('/en');
     await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
@@ -224,12 +224,13 @@ test.describe('versions', () => {
       timeout: 90_000,
     });
 
-    // The old behaviour survives as an explicit choice rather than as the law.
-    const grid = page.getByRole('button', { name: /On the grid/i });
-    await expect(grid).toContainText(/120/);
-    // And every option says where its tempo came from, so the app can never
-    // imply it heard a tempo it did not.
-    await expect(grid).toContainText(/your|heard/i);
+    // Every option says where its tempo came from, so the app can never imply
+    // it heard a pulse it did not.
+    for (const name of ['Unprocessed', 'What you played', 'Tidied up']) {
+      await expect(page.getByRole('button', { name: new RegExp(name, 'i') })).toContainText(
+        /your|heard/i,
+      );
+    }
   });
 
   test('choosing a version changes the result rather than only the label', async ({ page }) => {
@@ -244,15 +245,15 @@ test.describe('versions', () => {
     const noteCount = async (): Promise<string> =>
       (await page.getByText(/\d+ notes/).first().textContent()) ?? '';
 
-    await page.getByRole('button', { name: /As performed/i }).click();
-    await expect(page.getByRole('button', { name: /As performed/i })).toHaveAttribute(
+    await page.getByRole('button', { name: /Unprocessed/i }).click();
+    await expect(page.getByRole('button', { name: /Unprocessed/i })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
     const performed = await noteCount();
 
-    await page.getByRole('button', { name: /On the grid/i }).click();
-    await expect(page.getByRole('button', { name: /On the grid/i })).toHaveAttribute(
+    await page.getByRole('button', { name: /Tidied up/i }).click();
+    await expect(page.getByRole('button', { name: /Tidied up/i })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -272,6 +273,6 @@ test.describe('versions', () => {
 
     await expect(page.getByRole('heading', { name: /اسکچ تو/ })).toBeVisible({ timeout: 90_000 });
     await expect(page.getByRole('heading', { name: /برداشت‌ها/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /همان‌طور که اجرا کردی/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /همان چیزی که خواندی/ })).toBeVisible();
   });
 });

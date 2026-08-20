@@ -60,3 +60,10 @@
   color: var(--color-text-faint);
   font-variant-numeric: tabular-nums;
 }
+
+/* What the Judge corrected, shown only on the reading it produced. */
+.repairs {
+  margin-block-start: var(--space-1);
+  font-size: var(--text-micro);
+  color: var(--color-success);
+}

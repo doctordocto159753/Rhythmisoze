@@ -45,6 +45,9 @@
       "@intent": [
         "./src/packages/intent/index.ts"
       ],
+      "@musical-judge": [
+        "./src/packages/musical-judge/index.ts"
+      ],
       "@audio-core": [
         "./src/packages/audio-core/index.ts"
       ],

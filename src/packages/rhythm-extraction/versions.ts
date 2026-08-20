@@ -1,38 +1,46 @@
 /**
  * Performance versions.
  *
- * ## The rule this file enforces
- *
- * **The original human performance is never destroyed.** Every version is a
- * separate interpretation computed from the same untouched source, and the
- * source itself is always one of the options. Choosing "Grid" does not discard
- * "Natural"; it sits beside it.
- *
- * That is the whole answer to the tempo argument. The metronome no longer wins,
- * and neither does the detector — the user does, by ear, from a small set of
- * honestly labelled results:
+ * ## Three, and why exactly three
  *
  * ```
- * Performed        96 BPM   exactly as sung, artefacts removed
- * Natural          96 BPM   the performance's own pulse, lightly settled
- * Tight            96 BPM   the same pulse, timing pulled in
- * Grid            120 BPM   the tempo the user tapped, fully quantized
+ * Unprocessed   the transcription as it came out, nothing applied
+ * Judge         the most faithful reading of what the human actually did
+ * Teacher       the Judge's reading, made musically best-practice
  * ```
  *
- * Note that Natural and Tight share the *detected* tempo, and only Grid uses
- * the tapped one. If detection is unreliable, Grid is still offered and the
- * others fall back to the tapped tempo with `tempoSource: 'tapped'` recorded,
- * so the UI never claims a tempo was heard when it was not.
+ * The order is a pipeline, not a menu of independent effects. The Teacher works
+ * **on the Judge's output**, never on the raw candidate, because tidying a
+ * transcription that still contains a harmonic artifact or an octave slip just
+ * produces a tidy version of the wrong notes.
+ *
+ * ## Why the split is worth keeping strict
+ *
+ * The Judge is measurable. Its question — *did we understand the human?* — has a
+ * right answer that can be checked against onsets, pitches and offsets, so it
+ * can be benchmarked like any transcription system.
+ *
+ * The Teacher is aesthetic. Its question — *what would a music teacher fix?* —
+ * has no single right answer.
+ *
+ * Merging them would destroy the only property that makes the first half
+ * verifiable: we would no longer be able to tell whether the system understood
+ * the recording or merely made it prettier.
+ *
+ * ## The original is always available
+ *
+ * `unprocessed` is not a debug view. Someone who hummed something deliberately
+ * loose should be able to keep it, and every step away from it is offered
+ * rather than imposed.
  */
 
 import type { CreationMode, GridDivision } from '@contracts';
 import type { RetouchParams } from '@retouch';
-import { TEMPO_CONFIDENCE_FLOOR } from './tempo';
 import type { PerformanceRhythm } from './analyze';
 
-export type VersionId = 'performed' | 'natural' | 'tight' | 'grid';
+export type VersionId = 'unprocessed' | 'judge' | 'teacher';
 
-export const VERSION_IDS: readonly VersionId[] = ['performed', 'natural', 'tight', 'grid'];
+export const VERSION_IDS: readonly VersionId[] = ['unprocessed', 'judge', 'teacher'];
 
 export type TempoSource = 'detected' | 'tapped';
 
@@ -71,20 +79,21 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
   const performanceBpm = useDetected ? detected : tappedBpm;
   const tempoSource: TempoSource = useDetected ? 'detected' : 'tapped';
 
-  // How loose the performance actually was decides how much "Tight" has to do.
-  // A steady performer barely needs pulling in; a loose one needs more, and
-  // applying the same fixed strength to both is how a good take gets flattened.
+  // How loose the performance actually was decides how much the Teacher has to
+  // do. A steady performer barely needs pulling in; applying the same fixed
+  // strength to everyone is how a good take gets flattened.
   const looseness = 1 - rhythm.groove.steadiness;
-  const tightTiming = clamp01(0.45 + looseness * 0.45);
+  const teacherTiming = clamp01(0.55 + looseness * 0.45);
 
-  const recipes: VersionRecipe[] = [
+  return [
     {
-      // The reference point. Artefacts removed, nothing musical touched: no
-      // quantization, no scale snapping, no dynamics flattening.
-      id: 'performed',
+      // The transcription exactly as it arrived. No quantization, no scale
+      // snapping, no dynamics flattening - the reference point everything else
+      // is judged against.
+      id: 'unprocessed',
       bpm: performanceBpm,
       tempoSource,
-      amount: Math.min(amount, 18),
+      amount: 0,
       paramOverrides: {
         timingStrength: 0,
         scaleSnapStrength: 0,
@@ -92,55 +101,40 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
       },
     },
     {
-      // The performance's own pulse, with the timing only settled enough to
-      // remove tracking jitter rather than human feel.
-      id: 'natural',
+      // The Judge's repair, played at the performance's own pulse. Timing is
+      // barely touched: the Judge fixed *what* was played, and imposing a grid
+      // here would start answering a different question.
+      id: 'judge',
       bpm: performanceBpm,
       tempoSource,
-      amount,
+      amount: Math.min(amount, 30),
       paramOverrides: {
-        timingStrength: 0.2,
-        scaleSnapStrength: clamp01(amount / 100) * 0.5,
-        velocitySmoothing: 0.15,
+        timingStrength: 0.15,
+        scaleSnapStrength: 0,
+        velocitySmoothing: 0.1,
       },
     },
     {
-      id: 'tight',
+      // What a teacher would hand back: the same idea, put in time and in key.
+      id: 'teacher',
       bpm: performanceBpm,
       tempoSource,
-      amount,
+      amount: Math.max(amount, 60),
       paramOverrides: {
-        timingStrength: tightTiming,
-        scaleSnapStrength: clamp01(amount / 100) * 0.8,
-        velocitySmoothing: 0.4,
-      },
-    },
-    {
-      // Fully on the grid, at the tempo the user asked for. This is the old
-      // behaviour, now one option rather than the only one.
-      id: 'grid',
-      bpm: tappedBpm,
-      tempoSource: 'tapped',
-      amount: Math.max(amount, 70),
-      paramOverrides: {
-        timingStrength: 1,
-        velocitySmoothing: 0.6,
+        timingStrength: teacherTiming,
+        scaleSnapStrength: clamp01(amount / 100),
+        velocitySmoothing: 0.45,
       },
     },
   ];
-
-  return recipes;
 }
 
-/**
- * The version to select when the user has not chosen.
- *
- * "Natural" when the performance had a pulse worth keeping; "Grid" when it did
- * not, because a take with no detectable tempo is exactly the case where the
- * user's tapped grid is the more useful interpretation.
- */
-export function defaultVersion(rhythm: PerformanceRhythm): VersionId {
-  return rhythm.reliable ? 'natural' : 'grid';
+/** The version to select when the user has not chosen. */
+export function defaultVersion(_rhythm: PerformanceRhythm): VersionId {
+  // The Judge's reading is the honest default: it is the most faithful account
+  // of what the person actually did, which is what they came to hear. The
+  // Teacher is a step they choose to take, not one taken for them.
+  return 'judge';
 }
 
 /**
@@ -168,8 +162,6 @@ export function compareTempos(rhythm: PerformanceRhythm, tappedBpm: number): Tem
   }
   return { ...base, kind: 'different' };
 }
-
-export { TEMPO_CONFIDENCE_FLOOR };
 
 function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;

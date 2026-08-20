@@ -30,6 +30,8 @@ import {
 import { peakNormalize, resample } from '@/packages/audio-core/normalize';
 import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
+import { detectOnsets } from '@/packages/audio-core/onsets';
+import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
 
 export interface TranscribeRequest {
   type: 'transcribe';
@@ -216,12 +218,41 @@ function runVoiceMelody(
     segmentation: { minDurationSec: request.minNoteLengthSec },
   });
   throwIfCancelled(request.id);
-  post({ type: 'progress', id: request.id, stage: 'collecting', progress: 0.9 });
+  post({ type: 'progress', id: request.id, stage: 'collecting', progress: 0.86 });
+
+  // The Judge runs here, in the worker, and reuses the contour the melody
+  // engine has already produced. Re-tracking the fundamental purely to check it
+  // would roughly double the wait for no extra information.
+  const judgeFeatures = judgeFeaturesFromFrames(
+    extraction.frames,
+    audio.durationSec,
+    detectOnsets(audio.samples, audio.sampleRate).onsets.map((onset) => onset.timeSec),
+  );
+  const verdict = judgeAndRepair(extraction.notes, judgeFeatures);
+  throwIfCancelled(request.id);
+
   post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
   return {
+    // The candidate is returned untouched; the repair travels beside it.
     notes: extraction.notes,
     referenceNotes: extraction.notes.map((note) => ({ ...note })),
     melodyQuality: extraction.quality,
+    judge: {
+      notes: verdict.judgedNotes,
+      score: verdict.judgedScore.overall,
+      scoreBefore: verdict.originalScore.overall,
+      repairs: verdict.repairs.map((step) => step.description),
+      unsupportedNotesRemoved: Math.max(
+        0,
+        verdict.originalScore.diagnostics.unsupportedNotes -
+          verdict.judgedScore.diagnostics.unsupportedNotes,
+      ),
+      octaveErrorsCorrected: Math.max(
+        0,
+        verdict.originalScore.diagnostics.octaveMismatches -
+          verdict.judgedScore.diagnostics.octaveMismatches,
+      ),
+    },
     durationSec: audio.durationSec,
     diagnostics: {
       transcriberId: 'melody-extraction',

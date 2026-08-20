@@ -1,0 +1,77 @@
+/**
+ * D-0401 - the processing figure.
+ *
+ * Fourteen marks scattered above a line, each moving toward the line in
+ * proportion to real progress. It is the product's core transformation - a
+ * loose gesture becoming ordered material - at the one moment the user has
+ * nothing to do but watch.
+ *
+ * `--settle` is set per mark from the actual reported progress. There is no
+ * `animation` here at all: if inference stalls, the picture stalls, which is
+ * the honest thing for it to do.
+ */
+
+.field {
+  position: relative;
+  inline-size: 100%;
+  max-inline-size: 26rem;
+  block-size: 5rem;
+  /* Physical direction: this figure is about time and order, not about reading. */
+  direction: ltr;
+}
+
+.mark {
+  position: absolute;
+  inline-size: 3px;
+  block-size: 3px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-processing);
+
+  /* `--scatter-x` and `--scatter-y` are set inline from a deterministic
+   * formula rather than computed here: CSS `mod()` is not available everywhere
+   * in the supported browser matrix, and a scatter that silently collapses to
+   * a diagonal on one browser is a visual regression nobody would notice. */
+  left: var(--scatter-x);
+  top: calc(var(--scatter-y) * (1 - var(--settle)) + 78% * var(--settle));
+  opacity: calc(0.35 + 0.65 * var(--settle));
+  transform: scale(calc(1 + var(--settle) * 1.6));
+  transition:
+    top var(--motion-settle) var(--ease-out),
+    opacity var(--motion-settle) linear,
+    transform var(--motion-settle) var(--ease-out);
+}
+
+.line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 79%;
+  block-size: 1px;
+  background-color: var(--color-processing);
+  opacity: 0.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    transition: none;
+  }
+}
+
+/* --- The progress bar --- */
+
+.barTrack {
+  inline-size: 100%;
+  max-inline-size: 26rem;
+  block-size: 6px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-line-strong);
+  overflow: hidden;
+  direction: ltr;
+}
+
+.barFill {
+  block-size: 100%;
+  background-color: var(--color-processing);
+  border-radius: var(--radius-pill);
+  transition: inline-size var(--motion-settle) var(--ease-out);
+}

@@ -1,0 +1,21 @@
+{
+  "generatedBy": "scripts/generate-golden-fixtures.py",
+  "reference": "reference/humtool.py",
+  "divisions": [
+    2,
+    4,
+    8
+  ],
+  "cases": [
+    "clean-melody",
+    "duplicate-onsets",
+    "empty",
+    "half-step-rounding",
+    "human-timing",
+    "octave-errors",
+    "off-key",
+    "percussion",
+    "single-note",
+    "sparse"
+  ]
+}

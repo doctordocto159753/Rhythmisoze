@@ -1,0 +1,120 @@
+/**
+ * The global frame: a thin masthead, the stage, a quiet footer.
+ *
+ * Deliberately not a dashboard shell. No sidebar, no persistent navigation
+ * rail, no breadcrumb - the product is one instrument with two pages, and a
+ * chrome heavier than that would be lying about its complexity (D-0201).
+ */
+
+.frame {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 100dvh;
+}
+
+.masthead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  padding-inline: var(--space-5);
+  background-color: color-mix(in srgb, var(--color-canvas) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-block-end: var(--border-hairline) solid var(--color-line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-strong);
+  font-size: var(--text-body);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+/**
+ * The mark: three strokes at three heights - a gesture becoming pitch.
+ * It is the same relationship the piano roll and the level meter use, at the
+ * smallest scale the system has (art-direction skill: motifs recur with
+ * variation rather than being copy-pasted).
+ */
+.mark {
+  display: block;
+  inline-size: 1.375rem;
+  block-size: 1.375rem;
+  color: var(--color-accent);
+  flex: none;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.navLink {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color var(--motion-quick) var(--ease-out),
+    background-color var(--motion-quick) var(--ease-out);
+}
+
+.navLink:hover {
+  color: var(--color-text);
+  background-color: var(--color-well);
+}
+
+.navLinkActive {
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.main {
+  flex: 1 1 auto;
+  padding-block: var(--space-6) var(--space-8);
+}
+
+.footer {
+  padding-block: var(--space-5);
+  padding-inline: var(--space-5);
+  border-block-start: var(--border-hairline) solid var(--color-line);
+  font-size: var(--text-micro);
+  color: var(--color-text-faint);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.privacyNote {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-success);
+  flex: none;
+}
+
+@media (max-width: 40rem) {
+  .masthead {
+    padding-inline: var(--space-4);
+  }
+
+  .main {
+    padding-block: var(--space-5) var(--space-7);
+  }
+}

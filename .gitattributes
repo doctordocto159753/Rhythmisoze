@@ -1,0 +1,17 @@
+# Normalise line endings so a Windows and a Linux checkout produce identical
+# diffs. Without this, CI on Ubuntu re-writes every file the first time it
+# touches one, and the golden-fixture diff job reports a change that is nothing
+# but CRLF.
+* text=auto eol=lf
+
+# Binary: never normalised, never diffed as text.
+*.bin  binary
+*.wav  binary
+*.mid  binary
+*.png  binary
+*.woff2 binary
+
+# The golden fixtures are generated. Marking them keeps `git diff` readable and
+# stops a reviewer being asked to read 900 lines of regenerated JSON.
+tests/fixtures/golden/*.json linguist-generated=true
+package-lock.json           linguist-generated=true

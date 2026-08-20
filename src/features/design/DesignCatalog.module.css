@@ -1,0 +1,75 @@
+/**
+ * The catalog's own layout. Intentionally plain: it is a reference sheet, and
+ * anything expressive here would compete with the components it exists to show.
+ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block-end: var(--space-6);
+  border-block-end: var(--border-hairline) solid var(--color-line);
+}
+
+.sectionTitle {
+  font-size: var(--text-heading);
+  font-weight: var(--weight-strong);
+  color: var(--color-text-muted);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-3);
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-micro);
+}
+
+.chip {
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border-radius: var(--radius-sm);
+  border: var(--border-hairline) solid var(--color-line-strong);
+  flex: none;
+}
+
+.swatchName {
+  font-weight: var(--weight-medium);
+}
+
+.swatchToken {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.registry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-micro);
+}
+
+.registryRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 1fr) 5rem 6rem 6rem;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-end: var(--border-hairline) solid var(--color-line);
+}
+
+.registryRow code {
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 46rem) {
+  .registryRow {
+    grid-template-columns: 1fr 1fr;
+  }
+}

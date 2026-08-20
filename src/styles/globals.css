@@ -1,0 +1,180 @@
+/**
+ * Global base. Everything else is a CSS Module scoped to one component.
+ *
+ * Layout uses logical properties throughout - `inline-start`, `margin-inline`,
+ * `padding-block` - so Persian is a genuine RTL layout rather than a mirrored
+ * English one. `left`/`right` should not appear anywhere in this codebase
+ * except where a value is genuinely physical (a canvas coordinate, the time
+ * axis of the piano roll).
+ */
+
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/vazirmatn/index.css';
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  /* The app is a single stage; page scrolling is a fallback, not the medium. */
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  min-block-size: 100dvh;
+  background-color: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  font-weight: var(--weight-regular);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.012em;
+}
+
+:root[lang='fa'] h1,
+:root[lang='fa'] h2,
+:root[lang='fa'] h3,
+:root[lang='fa'] h4 {
+  /* Persian letterforms are already tightly fitted; negative tracking smudges
+   * the joins between letters. */
+  letter-spacing: 0;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+img,
+canvas,
+svg {
+  display: block;
+  max-inline-size: 100%;
+}
+
+/**
+ * Focus is part of the visual system, not an afterthought (D-0901).
+ * Two rings - one in the focus colour, one in the ground - so it stays visible
+ * on the canvas, on a well and on the brass accent alike.
+ */
+:focus-visible {
+  outline: var(--border-firm) solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/** Numerals that must align in a column. */
+.numeric {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/** Visually hidden but announced. Used for live regions and canvas summaries. */
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/** Skip link: visible only once focused, then anchored to the block start. */
+.skip-link {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-start: var(--space-2);
+  z-index: var(--z-toast);
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-raised);
+  border: var(--border-hairline) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  transform: translateY(-200%);
+  transition: transform var(--motion-quick) var(--ease-out);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+::selection {
+  background-color: var(--color-accent-wash);
+  color: var(--color-text);
+}
+
+/**
+ * The stage: one column, centred, that every screen composes inside.
+ * Named for what it is rather than as a generic `.container`, because there is
+ * exactly one and its proportions are part of the design.
+ */
+.stage {
+  inline-size: min(100% - var(--space-5) * 2, var(--stage-width));
+  margin-inline: auto;
+}
+
+.stage-wide {
+  inline-size: min(100% - var(--space-5) * 2, var(--stage-width-wide));
+  margin-inline: auto;
+}

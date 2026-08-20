@@ -1,0 +1,87 @@
+/**
+ * The review composition.
+ *
+ * One vertical sequence: what the app heard, how much to tidy it, what to play
+ * it on. The order is the order of the decisions, and nothing is hidden behind
+ * a tab - a non-musician should not have to discover the cleanup control.
+ */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-block-end: var(--border-hairline) solid var(--color-well-line);
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-block-start: var(--border-hairline) solid var(--color-well-line);
+}
+
+.counts {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+.keyBadge {
+  margin-inline-start: auto;
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+.keyUnknown {
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+
+/* Persian has no italic tradition; a synthesised oblique looks like a rendering
+ * fault rather than an emphasis. */
+:global(:root[lang='fa']) .keyUnknown {
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.detail {
+  margin-block-start: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3) var(--space-5);
+}
+
+.detailRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block-end: var(--space-2);
+  border-block-end: var(--border-hairline) solid var(--color-line);
+}
+
+.detailLabel {
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+}
+
+.detailValue {
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+}
+
+@media (max-width: 40rem) {
+  .header,
+  .transport {
+    padding-inline: var(--space-4);
+  }
+
+  .keyBadge {
+    margin-inline-start: 0;
+    inline-size: 100%;
+  }
+}

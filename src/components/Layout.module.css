@@ -1,0 +1,107 @@
+/**
+ * D-0103 / D-0104 - spatial and surface primitives.
+ *
+ * There is no `Card`. The design package prohibits card-everything composition,
+ * and a generic card is how it happens. What exists instead:
+ *  - `well`   a recess in the ground, for grouped controls;
+ *  - `raised` the single lifted plane, reserved for the focal object;
+ *  - `stack` / `row` pure layout, no decoration at all.
+ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gap1 { gap: var(--space-1); }
+.gap2 { gap: var(--space-2); }
+.gap3 { gap: var(--space-3); }
+.gap4 { gap: var(--space-4); }
+.gap5 { gap: var(--space-5); }
+.gap6 { gap: var(--space-6); }
+.gap7 { gap: var(--space-7); }
+
+.alignStart { align-items: flex-start; }
+.alignCenter { align-items: center; }
+.alignStretch { align-items: stretch; }
+.justifyBetween { justify-content: space-between; }
+.justifyCenter { justify-content: center; }
+.justifyEnd { justify-content: flex-end; }
+.wrapNone { flex-wrap: nowrap; }
+.grow { flex: 1 1 auto; min-inline-size: 0; }
+
+/* A recess: the ground steps down, bounded by a hairline, never a shadow. */
+.well {
+  background-color: var(--color-well);
+  border: var(--border-hairline) solid var(--color-well-line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+
+.wellTight {
+  padding: var(--space-4);
+}
+
+.wellFlush {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* The focal plane. One per screen (invariant 2). */
+.raised {
+  background-color: var(--color-raised);
+  border: var(--border-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lift);
+  padding: var(--space-6);
+}
+
+/* Tone variants for state, applied to a well rather than to arbitrary elements
+ * so status colour always arrives with a surface behind it. */
+.toneRecording {
+  background-color: var(--color-recording-wash);
+  border-color: color-mix(in srgb, var(--color-recording) 28%, transparent);
+}
+
+.toneProcessing {
+  background-color: var(--color-processing-wash);
+  border-color: color-mix(in srgb, var(--color-processing) 28%, transparent);
+}
+
+.toneSuccess {
+  background-color: var(--color-success-wash);
+  border-color: color-mix(in srgb, var(--color-success) 28%, transparent);
+}
+
+.toneDanger {
+  background-color: var(--color-danger-wash);
+  border-color: color-mix(in srgb, var(--color-danger) 32%, transparent);
+}
+
+.toneAccent {
+  background-color: var(--color-accent-wash);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* A hairline divider that respects the inline axis rather than assuming LTR. */
+.divider {
+  border: none;
+  border-block-start: var(--border-hairline) solid var(--color-line);
+  margin-block: var(--space-5);
+}
+
+@media (max-width: 40rem) {
+  .well {
+    padding: var(--space-4);
+  }
+
+  .raised {
+    padding: var(--space-5);
+  }
+}

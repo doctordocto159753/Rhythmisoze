@@ -1,0 +1,62 @@
+{
+  "name": "empty",
+  "bpm": 90,
+  "mode": "pitched",
+  "input": [],
+  "stripOctaveErrors": {
+    "kept": [],
+    "dropped": 0
+  },
+  "estimateTempo": {
+    "bpm": 80.0,
+    "gridError": 1.0
+  },
+  "detectKey": {
+    "root": "D",
+    "mode": "minor",
+    "confidence": 0.0
+  },
+  "quantize": {
+    "2": {
+      "notes": [],
+      "stepSec": 0.3333333333333333
+    },
+    "4": {
+      "notes": [],
+      "stepSec": 0.16666666666666666
+    },
+    "8": {
+      "notes": [],
+      "stepSec": 0.08333333333333333
+    }
+  },
+  "snapToScale": {
+    "2": {
+      "notes": [],
+      "moved": 0
+    },
+    "4": {
+      "notes": [],
+      "moved": 0
+    },
+    "8": {
+      "notes": [],
+      "moved": 0
+    }
+  },
+  "percussionMap": {
+    "2": [],
+    "4": [],
+    "8": []
+  },
+  "report": {
+    "2": null,
+    "4": null,
+    "8": null
+  },
+  "gridView": {
+    "2": "",
+    "4": "",
+    "8": ""
+  }
+}

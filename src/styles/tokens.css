@@ -1,0 +1,299 @@
+/**
+ * D-0102 / D-0103 / D-0105 - the token layer.
+ *
+ * ============================================================================
+ * VISUAL THESIS (D-0002)
+ *
+ * Rhythmisoze should feel like a tuned wooden object on a workbench under warm
+ * light. Not a dashboard, not a DAW, not a neon visualiser.
+ *
+ * Five invariants that survive both locales and every breakpoint:
+ *
+ *  1. ONE GROUND. A single warm paper field runs edge to edge. Panels are
+ *     recessed or lifted *within* it; nothing floats on a separate background.
+ *     This is why there is no generic card token.
+ *  2. ONE FOCAL OBJECT. Each stage has exactly one thing that is largest and
+ *     warmest - the tap pad, the record control, the sketch. Everything else
+ *     steps back.
+ *  3. TIME RUNS ALONG ONE AXIS. The pulse, the waveform, the piano roll and the
+ *     playhead all read left-to-right, in both locales. Text direction flips;
+ *     time does not (Playbook 11).
+ *  4. WARMTH MEANS SOUND. The brass accent appears only where audio is being
+ *     made or heard. A button that does not touch audio never uses it.
+ *  5. STILLNESS IS THE DEFAULT. Motion happens on musical events, not
+ *     continuously. Nothing loops for decoration.
+ *
+ * Anti-directions, from the design package: no SaaS card grid, no DAW transport
+ * chrome, no purple-blue AI gradient, no neon, no glassmorphism, no floating
+ * blob, no motion competing with tempo.
+ * ============================================================================
+ *
+ * Rules for this file:
+ *  - Tokens are named for meaning, never for their value. `--color-recording`,
+ *    not `--color-red`.
+ *  - Product components use these and nothing else. A raw hex in a component is
+ *    a bug.
+ *  - Spacing follows one scale. A one-off value needs a recorded reason.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- Palette primitives. Referenced only by the semantic tokens below. --- */
+  --paper-50: #faf7f2;
+  --paper-100: #f3eee5;
+  --paper-200: #e8e0d3;
+  --paper-300: #d9cfbe;
+
+  --ink-900: #1b1815;
+  --ink-700: #3c3630;
+  --ink-500: #6b6157;
+  --ink-300: #9a8f83;
+
+  --brass-600: #a8720f;
+  --brass-500: #c98a1b;
+  --brass-300: #e8bc6a;
+  --brass-100: #f7e7c6;
+
+  --clay-600: #a83a28;
+  --clay-500: #c8492f;
+  --clay-100: #f6ded8;
+
+  --indigo-600: #34467a;
+  --indigo-500: #4a5f9e;
+  --indigo-100: #dfe4f2;
+
+  --moss-600: #3f6b48;
+  --moss-100: #dcebde;
+
+  /* --- Ground and surface (invariant 1) --- */
+  --color-canvas: var(--paper-50);
+  --color-canvas-deep: var(--paper-100);
+  /* A recessed well: panels sit *in* the ground, not on top of it. */
+  --color-well: var(--paper-100);
+  --color-well-line: var(--paper-200);
+  /* The one surface allowed to lift, reserved for the focal object. */
+  --color-raised: #fffdf9;
+  --color-line: var(--paper-200);
+  --color-line-strong: var(--paper-300);
+
+  /* --- Text --- */
+  --color-text: var(--ink-900);
+  --color-text-muted: var(--ink-500);
+  --color-text-faint: var(--ink-300);
+  --color-text-inverse: var(--paper-50);
+
+  /* --- Musical state (invariant 4) --- */
+  --color-accent: var(--brass-600);
+  --color-accent-soft: var(--brass-300);
+  --color-accent-wash: var(--brass-100);
+  --color-recording: var(--clay-600);
+  --color-recording-wash: var(--clay-100);
+  --color-processing: var(--indigo-600);
+  --color-processing-wash: var(--indigo-100);
+  --color-success: var(--moss-600);
+  --color-success-wash: var(--moss-100);
+  --color-danger: var(--clay-600);
+  --color-danger-wash: var(--clay-100);
+
+  /* Raw vs cleaned: the two ends of the one control the product has. */
+  --color-raw: var(--ink-300);
+  --color-clean: var(--indigo-500);
+
+  --color-focus: var(--indigo-600);
+
+  /* --- Typography ---
+   * Two families, chosen so neither script is a fallback (D-0101).
+   * Vazirmatn is a contemporary Persian face with real weights and correct
+   * ZWNJ behaviour; Inter carries the Latin. Both are OFL-1.1 and self-hosted,
+   * so there is no third-party request and the CSP stays closed. */
+  --font-latin: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-persian: 'Vazirmatn Variable', 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+  --font-body: var(--font-latin);
+  /* Numerals that must line up in a column: BPM, timers, note names. */
+  --font-numeric: var(--font-latin);
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+
+  --text-display: 3.25rem;
+  --text-title: 1.75rem;
+  --text-heading: 1.25rem;
+  --text-body: 1rem;
+  --text-label: 0.875rem;
+  --text-micro: 0.75rem;
+  /* The BPM readout and the timer are read as instruments, not as prose. */
+  --text-readout: 2.5rem;
+
+  --leading-tight: 1.18;
+  --leading-body: 1.6;
+  /* Persian ascenders and descenders need more room than Latin at the same size. */
+  --leading-persian: 1.85;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 650;
+
+  /* --- Space. One scale, tuned to a 4 px base with a musical widening. --- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  --space-9: 6rem;
+
+  /* --- Shape. Sparingly: the material vocabulary is line and recess, not
+   * rounded rectangles everywhere (D-0104). --- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --border-hairline: 1px;
+  --border-firm: 2px;
+
+  /* Depth is used twice in the whole product: the focal object and an overlay. */
+  --shadow-lift: 0 1px 2px rgb(27 24 21 / 0.05), 0 6px 24px -8px rgb(27 24 21 / 0.14);
+  --shadow-overlay: 0 12px 48px -12px rgb(27 24 21 / 0.28);
+  --shadow-inset: inset 0 1px 2px rgb(27 24 21 / 0.06);
+
+  /* --- Motion (D-0105) ---
+   * Durations are named for what they express, not for their length. The
+   * tempo-linked ones are set from the audio clock at runtime by
+   * `--beat-duration`; nothing here loops on its own. */
+  --motion-instant: 90ms;
+  --motion-quick: 160ms;
+  --motion-settle: 280ms;
+  --motion-stage: 420ms;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.2, 1);
+  /* For anything that must land exactly on a beat: no overshoot, no anticipation.
+   * Easing that makes a beat land late is called out as an anti-pattern in the
+   * interaction-motion skill, so tempo-locked motion uses this and only this. */
+  --ease-beat: cubic-bezier(0.15, 0.9, 0.25, 1);
+
+  /* Set from the audio clock; the default is a placeholder for 100 BPM. */
+  --beat-duration: 600ms;
+
+  /* --- Layout --- */
+  --measure-text: 62ch;
+  --stage-width: 44rem;
+  --stage-width-wide: 62rem;
+
+  /* --- Z --- */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-overlay: 100;
+  --z-toast: 200;
+}
+
+/* Persian swaps the body face and loosens the line box. Note that the numeric
+ * face does not change: BPM and note names stay Latin in both locales, because
+ * they are identifiers a user compares against other tools. */
+:root[lang='fa'] {
+  --font-body: var(--font-persian);
+  --leading-body: var(--leading-persian);
+  --text-display: 3rem;
+  --text-readout: 2.4rem;
+}
+
+/**
+ * Reduced motion is designed, not merely disabled (D-0901).
+ *
+ * State changes still read: transitions collapse to a near-instant crossfade so
+ * the interface never appears to jump without cause, and the beat pulse becomes
+ * a static change of weight rather than a scale.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 1ms;
+    --motion-quick: 1ms;
+    --motion-settle: 1ms;
+    --motion-stage: 1ms;
+  }
+}
+
+/**
+ * Dark is a deliberate, restrained inversion, not a second design.
+ *
+ * Q-E2 chose light as the primary creation environment, so this exists to keep
+ * the product usable for someone whose whole system is dark rather than to be a
+ * showcase. The same five invariants hold: one ground, one focal object, warmth
+ * only where sound is.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-canvas: #17150f;
+    --color-canvas-deep: #100e0a;
+    --color-well: #1f1c15;
+    --color-well-line: #2c2820;
+    --color-raised: #262218;
+    --color-line: #2f2b22;
+    --color-line-strong: #40392d;
+
+    --color-text: #f2ece0;
+    --color-text-muted: #b0a698;
+    --color-text-faint: #7d7365;
+    --color-text-inverse: #17150f;
+
+    --color-accent: var(--brass-300);
+    --color-accent-soft: var(--brass-500);
+    --color-accent-wash: #3a2c12;
+    --color-recording: #e8705a;
+    --color-recording-wash: #3a1c16;
+    --color-processing: #8fa3d8;
+    --color-processing-wash: #1c2136;
+    --color-success: #86bf92;
+    --color-success-wash: #16281a;
+    --color-danger: #e8705a;
+    --color-danger-wash: #3a1c16;
+    --color-raw: #7d7365;
+    --color-clean: #8fa3d8;
+    --color-focus: #8fa3d8;
+
+    --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 24px -8px rgb(0 0 0 / 0.6);
+    --shadow-overlay: 0 12px 48px -12px rgb(0 0 0 / 0.7);
+    --shadow-inset: inset 0 1px 2px rgb(0 0 0 / 0.3);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-canvas: #17150f;
+  --color-canvas-deep: #100e0a;
+  --color-well: #1f1c15;
+  --color-well-line: #2c2820;
+  --color-raised: #262218;
+  --color-line: #2f2b22;
+  --color-line-strong: #40392d;
+
+  --color-text: #f2ece0;
+  --color-text-muted: #b0a698;
+  --color-text-faint: #7d7365;
+  --color-text-inverse: #17150f;
+
+  --color-accent: var(--brass-300);
+  --color-accent-soft: var(--brass-500);
+  --color-accent-wash: #3a2c12;
+  --color-recording: #e8705a;
+  --color-recording-wash: #3a1c16;
+  --color-processing: #8fa3d8;
+  --color-processing-wash: #1c2136;
+  --color-success: #86bf92;
+  --color-success-wash: #16281a;
+  --color-danger: #e8705a;
+  --color-danger-wash: #3a1c16;
+  --color-raw: #7d7365;
+  --color-clean: #8fa3d8;
+  --color-focus: #8fa3d8;
+
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 24px -8px rgb(0 0 0 / 0.6);
+  --shadow-overlay: 0 12px 48px -12px rgb(0 0 0 / 0.7);
+  --shadow-inset: inset 0 1px 2px rgb(0 0 0 / 0.3);
+}

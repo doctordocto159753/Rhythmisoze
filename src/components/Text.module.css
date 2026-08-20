@@ -1,0 +1,102 @@
+/**
+ * D-0101 - the type scale, and the pieces that keep mixed-direction text stable.
+ */
+
+.display {
+  font-size: var(--text-display);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.title {
+  font-size: var(--text-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+.heading {
+  font-size: var(--text-heading);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+
+.body {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  max-inline-size: var(--measure-text);
+}
+
+.label {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}
+
+.micro {
+  font-size: var(--text-micro);
+  color: var(--color-text-faint);
+  line-height: 1.5;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+/**
+ * The readout: BPM, timers, note names.
+ *
+ * Always Latin digits with tabular figures in both locales. A running timer
+ * that changes width as it counts, or that switches numeral systems mid-flow,
+ * reads as unstable - and these are measurements the user compares against a
+ * metronome app or a DAW.
+ */
+.readout {
+  font-family: var(--font-numeric);
+  font-size: var(--text-readout);
+  font-weight: var(--weight-strong);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  /* Forces LTR for the number itself even inside an RTL paragraph. */
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.readoutSmall {
+  font-size: var(--text-heading);
+}
+
+.unit {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+}
+
+/**
+ * Bidi isolation for a Latin fragment inside Persian prose, or the reverse.
+ * `<bdi>` already isolates; the class exists so numeric fragments also get
+ * tabular figures without a second wrapper.
+ */
+.bdi {
+  font-variant-numeric: tabular-nums;
+}
+
+.stageLabel {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+/* Persian does not have letter case; uppercase transforms and wide tracking do
+ * nothing there but break the joins. */
+:global(:root[lang='fa']) .stageLabel {
+  text-transform: none;
+  letter-spacing: 0;
+}

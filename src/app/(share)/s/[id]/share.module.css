@@ -1,0 +1,168 @@
+/**
+ * D-0604 - the share page.
+ *
+ * One card, centred, player above the fold on a phone. The brand is present and
+ * permanent (PRD 6.6) but never louder than the thing the visitor came to hear.
+ */
+
+.page {
+  min-block-size: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-5);
+  background-color: var(--color-canvas);
+}
+
+.card {
+  inline-size: min(100%, 30rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background-color: var(--color-raised);
+  border: var(--border-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lift);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mark {
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  color: var(--color-accent);
+}
+
+.brand {
+  font-size: var(--text-label);
+  font-weight: var(--weight-strong);
+  letter-spacing: -0.01em;
+}
+
+.title {
+  font-size: var(--text-title);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+  /* A user-supplied title of any script sets its own direction. */
+  unicode-bidi: isolate;
+}
+
+.meta {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+/* --- Player --- */
+
+.player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-start: var(--space-2);
+}
+
+.playButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 3.25rem;
+  block-size: 3.25rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-text);
+  color: var(--color-text-inverse);
+  transition: background-color var(--motion-quick) var(--ease-out);
+}
+
+.playButton:hover {
+  background-color: var(--ink-700);
+}
+
+/* A triangle drawn with borders: no icon font, no extra request. */
+.playGlyph {
+  inline-size: 0;
+  block-size: 0;
+  margin-inline-start: 3px;
+  border-block-start: 9px solid transparent;
+  border-block-end: 9px solid transparent;
+  border-inline-start: 14px solid currentColor;
+}
+
+.pauseGlyph {
+  inline-size: 14px;
+  block-size: 16px;
+  border-inline-start: 4px solid currentColor;
+  border-inline-end: 4px solid currentColor;
+}
+
+/* Time runs left to right regardless of the page's text direction. */
+.progressTrack {
+  flex: 1 1 auto;
+  block-size: 6px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-line-strong);
+  overflow: hidden;
+  direction: ltr;
+}
+
+.progressFill {
+  block-size: 100%;
+  background-color: var(--color-accent);
+  transition: inline-size 120ms linear;
+}
+
+.duration {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+  direction: ltr;
+}
+
+.download {
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+  align-self: flex-start;
+}
+
+/* --- CTA (E-06): strong, and clearly after the listening. --- */
+
+.cta {
+  inline-size: min(100%, 30rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: var(--border-hairline) solid var(--color-well-line);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-well);
+}
+
+.ctaTitle {
+  font-size: var(--text-heading);
+  font-weight: var(--weight-strong);
+}
+
+.ctaBody {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+.ctaLink {
+  align-self: flex-start;
+  margin-block-start: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}

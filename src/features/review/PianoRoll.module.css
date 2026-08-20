@@ -1,0 +1,80 @@
+/**
+ * D-0403 - the simplified note view.
+ *
+ * Read-only by construction: no handles, no resize cursors, no hover affordance
+ * that suggests a note can be dragged. MVP does not have note editing, and an
+ * interface that hints otherwise is a promise the product does not keep.
+ */
+
+.frame {
+  position: relative;
+  inline-size: 100%;
+  /* Time runs left to right in both locales. */
+  direction: ltr;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-well);
+  border: var(--border-hairline) solid var(--color-well-line);
+  overflow: hidden;
+}
+
+.svg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+}
+
+/* Bar lines are the only grid drawn. A full sixteenth grid turns the view into
+ * DAW chrome, which the design package prohibits. */
+.barLine {
+  stroke: var(--color-line-strong);
+  stroke-width: 1;
+}
+
+.beatLine {
+  stroke: var(--color-line);
+  stroke-width: 1;
+}
+
+/* Octave bands give pitch a readable reference without drawing a keyboard. */
+.octaveBand {
+  fill: var(--color-canvas-deep);
+  opacity: 0.55;
+}
+
+.note {
+  fill: var(--color-clean);
+  rx: 2;
+}
+
+.noteRaw {
+  fill: var(--color-raw);
+  opacity: 0.55;
+}
+
+.drum {
+  fill: var(--color-accent);
+}
+
+.drumLabel {
+  fill: var(--color-text-faint);
+  font-size: 10px;
+  font-family: var(--font-numeric);
+}
+
+.playhead {
+  stroke: var(--color-recording);
+  stroke-width: 2;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-block-size: 12rem;
+  padding: var(--space-6);
+  text-align: center;
+  /* The empty state reads with the page, not with the time axis. */
+  direction: inherit;
+}

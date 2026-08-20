@@ -1,0 +1,259 @@
+/**
+ * US-0801..US-0805 - the local workspace.
+ *
+ * Sketches live in IndexedDB and nowhere else until the user publishes. No
+ * account, no sync, no server round trip - that is the product's privacy claim
+ * made structural rather than promised (PRD 8, Playbook 16).
+ *
+ * Two design decisions worth stating:
+ *
+ *  1. **Blobs are a separate table.** A sketch row is a few kilobytes of note
+ *     data; a rendered WAV is megabytes. Splitting them lets the workspace list
+ *     load without pulling audio into memory, and lets audio be evicted under
+ *     quota pressure while the notes - the part that cannot be regenerated -
+ *     survive (US-0805).
+ *  2. **Quota failures are classified, never swallowed.** Running out of space
+ *     is the most common way a local-first app loses work, so it gets its own
+ *     error code and its own recovery action.
+ */
+
+import Dexie, { type Table } from 'dexie';
+import { AppError, LOCAL_SCHEMA_VERSION, type LocalSketch } from '@contracts';
+
+/** The row as stored: blobs are held elsewhere and referenced by id. */
+export interface StoredSketch extends Omit<LocalSketch, 'renderedAudio' | 'midi'> {
+  hasAudio: boolean;
+  hasMidi: boolean;
+}
+
+export interface StoredBlob {
+  /** `${sketchId}:audio` or `${sketchId}:midi`. */
+  key: string;
+  sketchId: string;
+  blob: Blob;
+  bytes: number;
+  updatedAt: number;
+}
+
+class WorkspaceDatabase extends Dexie {
+  sketches!: Table<StoredSketch, string>;
+  blobs!: Table<StoredBlob, string>;
+
+  constructor() {
+    super('rhythmisoze');
+    // Version 1. A future migration adds a `.version(2).stores(...).upgrade()`
+    // block here; the schemaVersion field on each row lets an upgrade decide
+    // per-record rather than assuming the whole store moved at once.
+    this.version(1).stores({
+      sketches: 'id, updatedAt, createdAt, mode, publishedId',
+      blobs: 'key, sketchId, updatedAt',
+    });
+  }
+}
+
+let database: WorkspaceDatabase | null = null;
+
+function db(): WorkspaceDatabase {
+  if (typeof indexedDB === 'undefined') {
+    throw new AppError('storage_unavailable', 'none', 'no indexedDB');
+  }
+  if (database === null) database = new WorkspaceDatabase();
+  return database;
+}
+
+/** Maps a Dexie/DOM failure to a typed error the UI can act on. */
+function toStorageError(error: unknown): AppError {
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+    return new AppError('storage_quota_exceeded', 'free_space', name, { cause: error });
+  }
+  if (name === 'InvalidStateError' || name === 'SecurityError') {
+    // Private browsing and blocked-storage settings land here.
+    return new AppError('storage_unavailable', 'none', name, { cause: error });
+  }
+  return new AppError('storage_failed', 'retry', name || 'unknown', { cause: error });
+}
+
+export function newSketchId(): string {
+  // 12 chars of base36 from crypto - enough that a user with thousands of local
+  // sketches will not collide, and not derived from a clock.
+  const bytes = new Uint8Array(9);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 12);
+}
+
+export async function listSketches(): Promise<StoredSketch[]> {
+  try {
+    return await db().sketches.orderBy('updatedAt').reverse().toArray();
+  } catch (error) {
+    throw toStorageError(error);
+  }
+}
+
+export async function getSketch(id: string): Promise<LocalSketch | undefined> {
+  try {
+    const row = await db().sketches.get(id);
+    if (!row) return undefined;
+    const [audio, midi] = await Promise.all([
+      row.hasAudio ? db().blobs.get(`${id}:audio`) : undefined,
+      row.hasMidi ? db().blobs.get(`${id}:midi`) : undefined,
+    ]);
+    const { hasAudio: _a, hasMidi: _m, ...rest } = row;
+    return {
+      ...rest,
+      renderedAudio: audio?.blob,
+      midi: midi?.blob,
+    };
+  } catch (error) {
+    throw toStorageError(error);
+  }
+}
+
+export interface SaveResult {
+  /** `true` when the notes were saved but the audio had to be dropped. */
+  audioDropped: boolean;
+}
+
+/**
+ * US-0802 - save a sketch.
+ *
+ * The note data is written first and committed on its own. Only then is the
+ * rendered audio attempted, and a quota failure on the audio is caught and
+ * reported rather than rolled back. Losing a cached render is an inconvenience;
+ * losing the transcription is losing the user's idea.
+ */
+export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
+  const row: StoredSketch = {
+    id: sketch.id,
+    title: sketch.title,
+    locale: sketch.locale,
+    bpm: sketch.bpm,
+    meter: sketch.meter,
+    mode: sketch.mode,
+    instrumentId: sketch.instrumentId,
+    retouch: sketch.retouch,
+    rawNotes: sketch.rawNotes,
+    rawDrums: sketch.rawDrums,
+    analysis: sketch.analysis,
+    durationSec: sketch.durationSec,
+    createdAt: sketch.createdAt,
+    updatedAt: Date.now(),
+    publishedId: sketch.publishedId,
+    schemaVersion: LOCAL_SCHEMA_VERSION,
+    hasAudio: sketch.renderedAudio !== undefined,
+    hasMidi: sketch.midi !== undefined,
+  };
+
+  try {
+    await db().sketches.put(row);
+  } catch (error) {
+    throw toStorageError(error);
+  }
+
+  let audioDropped = false;
+  try {
+    const writes: StoredBlob[] = [];
+    if (sketch.midi) {
+      writes.push({
+        key: `${sketch.id}:midi`,
+        sketchId: sketch.id,
+        blob: sketch.midi,
+        bytes: sketch.midi.size,
+        updatedAt: row.updatedAt,
+      });
+    }
+    if (sketch.renderedAudio) {
+      writes.push({
+        key: `${sketch.id}:audio`,
+        sketchId: sketch.id,
+        blob: sketch.renderedAudio,
+        bytes: sketch.renderedAudio.size,
+        updatedAt: row.updatedAt,
+      });
+    }
+    if (writes.length > 0) await db().blobs.bulkPut(writes);
+  } catch (error) {
+    const mapped = toStorageError(error);
+    if (mapped.code !== 'storage_quota_exceeded') throw mapped;
+    audioDropped = true;
+    // Record the truth: the row must not claim to have audio it does not have.
+    await db().sketches.update(sketch.id, { hasAudio: false }).catch(() => undefined);
+  }
+
+  return { audioDropped };
+}
+
+export async function renameSketch(id: string, title: string): Promise<void> {
+  const trimmed = title.trim().slice(0, 80);
+  try {
+    await db().sketches.update(id, { title: trimmed, updatedAt: Date.now() });
+  } catch (error) {
+    throw toStorageError(error);
+  }
+}
+
+/** US-0804 - deletes the row and every blob that belonged to it. */
+export async function deleteSketch(id: string): Promise<void> {
+  try {
+    await db().transaction('rw', db().sketches, db().blobs, async () => {
+      await db().blobs.where('sketchId').equals(id).delete();
+      await db().sketches.delete(id);
+    });
+  } catch (error) {
+    throw toStorageError(error);
+  }
+}
+
+/** Drops cached audio while keeping the sketch. The user's "free up space" action. */
+export async function evictAudio(id: string): Promise<void> {
+  try {
+    await db().blobs.delete(`${id}:audio`);
+    await db().sketches.update(id, { hasAudio: false });
+  } catch (error) {
+    throw toStorageError(error);
+  }
+}
+
+export interface StorageStatus {
+  usedBytes: number | null;
+  quotaBytes: number | null;
+  /** 0..1, or null when the browser will not say. */
+  usedFraction: number | null;
+  /** `true` past 85% - the point at which the next render is likely to fail. */
+  low: boolean;
+}
+
+export async function storageStatus(): Promise<StorageStatus> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.estimate) {
+    return { usedBytes: null, quotaBytes: null, usedFraction: null, low: false };
+  }
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    const fraction = usage !== undefined && quota !== undefined && quota > 0 ? usage / quota : null;
+    return {
+      usedBytes: usage ?? null,
+      quotaBytes: quota ?? null,
+      usedFraction: fraction,
+      low: fraction !== null && fraction > 0.85,
+    };
+  } catch {
+    return { usedBytes: null, quotaBytes: null, usedFraction: null, low: false };
+  }
+}
+
+/**
+ * Asks the browser to make storage persistent.
+ *
+ * Without this, a browser under disk pressure may evict the whole origin
+ * without telling anyone - the "no silent deletion" criterion in US-0805 can
+ * only be honoured if this is requested. Denial is normal and not an error.
+ */
+export async function requestPersistence(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
+  try {
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}

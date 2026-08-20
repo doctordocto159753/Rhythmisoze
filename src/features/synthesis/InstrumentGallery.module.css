@@ -1,0 +1,103 @@
+/**
+ * D-0501 / D-0502 - listening-first instrument selection.
+ *
+ * No photographs, no clip art. Each instrument is represented by a small
+ * spectral figure derived from its own voice recipe - the same partial pattern
+ * that produces its timbre, drawn. That keeps the visual signature honest
+ * (it *is* the instrument's material) and subordinate to the audible preview,
+ * which is what the story asks for.
+ */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--space-3);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-hairline) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  text-align: start;
+  transition:
+    background-color var(--motion-quick) var(--ease-out),
+    border-color var(--motion-quick) var(--ease-out);
+}
+
+.item:hover {
+  background-color: var(--color-well);
+}
+
+/* Selected is marked by fill, border and a text badge - never colour alone. */
+.itemSelected {
+  background-color: var(--color-accent-wash);
+  border-color: var(--color-accent);
+}
+
+.itemLoading {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.figure {
+  display: block;
+  inline-size: 100%;
+  block-size: 2.5rem;
+  color: var(--color-text-faint);
+}
+
+.itemSelected .figure {
+  color: var(--color-accent);
+}
+
+.name {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+}
+
+.badge {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  color: var(--color-accent);
+}
+
+.previewButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  margin-inline-start: auto;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+  border: var(--border-hairline) solid transparent;
+}
+
+.previewButton:hover {
+  color: var(--color-text);
+  border-color: var(--color-line-strong);
+}
+
+.previewButtonActive {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.familyLabel {
+  font-size: var(--text-micro);
+  color: var(--color-text-faint);
+}

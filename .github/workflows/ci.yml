@@ -1,0 +1,100 @@
+# US-0002 / US-1301 - the quality gate every change passes.
+#
+# Four jobs, in the order a failure is cheapest to read:
+#   verify   typecheck, lint and unit tests - seconds, catches most things
+#   build    the real production build, because "it compiles" is not "it builds"
+#   golden   regenerates the humtool fixtures from Python and fails if the port
+#            has drifted from the reference implementation
+#   e2e      the browser matrix
+#
+# `golden` is the unusual one and it is the point: the retouch engine is a port,
+# and a port that is not continuously re-verified against its source is just a
+# rewrite that happened to start from a copy.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  verify:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test -- --coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  golden:
+    name: humtool port parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: python -m pip install --quiet numpy pretty_midi
+      - name: Regenerate fixtures from the Python reference
+        run: python scripts/generate-golden-fixtures.py
+      - name: Fail if the committed fixtures no longer match the reference
+        run: git diff --exit-code tests/fixtures/golden
+      - name: Re-run the parity suite against the fresh fixtures
+        run: npx vitest run tests/unit/retouch-golden.test.ts
+
+  e2e:
+    name: Browser matrix
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

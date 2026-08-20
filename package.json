@@ -1,0 +1,52 @@
+{
+  "name": "rhythmisoze",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Turn your voice into an instrument \u2014 client-first voice-to-instrument sketchpad.",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "build": "next build",
+    "db:migrate": "node scripts/migrate.mjs",
+    "dev": "next dev",
+    "fixtures:golden": "python scripts/generate-golden-fixtures.py",
+    "lint": "eslint .",
+    "model:sync": "node scripts/sync-model.mjs",
+    "start": "next start",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run lint && npm run test"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/vazirmatn": "^5.3.0",
+    "@react-three/fiber": "9.7.0",
+    "@spotify/basic-pitch": "1.0.1",
+    "@tensorflow/tfjs": "4.22.0",
+    "@tonejs/midi": "2.0.28",
+    "@vercel/blob": "2.8.0",
+    "dexie": "4.4.5",
+    "next": "16.3.1",
+    "postgres": "3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "^0.185.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.4",
+    "@types/three": "0.185.4",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.48.1",
+    "vitest": "4.1.11"
+  }
+}

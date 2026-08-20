@@ -1,0 +1,156 @@
+/**
+ * D-0303 - recording as the product's central performance moment.
+ *
+ * Everything not needed to perform is removed while recording: no navigation
+ * emphasis, no instrument gallery, no cleanup slider. What remains is the level,
+ * the time, and one way to stop.
+ */
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  padding-block: var(--space-6);
+}
+
+.countIn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.countNumber {
+  font-family: var(--font-numeric);
+  font-size: 7rem;
+  font-weight: var(--weight-strong);
+  line-height: 1;
+  color: var(--color-accent);
+  direction: ltr;
+}
+
+.countLabel {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+/* --- The record control --- */
+
+.recordButton {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 7rem;
+  block-size: 7rem;
+  border-radius: var(--radius-pill);
+  border: var(--border-firm) solid var(--color-recording);
+  background-color: var(--color-recording);
+  color: var(--color-text-inverse);
+  font-size: var(--text-label);
+  font-weight: var(--weight-strong);
+  transition: background-color var(--motion-quick) var(--ease-out);
+}
+
+.recordButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-recording) 85%, black);
+}
+
+.recordButton:disabled {
+  opacity: 0.5;
+}
+
+/* Stop is a square inside the same circle: the shape changes, the position does
+ * not, so the target never moves under the finger mid-take. */
+.stopGlyph {
+  inline-size: 2.1rem;
+  block-size: 2.1rem;
+  border-radius: var(--radius-sm);
+  background-color: currentColor;
+}
+
+.recordGlyph {
+  inline-size: 2.4rem;
+  block-size: 2.4rem;
+  border-radius: var(--radius-pill);
+  background-color: currentColor;
+}
+
+/* --- Level and waveform --- */
+
+.meterWrap {
+  inline-size: 100%;
+  max-inline-size: 34rem;
+}
+
+/**
+ * The live waveform.
+ *
+ * Time runs left to right in both locales - `direction: ltr` is deliberate and
+ * physical (Playbook 11). Only the labels around it follow the reading order.
+ */
+.waveform {
+  direction: ltr;
+  inline-size: 100%;
+  block-size: 6rem;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  border: var(--border-hairline) solid var(--color-well-line);
+}
+
+.timeRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  inline-size: 100%;
+  max-inline-size: 34rem;
+}
+
+.remaining {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+  direction: ltr;
+}
+
+/* The time bar: a hairline that fills. Never a spinner - the user needs to know
+ * how much of their sixty seconds is left, not that something is happening. */
+.timeBar {
+  inline-size: 100%;
+  max-inline-size: 34rem;
+  block-size: 4px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-line-strong);
+  overflow: hidden;
+  direction: ltr;
+}
+
+.timeFill {
+  block-size: 100%;
+  background-color: var(--color-recording);
+  transition: inline-size 100ms linear;
+}
+
+.timeFillWarn {
+  background-color: var(--color-accent);
+}
+
+/* --- Input guidance (D-0304) --- */
+
+.guidance {
+  min-block-size: 1.5rem;
+  font-size: var(--text-label);
+  text-align: center;
+}
+
+.guidanceQuiet {
+  color: var(--color-text-muted);
+}
+
+.guidanceLoud {
+  color: var(--color-recording);
+  font-weight: var(--weight-medium);
+}

@@ -1,0 +1,120 @@
+/**
+ * D-0203 - mode selection, and the segmented control it shares with meter choice.
+ *
+ * A radio group, not a set of buttons: the browser then handles arrow-key
+ * navigation, roving focus and the "one of these" semantics that a screen
+ * reader needs to announce "2 of 2".
+ */
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.legend {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  padding: 0;
+  margin-block-end: var(--space-1);
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-3);
+}
+
+.compact .options {
+  display: inline-flex;
+  gap: 0;
+  border: var(--border-hairline) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: var(--border-hairline) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-quick) var(--ease-out),
+    border-color var(--motion-quick) var(--ease-out);
+}
+
+.compact .option {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2) var(--space-4);
+  min-block-size: 2.75rem;
+  border: none;
+  border-radius: 0;
+  border-inline-end: var(--border-hairline) solid var(--color-line-strong);
+}
+
+.compact .option:last-child {
+  border-inline-end: none;
+}
+
+.option:hover {
+  background-color: var(--color-well);
+}
+
+.input {
+  position: absolute;
+  opacity: 0;
+  inline-size: 1px;
+  block-size: 1px;
+}
+
+.optionTitle {
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.optionHint {
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+}
+
+/**
+ * Selection is marked by fill *and* by a weight change, so colour is never the
+ * only signal (D-0102 / WCAG 1.4.1).
+ */
+.option:has(.input:checked) {
+  background-color: var(--color-accent-wash);
+  border-color: var(--color-accent);
+}
+
+.option:has(.input:checked) .optionTitle {
+  font-weight: var(--weight-strong);
+}
+
+.compact .option:has(.input:checked) {
+  background-color: var(--color-text);
+}
+
+.compact .option:has(.input:checked) .optionTitle {
+  color: var(--color-text-inverse);
+}
+
+.option:has(.input:focus-visible) {
+  outline: var(--border-firm) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.option:has(.input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

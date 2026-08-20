@@ -1,0 +1,45 @@
+/**
+ * The 3D layer's container.
+ *
+ * Two rules enforced here rather than trusted to the scene:
+ *  - the layer never receives pointer events, so it cannot swallow a tap meant
+ *    for the record button (D-0903: "3D does not create accidental scroll or
+ *    gesture conflicts");
+ *  - the layer sits behind its content in the stacking order, always.
+ */
+
+.wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 18rem;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-base);
+  pointer-events: none;
+  color: var(--color-accent);
+  /* Bounded so the object cannot grow past its own area no matter what the
+   * level mapping does. */
+  overflow: hidden;
+}
+
+.content {
+  position: relative;
+  z-index: var(--z-raised);
+  inline-size: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.static {
+  inline-size: 100%;
+  block-size: 100%;
+  opacity: 0.9;
+  transition: opacity var(--motion-settle) var(--ease-out);
+}

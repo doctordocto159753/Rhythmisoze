@@ -1,0 +1,137 @@
+/**
+ * D-0402 - the cleanup control, and the sound controls that share its anatomy.
+ *
+ * Built on a native `<input type="range">`. A custom div-with-drag-handlers
+ * would have to reimplement keyboard stepping, Home/End, page steps, touch,
+ * pointer capture and the ARIA slider pattern, and would get some of it wrong.
+ * The native element gets all of that for free and can still be styled fully.
+ */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.label {
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+
+.value {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+}
+
+.track {
+  position: relative;
+  display: block;
+  inline-size: 100%;
+  block-size: 2.75rem;
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+/* The painted track. `--fill` is set inline from the current value. */
+.rail {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline: 0;
+  block-size: 6px;
+  margin-block-start: -3px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-line-strong);
+  box-shadow: var(--shadow-inset);
+  pointer-events: none;
+}
+
+.fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--fill, 0%);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+}
+
+/**
+ * The cleanup slider is the one place a gradient is justified: it *is* the
+ * continuum from raw to cleaned, so the two ends are named colours and the
+ * track shows the journey between them (D-0402: "communicates a continuum").
+ */
+.continuum .fill {
+  background: linear-gradient(to right, var(--color-raw), var(--color-clean));
+}
+
+.thumb {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: var(--fill, 0%);
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  margin-block-start: -0.75rem;
+  margin-inline-start: -0.75rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-raised);
+  border: var(--border-firm) solid var(--color-text);
+  box-shadow: var(--shadow-lift);
+  pointer-events: none;
+  transition: transform var(--motion-instant) var(--ease-out);
+}
+
+.input:hover:not(:disabled) ~ .thumb {
+  transform: scale(1.08);
+}
+
+.input:focus-visible ~ .thumb {
+  outline: var(--border-firm) solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+.input:disabled ~ .rail,
+.input:disabled ~ .thumb {
+  opacity: 0.45;
+}
+
+/* Endpoint captions for the continuum, so the two ends are legible without
+ * dragging to find out (D-0402: "current value understandable without numbers"). */
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-micro);
+  color: var(--color-text-faint);
+}
+
+/**
+ * The time axis never mirrors.
+ *
+ * `flex-direction: row` and `to right` are physical on purpose. A slider whose
+ * fill runs from raw to cleaned, and a piano roll whose time runs forward, must
+ * point the same way in Persian and English (Playbook 11: "waveform/piano-roll
+ * time direction must not mirror accidentally with text direction"). Only the
+ * label row above it follows the reading direction.
+ */
+.continuum .track,
+.continuum .ends {
+  direction: ltr;
+}

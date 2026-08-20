@@ -1,0 +1,271 @@
+{
+  "name": "sparse",
+  "bpm": 80,
+  "mode": "pitched",
+  "input": [
+    [
+      0.0,
+      0.4,
+      62,
+      90
+    ],
+    [
+      0.9,
+      1.6,
+      65,
+      84
+    ],
+    [
+      2.1,
+      2.4,
+      69,
+      70
+    ]
+  ],
+  "stripOctaveErrors": {
+    "kept": [
+      [
+        0.0,
+        0.4,
+        62,
+        90
+      ],
+      [
+        0.9,
+        1.6,
+        65,
+        84
+      ],
+      [
+        2.1,
+        2.4,
+        69,
+        70
+      ]
+    ],
+    "dropped": 0
+  },
+  "estimateTempo": {
+    "bpm": 80.0,
+    "gridError": 1.0
+  },
+  "detectKey": {
+    "root": "D",
+    "mode": "minor",
+    "confidence": 0.8327803893552328
+  },
+  "quantize": {
+    "2": {
+      "notes": [
+        [
+          0.0,
+          1.0,
+          62.0,
+          90.0
+        ],
+        [
+          2.0,
+          2.0,
+          65.0,
+          84.0
+        ],
+        [
+          6.0,
+          1.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "stepSec": 0.375
+    },
+    "4": {
+      "notes": [
+        [
+          0.0,
+          2.0,
+          62.0,
+          90.0
+        ],
+        [
+          5.0,
+          4.0,
+          65.0,
+          84.0
+        ],
+        [
+          11.0,
+          2.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "stepSec": 0.1875
+    },
+    "8": {
+      "notes": [
+        [
+          0.0,
+          4.0,
+          62.0,
+          90.0
+        ],
+        [
+          10.0,
+          7.0,
+          65.0,
+          84.0
+        ],
+        [
+          22.0,
+          3.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "stepSec": 0.09375
+    }
+  },
+  "snapToScale": {
+    "2": {
+      "notes": [
+        [
+          0.0,
+          1.0,
+          62.0,
+          90.0
+        ],
+        [
+          2.0,
+          2.0,
+          65.0,
+          84.0
+        ],
+        [
+          6.0,
+          1.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "moved": 0
+    },
+    "4": {
+      "notes": [
+        [
+          0.0,
+          2.0,
+          62.0,
+          90.0
+        ],
+        [
+          5.0,
+          4.0,
+          65.0,
+          84.0
+        ],
+        [
+          11.0,
+          2.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "moved": 0
+    },
+    "8": {
+      "notes": [
+        [
+          0.0,
+          4.0,
+          62.0,
+          90.0
+        ],
+        [
+          10.0,
+          7.0,
+          65.0,
+          84.0
+        ],
+        [
+          22.0,
+          3.0,
+          69.0,
+          70.0
+        ]
+      ],
+      "moved": 0
+    }
+  },
+  "percussionMap": {
+    "2": [
+      [
+        0.0,
+        1.0,
+        36.0,
+        90.0
+      ],
+      [
+        2.0,
+        2.0,
+        38.0,
+        84.0
+      ],
+      [
+        6.0,
+        1.0,
+        38.0,
+        70.0
+      ]
+    ],
+    "4": [
+      [
+        0.0,
+        2.0,
+        36.0,
+        90.0
+      ],
+      [
+        5.0,
+        4.0,
+        38.0,
+        84.0
+      ],
+      [
+        11.0,
+        2.0,
+        38.0,
+        70.0
+      ]
+    ],
+    "8": [
+      [
+        0.0,
+        4.0,
+        36.0,
+        90.0
+      ],
+      [
+        10.0,
+        7.0,
+        38.0,
+        84.0
+      ],
+      [
+        22.0,
+        3.0,
+        38.0,
+        70.0
+      ]
+    ]
+  },
+  "report": {
+    "2": "notes in        : 3\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : D minor  (confidence 0.83)\nrange           : D4 to A4\nrepeated notes  : 0% of moves\nsemitone steps  : 0% of moves\nstepwise total  : 0%  (high = creeping, low = leaping)",
+    "4": "notes in        : 3\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : D minor  (confidence 0.83)\nrange           : D4 to A4\nrepeated notes  : 0% of moves\nsemitone steps  : 0% of moves\nstepwise total  : 0%  (high = creeping, low = leaping)",
+    "8": "notes in        : 3\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : D minor  (confidence 0.83)\nrange           : D4 to A4\nrepeated notes  : 0% of moves\nsemitone steps  : 0% of moves\nstepwise total  : 0%  (high = creeping, low = leaping)"
+  },
+  "gridView": {
+    "2": "bar  1 |X.X...X.|  D4 F4 A4",
+    "4": "bar  1 |X....X.....X....|  D4 F4 A4",
+    "8": "bar  1 |X.........X...........X.........|  D4 F4 A4"
+  }
+}

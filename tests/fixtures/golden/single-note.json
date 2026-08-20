@@ -1,0 +1,139 @@
+{
+  "name": "single-note",
+  "bpm": 100,
+  "mode": "pitched",
+  "input": [
+    [
+      0.31,
+      1.02,
+      57,
+      66
+    ]
+  ],
+  "stripOctaveErrors": {
+    "kept": [
+      [
+        0.31,
+        1.02,
+        57,
+        66
+      ]
+    ],
+    "dropped": 0
+  },
+  "estimateTempo": {
+    "bpm": 80.0,
+    "gridError": 1.0
+  },
+  "detectKey": {
+    "root": "A",
+    "mode": "major",
+    "confidence": 0.6844726949095996
+  },
+  "quantize": {
+    "2": {
+      "notes": [
+        [
+          1.0,
+          2.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "stepSec": 0.3
+    },
+    "4": {
+      "notes": [
+        [
+          2.0,
+          5.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "stepSec": 0.15
+    },
+    "8": {
+      "notes": [
+        [
+          4.0,
+          9.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "stepSec": 0.075
+    }
+  },
+  "snapToScale": {
+    "2": {
+      "notes": [
+        [
+          1.0,
+          2.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "moved": 0
+    },
+    "4": {
+      "notes": [
+        [
+          2.0,
+          5.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "moved": 0
+    },
+    "8": {
+      "notes": [
+        [
+          4.0,
+          9.0,
+          57.0,
+          66.0
+        ]
+      ],
+      "moved": 0
+    }
+  },
+  "percussionMap": {
+    "2": [
+      [
+        1.0,
+        2.0,
+        38.0,
+        66.0
+      ]
+    ],
+    "4": [
+      [
+        2.0,
+        5.0,
+        38.0,
+        66.0
+      ]
+    ],
+    "8": [
+      [
+        4.0,
+        9.0,
+        38.0,
+        66.0
+      ]
+    ]
+  },
+  "report": {
+    "2": "notes in        : 1\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : A major  (confidence 0.68)\nrange           : A3 to A3",
+    "4": "notes in        : 1\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : A major  (confidence 0.68)\nrange           : A3 to A3",
+    "8": "notes in        : 1\noctave errors   : 0 removed\ntempo estimate  : 80.0 BPM  (grid error 1.000; <0.10 tight, >0.20 loose)\nkey estimate    : A major  (confidence 0.68)\nrange           : A3 to A3"
+  },
+  "gridView": {
+    "2": "bar  1 |.x......|  A3",
+    "4": "bar  1 |..x.............|  A3",
+    "8": "bar  1 |....x...........................|  A3"
+  }
+}

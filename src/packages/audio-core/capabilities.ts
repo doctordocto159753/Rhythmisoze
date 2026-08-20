@@ -11,6 +11,16 @@
  */
 
 export interface Capabilities {
+  /**
+   * Whether the page is a secure context.
+   *
+   * This is the single most common reason capture is unavailable, and it has
+   * nothing to do with the browser: `getUserMedia`, the Cache API and service
+   * workers are all gated on HTTPS or `localhost`. Opening the app from a LAN
+   * address over plain HTTP silently removes the microphone from a completely
+   * modern browser, so it is detected separately and reported separately.
+   */
+  secureContext: boolean;
   /** `getUserMedia` exists. Says nothing about permission or hardware. */
   microphone: boolean;
   webAudio: boolean;
@@ -56,6 +66,7 @@ export function detectCapabilities(): Capabilities {
     typeof (window as { webkitAudioContext?: unknown }).webkitAudioContext !== 'undefined';
 
   return {
+    secureContext: window.isSecureContext !== false,
     microphone: typeof nav.mediaDevices?.getUserMedia === 'function',
     webAudio,
     mediaRecorder: typeof window.MediaRecorder !== 'undefined',
@@ -75,6 +86,7 @@ export function detectCapabilities(): Capabilities {
 
 function serverCapabilities(): Capabilities {
   return {
+    secureContext: false,
     microphone: false,
     webAudio: false,
     mediaRecorder: false,
@@ -111,13 +123,28 @@ function detectWebgl2(): boolean {
 }
 
 /**
+ * Why the core creation flow cannot run, when it cannot.
+ *
+ * `insecure_context` is deliberately separate from `unsupported_browser`.
+ * They need completely different advice: one is "open this over HTTPS or from
+ * localhost", the other is "update your browser". Telling somebody on a modern
+ * Chrome over plain HTTP to upgrade their browser sends them to fix the one
+ * thing that is not broken.
+ */
+export type UnsupportedReason = 'insecure_context' | 'missing_features';
+
+export interface CoreSupport {
+  supported: boolean;
+  reason: UnsupportedReason | null;
+  /** Features genuinely absent, excluding ones an insecure context removed. */
+  missing: Array<keyof Capabilities>;
+}
+
+/**
  * Whether the core creation flow can run at all.
  * Missing pieces are named so the UI can say which one, not just "unsupported".
  */
-export function assessCoreSupport(capabilities: Capabilities): {
-  supported: boolean;
-  missing: Array<keyof Capabilities>;
-} {
+export function assessCoreSupport(capabilities: Capabilities): CoreSupport {
   const required: Array<keyof Capabilities> = [
     'microphone',
     'webAudio',
@@ -125,7 +152,21 @@ export function assessCoreSupport(capabilities: Capabilities): {
     'offlineAudio',
   ];
   const missing = required.filter((key) => capabilities[key] === false);
-  return { supported: missing.length === 0, missing };
+  if (missing.length === 0) return { supported: true, reason: null, missing: [] };
+
+  // An insecure origin removes `getUserMedia` from an otherwise capable
+  // browser. Report the cause, not the symptom, and do not list the features
+  // the missing secure context took away as though the browser lacked them.
+  if (!capabilities.secureContext) {
+    const unrelated = missing.filter((key) => key !== 'microphone');
+    return {
+      supported: false,
+      reason: unrelated.length > 0 ? 'missing_features' : 'insecure_context',
+      missing: unrelated,
+    };
+  }
+
+  return { supported: false, reason: 'missing_features', missing };
 }
 
 export type PerformanceTier = 'full' | 'reduced' | 'minimal';

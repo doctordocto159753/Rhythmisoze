@@ -291,6 +291,11 @@ export const fa: Messages = {
   capability: {
     unsupportedTitle: 'این مرورگر نمی‌تواند ریتمیسوز را اجرا کند',
     unsupportedBody: 'برنامه به میکروفون و سیستم Web Audio نیاز دارد.',
+    insecureTitle: 'این صفحه به اتصال امن نیاز دارد',
+    insecureBody:
+      'مرورگرها دسترسی به میکروفون را فقط روی HTTPS می‌دهند. مرورگر تو مشکلی ندارد — آدرسی که صفحه از آن باز شده امن نیست.',
+    insecureHint:
+      'صفحه را با https:// باز کن، یا با http://localhost که مرورگرها آن را امن حساب می‌کنند.',
     missing: 'موجود نیست:',
     names: {
       microphone: 'دسترسی به میکروفون',

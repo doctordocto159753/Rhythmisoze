@@ -19,6 +19,39 @@ npm run start
 
 Node 20.9 or newer.
 
+## 1a. The microphone needs a secure context
+
+The single most common way to see a broken-looking Rhythmisoze is to open it
+over plain HTTP from something that is not `localhost` — a LAN address like
+`http://192.168.1.20:3000`, or a domain without a certificate.
+
+Browsers gate `getUserMedia`, the Cache API and service workers on a **secure
+context**. On an insecure origin `navigator.mediaDevices` is simply not there,
+so the app cannot record no matter how modern the browser is. The app detects
+this specifically and says so — "this page needs a secure connection" rather
+than "update your browser" — but it cannot work around it, because nothing can.
+
+What counts as secure:
+
+| Origin | Secure | Microphone |
+|---|---|---|
+| `https://anything` | yes | yes |
+| `http://localhost:3000` | yes | yes |
+| `http://127.0.0.1:3000` | yes | yes |
+| `http://192.168.1.20:3000` | **no** | **no** |
+| `http://some-host:3000` | **no** | **no** |
+
+To test on a phone on the same network, one of:
+
+- an HTTPS tunnel — `npx localtunnel --port 3000`, `cloudflared tunnel`, or
+  `ngrok http 3000`; all of them terminate TLS for you;
+- a local certificate — `mkcert` plus a reverse proxy in front of `next start`;
+- a preview deployment, which is HTTPS by default.
+
+Chrome can also be told to trust one insecure origin, which is useful for a
+quick check and must not be how anyone else reaches the app:
+`chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+
 ## 2. Object storage
 
 Vercel Blob. Create a store and take its read-write token.

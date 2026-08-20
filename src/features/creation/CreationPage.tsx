@@ -53,26 +53,39 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
   const showReview = hasResult(machineState) && refined !== null;
   const showDeliver = canExport(machineState) && refined !== null;
 
-  // US-0105: an unsupported browser is told which piece is missing, not just
-  // that "something" failed.
-  if (!support.supported) {
+  // US-0105: the user is told which piece is missing, and why.
+  //
+  // `support.measured` gates the whole panel. Before the client has looked at
+  // the browser the capability set is all-false, and rendering this during
+  // prerender would put "this browser cannot run Rhythmisoze" into the static
+  // HTML of every page — an accusation made before anything was checked.
+  if (support.measured && !support.supported) {
+    const insecure = support.reason === 'insecure_context';
     return (
       <div className="stage">
         <Well tone="danger" as="section">
           <Stack gap={3}>
             <Text variant="title" as="h1">
-              {t.capability.unsupportedTitle}
+              {insecure ? t.capability.insecureTitle : t.capability.unsupportedTitle}
             </Text>
-            <Text>{t.capability.unsupportedBody}</Text>
-            <Text variant="micro" muted>
-              {t.capability.missing}{' '}
-              {support.missing
-                .map((key) => t.capability.names[key as keyof typeof t.capability.names] ?? key)
-                .join('، ')}
-            </Text>
-            <Text variant="micro" muted>
-              {t.errors.hints.unsupported_browser}
-            </Text>
+            <Text>{insecure ? t.capability.insecureBody : t.capability.unsupportedBody}</Text>
+            {insecure ? (
+              <Text variant="micro" muted>
+                {t.capability.insecureHint}
+              </Text>
+            ) : (
+              <>
+                <Text variant="micro" muted>
+                  {t.capability.missing}{' '}
+                  {support.missing
+                    .map((key) => t.capability.names[key as keyof typeof t.capability.names] ?? key)
+                    .join('، ')}
+                </Text>
+                <Text variant="micro" muted>
+                  {t.errors.hints.unsupported_browser}
+                </Text>
+              </>
+            )}
           </Stack>
         </Well>
       </div>

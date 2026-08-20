@@ -99,6 +99,12 @@ describe('catalogs', () => {
       'Web Audio',
       'WebAssembly',
       'Rhythmisoze',
+      // URL scheme and host literals. A Persian speaker types these exactly as
+      // written, so localising them would make the instruction unusable.
+      'HTTPS',
+      'https',
+      'http',
+      'localhost',
     ]);
     const suspicious: string[] = [];
     const walk = (value: unknown, path: string): void => {

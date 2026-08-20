@@ -287,6 +287,11 @@ export const en = {
   capability: {
     unsupportedTitle: 'This browser cannot run Rhythmisoze',
     unsupportedBody: 'The app needs the microphone and the Web Audio system.',
+    insecureTitle: 'This page needs a secure connection',
+    insecureBody:
+      'Browsers only allow microphone access over HTTPS. Your browser is fine — the address this page was opened from is not secure.',
+    insecureHint:
+      'Open it at https://, or at http://localhost, which browsers treat as secure.',
     missing: 'Missing:',
     names: {
       microphone: 'microphone access',

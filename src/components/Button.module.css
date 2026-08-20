@@ -96,8 +96,8 @@
 }
 
 .accent:hover:not(:disabled) {
-  background-color: var(--brass-500);
-  border-color: var(--brass-500);
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 .danger {

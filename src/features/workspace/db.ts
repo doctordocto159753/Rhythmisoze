@@ -18,16 +18,23 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import { AppError, LOCAL_SCHEMA_VERSION, type LocalSketch } from '@contracts';
+import {
+  AppError,
+  LOCAL_SCHEMA_VERSION,
+  type LocalSketch,
+  type LocalSourceAsset,
+} from '@contracts';
 
 /** The row as stored: blobs are held elsewhere and referenced by id. */
-export interface StoredSketch extends Omit<LocalSketch, 'renderedAudio' | 'midi'> {
+export interface StoredSketch extends Omit<LocalSketch, 'renderedAudio' | 'midi' | 'source'> {
   hasAudio: boolean;
   hasMidi: boolean;
+  hasSource: boolean;
+  sourceDescriptor?: Omit<LocalSourceAsset, 'blob'>;
 }
 
 export interface StoredBlob {
-  /** `${sketchId}:audio` or `${sketchId}:midi`. */
+  /** `${sketchId}:audio`, `${sketchId}:midi` or `${sketchId}:source`. */
   key: string;
   sketchId: string;
   blob: Blob;
@@ -94,15 +101,26 @@ export async function getSketch(id: string): Promise<LocalSketch | undefined> {
   try {
     const row = await db().sketches.get(id);
     if (!row) return undefined;
-    const [audio, midi] = await Promise.all([
+    const [audio, midi, source] = await Promise.all([
       row.hasAudio ? db().blobs.get(`${id}:audio`) : undefined,
       row.hasMidi ? db().blobs.get(`${id}:midi`) : undefined,
+      row.hasSource ? db().blobs.get(`${id}:source`) : undefined,
     ]);
-    const { hasAudio: _a, hasMidi: _m, ...rest } = row;
+    const {
+      hasAudio: _a,
+      hasMidi: _m,
+      hasSource: _s,
+      sourceDescriptor,
+      ...rest
+    } = row;
     return {
       ...rest,
       renderedAudio: audio?.blob,
       midi: midi?.blob,
+      source:
+        source?.blob && sourceDescriptor
+          ? { ...sourceDescriptor, blob: source.blob }
+          : undefined,
     };
   } catch (error) {
     throw toStorageError(error);
@@ -112,6 +130,8 @@ export async function getSketch(id: string): Promise<LocalSketch | undefined> {
 export interface SaveResult {
   /** `true` when the notes were saved but the audio had to be dropped. */
   audioDropped: boolean;
+  /** The current session still owns the source even if persistence ran out. */
+  sourceDropped: boolean;
 }
 
 /**
@@ -142,12 +162,38 @@ export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
     schemaVersion: LOCAL_SCHEMA_VERSION,
     hasAudio: sketch.renderedAudio !== undefined,
     hasMidi: sketch.midi !== undefined,
+    hasSource: sketch.source !== undefined,
+    sourceDescriptor: sketch.source
+      ? {
+          kind: sketch.source.kind,
+          filename: sketch.source.filename,
+          mimeType: sketch.source.mimeType,
+        }
+      : undefined,
   };
 
   try {
     await db().sketches.put(row);
   } catch (error) {
     throw toStorageError(error);
+  }
+
+  let sourceDropped = false;
+  if (sketch.source) {
+    try {
+      await db().blobs.put({
+        key: `${sketch.id}:source`,
+        sketchId: sketch.id,
+        blob: sketch.source.blob,
+        bytes: sketch.source.blob.size,
+        updatedAt: row.updatedAt,
+      });
+    } catch (error) {
+      const mapped = toStorageError(error);
+      if (mapped.code !== 'storage_quota_exceeded') throw mapped;
+      sourceDropped = true;
+      await db().sketches.update(sketch.id, { hasSource: false }).catch(() => undefined);
+    }
   }
 
   let audioDropped = false;
@@ -180,7 +226,7 @@ export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
     await db().sketches.update(sketch.id, { hasAudio: false }).catch(() => undefined);
   }
 
-  return { audioDropped };
+  return { audioDropped, sourceDropped };
 }
 
 export async function renameSketch(id: string, title: string): Promise<void> {

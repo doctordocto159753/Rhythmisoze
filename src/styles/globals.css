@@ -178,3 +178,11 @@ svg {
   inline-size: min(100% - var(--space-5) * 2, var(--stage-width-wide));
   margin-inline: auto;
 }
+
+/* Give the single creation column a deliberate paper margin on tablets. The
+ * desktop measure is unchanged and phones keep the existing compact gutter. */
+@media (min-width: 40rem) and (max-width: 52rem) {
+  .stage {
+    inline-size: min(calc(100% - var(--space-7) * 2), var(--stage-width));
+  }
+}

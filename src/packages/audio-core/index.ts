@@ -1,6 +1,7 @@
 export * from './normalize';
 export * from './fft';
 export * from './pitch';
+export * from './melodyGuide';
 export * from './onsets';
 export * from './drums';
 export * from './tempo';

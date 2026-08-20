@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 /**
@@ -111,6 +112,37 @@ test.describe('melody', () => {
       page.getByText(/note model|pitch tracker|a server/i).first(),
     ).toBeVisible();
   });
+
+  test('the complete package contains the original recorder bytes', async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+    await recordATake(page);
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
+      timeout: 90_000,
+    });
+
+    await page.getByRole('button', { name: /Take it with you/i }).click();
+    await expect(page.getByRole('heading', { name: /Complete package/i })).toBeVisible({
+      timeout: 90_000,
+    });
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: /Download complete package/i }).click();
+    const path = await (await downloadPromise).path();
+    expect(path).toBeTruthy();
+    const entries = readStoredZip(readFileSync(path as string));
+    const sourceEntry = [...entries.entries()].find(([name]) =>
+      name.startsWith('source/original-recording.'),
+    );
+    expect(sourceEntry).toBeDefined();
+    expect(sourceEntry?.[1].length).toBeGreaterThan(100);
+    const manifest = JSON.parse(new TextDecoder().decode(entries.get('manifest.json'))) as {
+      source: { kind: string; bytes: number };
+    };
+    expect(manifest.source.kind).toBe('recording');
+    expect(manifest.source.bytes).toBe(sourceEntry?.[1].length);
+  });
 });
 
 test.describe('rhythm', () => {
@@ -142,3 +174,20 @@ test.describe('recovery', () => {
     await expect(page.getByRole('button', { name: /Record again/i })).toBeVisible();
   });
 });
+
+function readStoredZip(bytes: Uint8Array): Map<string, Uint8Array> {
+  const entries = new Map<string, Uint8Array>();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 0;
+  while (offset + 30 <= bytes.length && view.getUint32(offset, true) === 0x04034b50) {
+    const size = view.getUint32(offset + 18, true);
+    const nameLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLength));
+    entries.set(name, bytes.slice(dataStart, dataStart + size));
+    offset = dataStart + size;
+  }
+  return entries;
+}

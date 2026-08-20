@@ -71,6 +71,36 @@ Concretely:
 - No server processing exists. There is no code path that uploads unpublished
   audio.
 
+### 2026-08-20 human-input correction
+
+The first owner-supplied human take exposed a failure hidden by the synthetic
+corpus. Basic Pitch emitted the correct D3–F4 contour alongside a near-continuous
+A2 subharmonic. Because the decoder was configured as unconstrained polyphonic
+output, the global-median octave filter then treated the false lower register as
+truth; stronger Clean removed short correct notes and preserved A2.
+
+The melody path is therefore now **Basic Pitch candidates guided by an
+independent monophonic YIN contour**:
+
+- YIN runs at 16 kHz before decoding and supplies robust 8th/92nd percentile
+  register bounds with a three-semitone margin.
+- `outputToNotesPoly` receives those bounds instead of `null`/`null`.
+- The model uses its conservative defaults (`0.30` frame, `0.50` onset) and a
+  120 ms minimum note length.
+- Candidate notes more than 2.5 semitones from the contour are rejected; the
+  output is structurally monophonic.
+- Retouch centres octave cleanup on the trusted contour, and a quality guard
+  rolls back pitch-destructive stages if agreement falls by more than five
+  percentage points, register moves over six semitones, or one pitch dominates
+  over 60% of the take.
+
+The source recording is represented in the permanent regression corpus by its
+SHA-256 and derived note/contour facts in
+`tests/fixtures/transcription/recording-8-regression.json`; the personal voice
+bytes are not checked into Git. A local run against the supplied 20.288 s M4A
+produced 28 monophonic YIN notes, median MIDI 56 (G♯3), adaptive range
+48.17–67.74, and no A1/A2 event.
+
 ## What has NOT been measured
 
 Stated explicitly rather than implied, because Playbook §7 makes this gate
@@ -86,11 +116,10 @@ mandatory and an unmeasured claim would be worse than an absent one:
 | 60 s clip without OOM | required | **not measured on device** |
 | Blinded A/B listening | required | **not performed** |
 
-The corpus itself (US-0004) does not exist: the questionnaire records that the
-owner will supply real examples (Q-A2), and none were available. What exists
-instead is a synthetic fixture set that verifies *correctness* — a 220 Hz sine
-really is A3, four clicks really are four onsets — which is a different claim
-from *accuracy on human input*.
+The corpus now contains one owner-supplied human regression represented by
+derived facts plus the synthetic fixtures. That proves this octave/subharmonic
+failure stays fixed; it is still too small to satisfy the architecture gate or
+support general accuracy claims.
 
 ## Consequences
 

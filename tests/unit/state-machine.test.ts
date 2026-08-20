@@ -46,6 +46,8 @@ const ALL_EVENTS: CreationEvent[] = [
   'COUNT_IN_STARTED',
   'RECORDING_STARTED',
   'RECORDING_STOPPED',
+  'AUDIO_IMPORTED',
+  'MIDI_IMPORTED',
   'CANCEL',
   'PROCESS',
   'PROCESS_DONE',
@@ -183,6 +185,16 @@ describe('failure and retry', () => {
     const processing = run(HAPPY_PATH.slice(0, 6));
     const failed = transition(processing, 'FAIL').context;
     expect(transition(failed, 'RETRY').context.state).toBe('captured');
+  });
+
+  it('keeps a configured tempo after a recoverable file-import failure', () => {
+    const tempoReady = run(['TEMPO_SET']);
+    const failed = transition(tempoReady, 'FAIL', {
+      code: 'unsupported_file',
+      recovery: 'retry',
+    }).context;
+
+    expect(transition(failed, 'RETRY').context.state).toBe('tempo_ready');
   });
 
   it('retrying a publish failure returns to the finished render', () => {

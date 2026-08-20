@@ -8,7 +8,7 @@
 
 import type { CreationMode, DrumEvent, GridDivision, KeyMode, Meter, NoteEvent, PitchClassName } from './music';
 
-export const LOCAL_SCHEMA_VERSION = 1 as const;
+export const LOCAL_SCHEMA_VERSION = 2 as const;
 export const PUBLISHED_SCHEMA_VERSION = 1 as const;
 
 export type Locale = 'fa' | 'en';
@@ -20,6 +20,20 @@ export interface RetouchSettings {
   grid: GridDivision;
   /** User override of the detected key, when they corrected it (Q-B4). */
   keyOverride?: { root: PitchClassName; mode: KeyMode };
+}
+
+export type SourceKind = 'recording' | 'audio-upload' | 'midi-upload';
+
+/**
+ * The exact bytes the user supplied. This remains local and is deliberately
+ * absent from PublishedSketch; it exists so the original can be exported and
+ * recovered without pretending a rendered WAV is the source take.
+ */
+export interface LocalSourceAsset {
+  kind: SourceKind;
+  filename: string;
+  mimeType: string;
+  blob: Blob;
 }
 
 export interface SketchAnalysis {
@@ -56,6 +70,8 @@ export interface LocalSketch {
   durationSec: number;
   /** Rendered WAV, cached locally. Dropped first when storage is tight. */
   renderedAudio?: Blob;
+  /** Original recording/upload. Never published. */
+  source?: LocalSourceAsset;
   midi?: Blob;
   createdAt: number;
   updatedAt: number;

@@ -37,6 +37,8 @@ export type CreationEvent =
   | 'COUNT_IN_STARTED'
   | 'RECORDING_STARTED'
   | 'RECORDING_STOPPED'
+  | 'AUDIO_IMPORTED'
+  | 'MIDI_IMPORTED'
   | 'CANCEL'
   | 'PROCESS'
   | 'PROCESS_DONE'
@@ -62,6 +64,7 @@ const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, 
   Object.freeze({
     idle: {
       TEMPO_SET: 'tempo_ready',
+      MIDI_IMPORTED: 'review',
       RESTORE: 'review',
       RESET: 'idle',
     },
@@ -69,6 +72,8 @@ const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, 
       TEMPO_SET: 'tempo_ready',
       MODE_CHANGED: 'tempo_ready',
       ARM: 'armed',
+      AUDIO_IMPORTED: 'captured',
+      MIDI_IMPORTED: 'review',
       RESTORE: 'review',
       RESET: 'idle',
     },
@@ -77,6 +82,8 @@ const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, 
       DISARM: 'tempo_ready',
       TEMPO_SET: 'tempo_ready',
       MODE_CHANGED: 'tempo_ready',
+      AUDIO_IMPORTED: 'captured',
+      MIDI_IMPORTED: 'review',
       RESET: 'idle',
     },
     countdown: {
@@ -161,6 +168,9 @@ export interface TransitionResult {
  * capture so the user can retry without singing again (US-0305).
  */
 const RETRY_TARGET: Readonly<Partial<Record<CreationState, CreationState>>> = Object.freeze({
+  idle: 'idle',
+  tempo_ready: 'tempo_ready',
+  armed: 'armed',
   countdown: 'armed',
   recording: 'armed',
   captured: 'captured',

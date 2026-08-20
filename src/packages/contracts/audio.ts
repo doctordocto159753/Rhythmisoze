@@ -49,7 +49,12 @@ export interface AudioValidation {
   diagnostics: AudioDiagnostics;
 }
 
-export type TranscriberId = 'basic-pitch' | 'pitch-tracker' | 'server';
+export type TranscriberId =
+  | 'basic-pitch'
+  | 'basic-pitch-yin'
+  | 'pitch-tracker'
+  | 'midi-import'
+  | 'server';
 
 export type ProcessingBackend = 'browser' | 'server';
 
@@ -80,6 +85,12 @@ export interface ProcessingDiagnostics {
 
 export interface TranscriptionResult {
   notes: NoteEvent[];
+  /**
+   * Independent monophonic reference extracted from the source audio.
+   * Retouch uses it as a quality guard; it is never rendered directly unless
+   * the model has no trustworthy candidate for a voiced segment.
+   */
+  referenceNotes?: NoteEvent[];
   onsets?: OnsetEvent[];
   drums?: DrumEvent[];
   durationSec: number;

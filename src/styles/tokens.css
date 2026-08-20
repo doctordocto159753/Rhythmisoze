@@ -51,6 +51,8 @@
   --ink-300: #9a8f83;
 
   --brass-600: #a8720f;
+  --brass-700: #875a08;
+  --brass-800: #744c06;
   --brass-500: #c98a1b;
   --brass-300: #e8bc6a;
   --brass-100: #f7e7c6;
@@ -80,11 +82,14 @@
   /* --- Text --- */
   --color-text: var(--ink-900);
   --color-text-muted: var(--ink-500);
-  --color-text-faint: var(--ink-300);
+  /* Quiet copy is still text. This is the lightest ink that remains above
+   * 4.5:1 on both canvas and recessed wells at the 12 px micro size. */
+  --color-text-faint: #71675e;
   --color-text-inverse: var(--paper-50);
 
   /* --- Musical state (invariant 4) --- */
-  --color-accent: var(--brass-600);
+  --color-accent: var(--brass-700);
+  --color-accent-hover: var(--brass-800);
   --color-accent-soft: var(--brass-300);
   --color-accent-wash: var(--brass-100);
   --color-recording: var(--clay-600);
@@ -238,10 +243,11 @@
 
     --color-text: #f2ece0;
     --color-text-muted: #b0a698;
-    --color-text-faint: #7d7365;
+    --color-text-faint: #948a7d;
     --color-text-inverse: #17150f;
 
     --color-accent: var(--brass-300);
+    --color-accent-hover: var(--brass-500);
     --color-accent-soft: var(--brass-500);
     --color-accent-wash: #3a2c12;
     --color-recording: #e8705a;
@@ -275,10 +281,11 @@
 
   --color-text: #f2ece0;
   --color-text-muted: #b0a698;
-  --color-text-faint: #7d7365;
+  --color-text-faint: #948a7d;
   --color-text-inverse: #17150f;
 
   --color-accent: var(--brass-300);
+  --color-accent-hover: var(--brass-500);
   --color-accent-soft: var(--brass-500);
   --color-accent-wash: #3a2c12;
   --color-recording: #e8705a;

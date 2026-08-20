@@ -29,7 +29,12 @@ import {
   type TranscriptionResult,
 } from '@contracts';
 import { peakNormalize, resample } from '@/packages/audio-core/normalize';
-import { PitchTrackerTranscriber, RhythmTranscriber } from '@/packages/audio-core/transcribers';
+import {
+  buildMelodyGuide,
+  guideMelodyCandidates,
+  type MelodyGuide,
+} from '@/packages/audio-core/melodyGuide';
+import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 
 export interface TranscribeRequest {
   type: 'transcribe';
@@ -208,6 +213,10 @@ async function runMelody(
   request: TranscribeRequest,
   audio: MonoAudio,
 ): Promise<TranscriptionResult> {
+  const melodyStarted = now();
+  post({ type: 'progress', id: request.id, stage: 'preparing_audio', progress: 0.01 });
+  const guide = buildMelodyGuide(audio);
+  throwIfCancelled(request.id);
   if (request.allowModel) {
     try {
       // `escapable` is rejected by the global error trap, so an error thrown
@@ -216,7 +225,7 @@ async function runMelody(
         modelAttempt = { reject };
       });
       return await withTimeout(
-        Promise.race([runBasicPitch(request, audio), escapable]),
+        Promise.race([runBasicPitch(request, audio, guide, melodyStarted), escapable]),
         modelBudgetMs(audio.durationSec),
         'model_timeout',
       );
@@ -225,33 +234,42 @@ async function runMelody(
       // a cancelled run must not be "recovered" into a second inference.
       if (cancelled.has(request.id)) throw error;
       const detail = error instanceof AppError ? error.detail : 'load failed';
-      return runPitchTracker(request, audio, [`model_unavailable:${detail ?? 'unknown'}`]);
+      return resultFromGuide(
+        request,
+        audio,
+        guide,
+        [`model_unavailable:${detail ?? 'unknown'}`],
+        melodyStarted,
+      );
     } finally {
       modelAttempt = null;
     }
   }
-  return runPitchTracker(request, audio, []);
+  return resultFromGuide(request, audio, guide, [], melodyStarted);
 }
 
-async function runPitchTracker(
+function resultFromGuide(
   request: TranscribeRequest,
   audio: MonoAudio,
+  guide: MelodyGuide,
   warnings: string[],
-): Promise<TranscriptionResult> {
-  const transcriber = new PitchTrackerTranscriber();
-  const result = await transcriber.transcribe(
-    audio,
-    {
-      mode: 'melody',
-      noteThreshold: request.noteThreshold > 0 ? request.noteThreshold : undefined,
-      minNoteLengthSec: request.minNoteLengthSec,
-    },
-    (progress) =>
-      post({ type: 'progress', id: request.id, stage: progress.stage, progress: progress.progress }),
-  );
+  started: number,
+): TranscriptionResult {
+  post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
   return {
-    ...result,
-    diagnostics: { ...result.diagnostics, warnings: [...result.diagnostics.warnings, ...warnings] },
+    notes: guide.notes,
+    referenceNotes: guide.notes.map((note) => ({ ...note })),
+    durationSec: audio.durationSec,
+    diagnostics: {
+      transcriberId: 'pitch-tracker',
+      backend: 'browser',
+      elapsedMs: now() - started,
+      modelLoadMs: 0,
+      modelFromCache: true,
+      notesBeforeFilter: guide.notes.length,
+      notesAfterFilter: guide.notes.length,
+      warnings,
+    },
   };
 }
 
@@ -293,8 +311,9 @@ interface BasicPitchModule {
 async function runBasicPitch(
   request: TranscribeRequest,
   audio: MonoAudio,
+  guide: MelodyGuide,
+  started: number,
 ): Promise<TranscriptionResult> {
-  const started = now();
   post({ type: 'progress', id: request.id, stage: 'loading_model', progress: 0.02 });
 
   const modelLoadStart = now();
@@ -366,13 +385,13 @@ async function runBasicPitch(
     // The library counts note length in model frames, not seconds.
     Math.max(1, Math.round(request.minNoteLengthSec / MODEL_FRAME_SEC)),
     true,
-    null,
-    null,
+    guide.register?.maxFrequencyHz ?? null,
+    guide.register?.minFrequencyHz ?? null,
     true,
   );
   const timed = basicPitch.noteFramesToTime(raw);
 
-  const notes: NoteEvent[] = timed
+  const candidates: NoteEvent[] = timed
     .map((note) => ({
       startSec: note.startTimeSeconds,
       endSec: note.startTimeSeconds + note.durationSeconds,
@@ -383,21 +402,32 @@ async function runBasicPitch(
     }))
     .filter((note) => note.endSec > note.startSec)
     .sort((a, b) => a.startSec - b.startSec);
+  const notes = guideMelodyCandidates(candidates, guide);
 
   post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
 
   const diagnostics: ProcessingDiagnostics = {
-    transcriberId: 'basic-pitch',
+    transcriberId: 'basic-pitch-yin',
     backend: 'browser',
     elapsedMs: now() - started,
     modelLoadMs,
     modelFromCache: fromCache,
     notesBeforeFilter: timed.length,
     notesAfterFilter: notes.length,
-    warnings: [],
+    warnings: [
+      'yin_guided_monophonic',
+      ...(guide.register
+        ? [`adaptive_register:${guide.register.lowMidi.toFixed(1)}-${guide.register.highMidi.toFixed(1)}`]
+        : []),
+    ],
   };
 
-  return { notes, durationSec: audio.durationSec, diagnostics };
+  return {
+    notes,
+    referenceNotes: guide.notes.map((note) => ({ ...note })),
+    durationSec: audio.durationSec,
+    diagnostics,
+  };
 }
 
 /**

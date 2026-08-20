@@ -17,10 +17,12 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import {
   AppError,
   DEFAULT_METER,
+  LOCAL_SCHEMA_VERSION,
   toAppError,
   type AudioValidation,
   type CreationMode,
   type Locale,
+  type LocalSourceAsset,
   type Meter,
   type MonoAudio,
   type NoteEvent,
@@ -44,6 +46,7 @@ import {
   type MetronomeHandle,
 } from '@audio-core';
 import { refine, RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
+import { importMidi } from '@midi';
 import {
   DEFAULT_MASTER,
   playSketch,
@@ -64,6 +67,8 @@ import { newSketchId, saveSketch } from '@/features/workspace/db';
 
 /** PRD R-05, questionnaire Q-B1: sixty seconds. */
 export const MAX_RECORDING_SEC = 60;
+export const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_MIDI_UPLOAD_BYTES = 5 * 1024 * 1024;
 /** PRD R-04: one measure. */
 export const COUNT_IN_BARS = 1;
 
@@ -83,9 +88,13 @@ export interface FlowState {
   elapsedSec: number;
 
   audio: MonoAudio | null;
+  /** Exact source bytes, retained locally for export and never published. */
+  source: LocalSourceAsset | null;
+  durationSec: number;
   validation: AudioValidation | null;
 
   rawNotes: NoteEvent[];
+  referenceNotes: NoteEvent[];
   rawDrums: RefineResult['drums'];
   diagnostics: ProcessingDiagnostics | null;
   progress: TranscriptionProgress | null;
@@ -119,12 +128,29 @@ type Action =
   | { type: 'beat'; beat: BeatInfo }
   | { type: 'level'; level: LevelSnapshot }
   | { type: 'elapsed'; seconds: number }
-  | { type: 'captured'; audio: MonoAudio; validation: AudioValidation }
+  | {
+      type: 'captured';
+      audio: MonoAudio;
+      validation: AudioValidation;
+      source: LocalSourceAsset;
+    }
   | { type: 'progress'; progress: TranscriptionProgress }
   | {
       type: 'transcribed';
       notes: NoteEvent[];
       drums: RefineResult['drums'];
+      diagnostics: ProcessingDiagnostics;
+      referenceNotes: NoteEvent[];
+    }
+  | {
+      type: 'midiImported';
+      mode: CreationMode;
+      bpm: number;
+      meter: Meter;
+      notes: NoteEvent[];
+      drums: RefineResult['drums'];
+      durationSec: number;
+      source: LocalSourceAsset;
       diagnostics: ProcessingDiagnostics;
     }
   | { type: 'setRetouch'; amount: number }
@@ -156,8 +182,11 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     level: null,
     elapsedSec: 0,
     audio: null,
+    source: null,
+    durationSec: 0,
     validation: null,
     rawNotes: [],
+    referenceNotes: [],
     rawDrums: [],
     diagnostics: null,
     progress: null,
@@ -192,7 +221,11 @@ function reducer(state: FlowState, action: Action): FlowState {
         // would leave the gallery showing a selection that cannot be voiced.
         instrumentId: resolveInstrument(undefined, action.mode).id,
         rawNotes: [],
+        referenceNotes: [],
         rawDrums: [],
+        audio: null,
+        source: null,
+        durationSec: 0,
         renderedAudio: null,
       };
     case 'setBpm':
@@ -215,17 +248,44 @@ function reducer(state: FlowState, action: Action): FlowState {
     case 'elapsed':
       return { ...state, elapsedSec: action.seconds };
     case 'captured':
-      return { ...state, audio: action.audio, validation: action.validation, level: null };
+      return {
+        ...state,
+        audio: action.audio,
+        source: action.source,
+        durationSec: action.audio.durationSec,
+        validation: action.validation,
+        level: null,
+      };
     case 'progress':
       return { ...state, progress: action.progress };
     case 'transcribed':
       return {
         ...state,
         rawNotes: action.notes,
+        referenceNotes: action.referenceNotes,
         rawDrums: action.drums,
         diagnostics: action.diagnostics,
         progress: null,
         // A new transcription invalidates any previous render.
+        renderedAudio: null,
+        renderRealtimeRatio: null,
+      };
+    case 'midiImported':
+      return {
+        ...state,
+        mode: action.mode,
+        bpm: action.bpm,
+        meter: action.meter,
+        instrumentId: resolveInstrument(undefined, action.mode).id,
+        audio: null,
+        source: action.source,
+        durationSec: action.durationSec,
+        validation: null,
+        rawNotes: action.notes,
+        referenceNotes: [],
+        rawDrums: action.drums,
+        diagnostics: action.diagnostics,
+        progress: null,
         renderedAudio: null,
         renderRealtimeRatio: null,
       };
@@ -265,6 +325,7 @@ function reducer(state: FlowState, action: Action): FlowState {
 
 export function useCreationFlow(locale: Locale) {
   const [state, dispatch] = useReducer(reducer, undefined, () => initialState(newSketchId()));
+  const sourceKind = state.source?.kind;
 
   const captureRef = useRef<CaptureStream | null>(null);
   const recorderRef = useRef<ActiveRecording | null>(null);
@@ -305,6 +366,8 @@ export function useCreationFlow(locale: Locale) {
               }
             : undefined,
           playableRange: state.mode === 'melody' ? instrument.range : undefined,
+          referenceNotes: state.referenceNotes,
+          sourceKind,
         },
       );
     } catch {
@@ -315,11 +378,13 @@ export function useCreationFlow(locale: Locale) {
   }, [
     state.bpm,
     state.rawNotes,
+    state.referenceNotes,
     state.rawDrums,
     state.mode,
     state.retouchAmount,
     state.keyOverride,
     state.instrumentId,
+    sourceKind,
   ]);
 
   // --- Tempo -------------------------------------------------------------
@@ -390,6 +455,7 @@ export function useCreationFlow(locale: Locale) {
         dispatch({
           type: 'transcribed',
           notes: result.notes,
+          referenceNotes: result.referenceNotes ?? [],
           drums: result.drums ?? [],
           diagnostics: result.diagnostics,
         });
@@ -416,6 +482,38 @@ export function useCreationFlow(locale: Locale) {
     [state.mode, send, fail],
   );
 
+  const ingestAudioBlob = useCallback(
+    async (
+      blob: Blob,
+      source: LocalSourceAsset,
+      capturedEvent: Extract<CreationEvent, 'RECORDING_STOPPED' | 'AUDIO_IMPORTED'>,
+    ) => {
+      if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
+        throw new AppError('file_too_large', 'retry', 'audio over 100 MiB');
+      }
+      const context = getAudioContext();
+      const audio = await decodeToMono(blob, context);
+      if (audio.durationSec > MAX_RECORDING_SEC + 0.25) {
+        throw new AppError('audio_too_long', 'retry', `${audio.durationSec.toFixed(2)}s`);
+      }
+      const validation = validateAudio(audio);
+      dispatch({ type: 'captured', audio, validation, source });
+      send(capturedEvent);
+
+      if (!validation.usable) {
+        const code = validation.code === 'too_short' ? 'audio_too_short' : 'audio_silent';
+        throw new AppError(
+          code,
+          capturedEvent === 'RECORDING_STOPPED' ? 'rerecord' : 'retry',
+          validation.code,
+        );
+      }
+      await runTranscription(audio);
+      return audio;
+    },
+    [runTranscription, send],
+  );
+
   const finishRecording = useCallback(async () => {
     const recorder = recorderRef.current;
     if (!recorder) return;
@@ -429,24 +527,109 @@ export function useCreationFlow(locale: Locale) {
         closeMicrophone(captureRef.current);
         captureRef.current = null;
       }
-      const context = getAudioContext();
-      const audio = await decodeToMono(blob, context);
-      const validation = validateAudio(audio);
-      dispatch({ type: 'captured', audio, validation });
-      send('RECORDING_STOPPED');
+      const audio = await ingestAudioBlob(
+        blob,
+        {
+          kind: 'recording',
+          filename: `original-recording.${extensionForMime(blob.type)}`,
+          mimeType: blob.type || 'application/octet-stream',
+          blob,
+        },
+        'RECORDING_STOPPED',
+      );
       track('recording_completed', { seconds: Math.round(audio.durationSec), mode: state.mode });
-
-      if (!validation.usable) {
-        const code = validation.code === 'too_short' ? 'audio_too_short' : 'audio_silent';
-        fail(new AppError(code, 'rerecord', validation.code));
-        return;
-      }
-      await runTranscription(audio);
     } catch (error) {
       stopEverything();
       fail(error);
     }
-  }, [send, fail, state.mode, stopEverything, runTranscription]);
+  }, [fail, state.mode, stopEverything, ingestAudioBlob]);
+
+  const uploadAudio = useCallback(
+    async (file: File) => {
+      if (state.bpm === null) return;
+      dispatch({ type: 'clearError' });
+      // A picker remains visible while the take is armed. Choosing a file must
+      // release that microphone/count-in before file processing takes over.
+      stopEverything();
+      try {
+        if (!isLikelyAudioFile(file)) {
+          throw new AppError('unsupported_file', 'retry', file.type || file.name.slice(-12));
+        }
+        await unlockAudio();
+        await ingestAudioBlob(
+          file,
+          {
+            kind: 'audio-upload',
+            filename: file.name || `uploaded-audio.${extensionForMime(file.type)}`,
+            mimeType: file.type || 'application/octet-stream',
+            blob: file,
+          },
+          'AUDIO_IMPORTED',
+        );
+      } catch (error) {
+        const mapped =
+          error instanceof AppError && error.code === 'decode_failed'
+            ? new AppError('decode_failed', 'retry', error.detail, { cause: error })
+            : error;
+        fail(mapped);
+      }
+    },
+    [state.bpm, ingestAudioBlob, fail, stopEverything],
+  );
+
+  const uploadMidi = useCallback(
+    async (file: File) => {
+      dispatch({ type: 'clearError' });
+      stopEverything();
+      try {
+        if (file.size > MAX_MIDI_UPLOAD_BYTES) {
+          throw new AppError('file_too_large', 'retry', 'MIDI over 5 MiB');
+        }
+        if (!/\.(?:mid|midi)$/i.test(file.name) && !/midi/i.test(file.type)) {
+          throw new AppError('unsupported_file', 'retry', file.type || file.name.slice(-12));
+        }
+        const result = importMidi(new Uint8Array(await file.arrayBuffer()));
+        if (result.durationSec > MAX_RECORDING_SEC + 0.25) {
+          throw new AppError('audio_too_long', 'retry', `${result.durationSec.toFixed(2)}s MIDI`);
+        }
+        const mode: CreationMode =
+          state.mode === 'melody' && result.notes.length === 0
+            ? 'rhythm'
+            : state.mode === 'rhythm' && result.drums.length === 0
+              ? 'melody'
+              : state.mode;
+        dispatch({
+          type: 'midiImported',
+          mode,
+          bpm: result.bpm,
+          meter: result.meter,
+          notes: result.notes,
+          drums: result.drums,
+          durationSec: result.durationSec,
+          source: {
+            kind: 'midi-upload',
+            filename: file.name || 'source.mid',
+            mimeType: file.type || 'audio/midi',
+            blob: file,
+          },
+          diagnostics: {
+            transcriberId: 'midi-import',
+            backend: 'browser',
+            elapsedMs: 0,
+            modelLoadMs: 0,
+            modelFromCache: true,
+            notesBeforeFilter: result.notes.length + result.drums.length,
+            notesAfterFilter: result.notes.length + result.drums.length,
+            warnings: [],
+          },
+        });
+        send('MIDI_IMPORTED');
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.mode, send, fail, stopEverything],
+  );
 
   const arm = useCallback(async () => {
     if (state.bpm === null) return;
@@ -551,7 +734,7 @@ export function useCreationFlow(locale: Locale) {
         instrumentId: state.instrumentId,
         notes: refined.notes,
         drums: refined.drums,
-        durationSec: state.audio?.durationSec ?? 0,
+        durationSec: state.durationSec,
         master: state.master,
       });
       playbackRef.current = handle;
@@ -559,10 +742,10 @@ export function useCreationFlow(locale: Locale) {
     } catch (error) {
       fail(error);
     }
-  }, [refined, state.instrumentId, state.master, state.audio, stopPlayback, fail]);
+  }, [refined, state.instrumentId, state.master, state.durationSec, stopPlayback, fail]);
 
   const render = useCallback(async () => {
-    if (!refined || state.audio === null) return null;
+    if (!refined || state.durationSec <= 0) return null;
     stopPlayback();
     send('RENDER');
     track('render_started', { instrument: state.instrumentId });
@@ -572,7 +755,7 @@ export function useCreationFlow(locale: Locale) {
         instrumentId: state.instrumentId,
         notes: refined.notes,
         drums: refined.drums,
-        durationSec: state.audio.durationSec,
+        durationSec: state.durationSec,
         master: state.master,
       });
       const channels: Float32Array[] = [];
@@ -596,7 +779,7 @@ export function useCreationFlow(locale: Locale) {
       fail(error);
       return null;
     }
-  }, [refined, state.audio, state.instrumentId, state.master, send, stopPlayback, fail]);
+  }, [refined, state.durationSec, state.instrumentId, state.master, send, stopPlayback, fail]);
 
   // --- Persistence -------------------------------------------------------
 
@@ -633,15 +816,18 @@ export function useCreationFlow(locale: Locale) {
         rawNotes: state.rawNotes,
         rawDrums: state.rawDrums,
         analysis: refined?.analysis ?? null,
-        durationSec: state.audio?.durationSec ?? 0,
+        durationSec: state.durationSec,
         renderedAudio: state.renderedAudio ?? undefined,
+        source: state.source ?? undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         publishedId: state.publishedId ?? undefined,
-        schemaVersion: 1,
+        schemaVersion: LOCAL_SCHEMA_VERSION,
       })
         .then((result) => {
-          if (result.audioDropped) dispatch({ type: 'storageWarning', low: true });
+          if (result.audioDropped || result.sourceDropped) {
+            dispatch({ type: 'storageWarning', low: true });
+          }
         })
         .catch((error) => {
           // A save failure must be visible but must never interrupt creation.
@@ -662,7 +848,10 @@ export function useCreationFlow(locale: Locale) {
     state.retouchAmount,
     state.instrumentId,
     state.rawNotes,
+    state.referenceNotes,
     state.renderedAudio,
+    state.source,
+    state.durationSec,
     state.publishedId,
     refined,
     locale,
@@ -688,6 +877,8 @@ export function useCreationFlow(locale: Locale) {
       setMeter,
       toggleMetronome,
       arm,
+      uploadAudio,
+      uploadMidi,
       stopRecording: finishRecording,
       cancelRecording,
       cancelProcessing,
@@ -729,3 +920,17 @@ export function useCreationFlow(locale: Locale) {
 }
 
 export type CreationFlow = ReturnType<typeof useCreationFlow>;
+
+function extensionForMime(mimeType: string): string {
+  const value = mimeType.toLowerCase();
+  if (value.includes('wav')) return 'wav';
+  if (value.includes('mpeg')) return 'mp3';
+  if (value.includes('mp4') || value.includes('aac')) return 'm4a';
+  if (value.includes('ogg')) return 'ogg';
+  return 'webm';
+}
+
+function isLikelyAudioFile(file: File): boolean {
+  if (file.type.toLowerCase().startsWith('audio/')) return true;
+  return /\.(?:wav|mp3|m4a|aac|ogg|oga|webm|flac|mp4)$/i.test(file.name);
+}

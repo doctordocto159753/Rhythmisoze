@@ -62,6 +62,7 @@ an unanswered question.
 | F-1 | Analytics stack | **Not answered.** Default applied: a minimal first-party event sender, inert unless `NEXT_PUBLIC_ANALYTICS_ENDPOINT` is set. No third-party script ships. |
 | F-2 | Jurisdiction | **Not answered.** No privacy policy or terms text is shipped. **Release blocker if the service goes public.** |
 | F-3 | Cross-device sync | Post-MVP. The published schema is extensible without changing public ids. |
+| F-4 | Original source | **Retain locally and include in the user's export bundle; never publish it.** Recording, uploaded audio and imported MIDI share one source contract. |
 
 ## G — Release and operations
 

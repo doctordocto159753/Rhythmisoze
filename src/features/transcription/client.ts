@@ -37,15 +37,14 @@ export interface TranscribeOptions {
  * Defaults.
  *
  * `noteThreshold` and `onsetThreshold` are the model's own confidence gates.
- * They sit slightly below Basic Pitch's library defaults because the input here
- * is one quiet human voice rather than a mixed recording, and the retouch stage
- * downstream is far better at removing a spurious note than at inventing a
- * missing one.
+ * Melody uses the library's conservative baseline. A YIN guide now fills gaps
+ * and rejects octave/sub-octave activations, so lowering these gates only adds
+ * breath and transition noise without buying recall.
  */
 const DEFAULTS = {
-  noteThreshold: 0.25,
-  onsetThreshold: 0.45,
-  minNoteLengthSec: 0.058,
+  noteThreshold: 0.3,
+  onsetThreshold: 0.5,
+  minNoteLengthSec: 0.12,
 } as const;
 
 export const MODEL_URL =

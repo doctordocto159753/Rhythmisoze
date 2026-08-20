@@ -143,6 +143,13 @@ export function ReviewStage({
             endLabel={t.review.cleanupLevels.clean}
             onChange={onRetouchChange}
           />
+
+          {refined.qualityGuard?.triggered ? (
+            <div className={styles.qualityGuard} role="status">
+              <Text variant="micro">{t.review.qualityGuard}</Text>
+            </div>
+          ) : null}
+
           <Text variant="micro" muted>
             {t.review.cleanupHelp}
           </Text>

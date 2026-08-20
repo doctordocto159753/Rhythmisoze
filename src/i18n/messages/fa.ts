@@ -142,6 +142,8 @@ export const fa: Messages = {
     },
     judgeRepaired: (count: number) => `${count} اصلاح`,
     judgeClean: 'چیزی نیاز به اصلاح نداشت.',
+    teacherSuggestions: (count: number) => `${count} پیشنهاد`,
+    teacherNone: 'پیشنهادی نیست — همین‌طور خوب است.',
     heardTempo: (bpm: number) => `شنیده‌شده روی ${bpm} BPM`,
     tappedTempo: (bpm: number) => `${bpm} BPM خودت`,
     tempoNotHeard: 'ضرب روشنی شنیده نشد، پس سرعتی که تپ کردی استفاده می‌شود.',

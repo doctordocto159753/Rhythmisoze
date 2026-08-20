@@ -67,3 +67,15 @@
   font-size: var(--text-micro);
   color: var(--color-success);
 }
+
+/* The teacher's reasons. A list rather than a paragraph: each one is a separate
+ * decision the user can accept or reject on its own merits. */
+.reasons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+  padding-inline-start: var(--space-4);
+  list-style: disc;
+}

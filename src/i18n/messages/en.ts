@@ -139,6 +139,9 @@ export const en = {
     judgeRepaired: (count: number) =>
       count === 1 ? '1 correction' : `${count} corrections`,
     judgeClean: 'Nothing needed correcting.',
+    teacherSuggestions: (count: number) =>
+      count === 1 ? '1 suggestion' : `${count} suggestions`,
+    teacherNone: 'Nothing to suggest — this already works.',
     heardTempo: (bpm: number) => `heard at ${bpm} BPM`,
     tappedTempo: (bpm: number) => `your ${bpm} BPM`,
     tempoNotHeard: 'No clear pulse was heard, so your tapped speed is used.',

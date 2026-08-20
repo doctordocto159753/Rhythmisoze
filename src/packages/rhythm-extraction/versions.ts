@@ -116,14 +116,20 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
     },
     {
       // What a teacher would hand back: the same idea, put in time and in key.
+      //
+      // The musical work is done by `@music-teacher`, which has already moved
+      // the notes it chose to move and recorded a reason for each. Retouch is
+      // therefore kept light here - quantising on top of the Teacher's own
+      // timing decisions would overwrite deliberate, explained choices with
+      // an unexplained grid.
       id: 'teacher',
       bpm: performanceBpm,
       tempoSource,
-      amount: Math.max(amount, 60),
+      amount: Math.min(amount, 40),
       paramOverrides: {
-        timingStrength: teacherTiming,
-        scaleSnapStrength: clamp01(amount / 100),
-        velocitySmoothing: 0.45,
+        timingStrength: Math.min(0.35, teacherTiming * 0.4),
+        scaleSnapStrength: 0,
+        velocitySmoothing: 0.35,
       },
     },
   ];

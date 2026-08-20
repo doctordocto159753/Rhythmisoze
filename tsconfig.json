@@ -48,6 +48,9 @@
       "@musical-judge": [
         "./src/packages/musical-judge/index.ts"
       ],
+      "@music-teacher": [
+        "./src/packages/music-teacher/index.ts"
+      ],
       "@audio-core": [
         "./src/packages/audio-core/index.ts"
       ],

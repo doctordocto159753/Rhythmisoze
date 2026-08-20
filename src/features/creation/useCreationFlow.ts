@@ -49,6 +49,7 @@ import {
   type MetronomeHandle,
 } from '@audio-core';
 import { refine, RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
+import { teach, type TeacherResult } from '@music-teacher';
 import {
   analyzeDrumRhythm,
   analyzeMelodyRhythm,
@@ -419,6 +420,27 @@ export function useCreationFlow(locale: Locale) {
     return notes.length > 0 ? analyzeMelodyRhythm(notes, state.durationSec) : null;
   }, [state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
 
+  /**
+   * What a teacher would suggest, computed from the Judge's reading.
+   *
+   * Derived rather than stored, and keyed only on the judged notes, so it runs
+   * once per take. It deliberately receives no tempo: the Teacher must work
+   * from the performance's own pulse, never from the tapped one.
+   */
+  const lesson = useMemo<TeacherResult | null>(() => {
+    if (state.mode !== 'melody') return null;
+    const source = state.judge?.notes ?? state.rawNotes;
+    if (source.length < 4 || state.durationSec <= 0) return null;
+    try {
+      return teach(source, state.durationSec);
+    } catch {
+      // The Teacher is pure; a throw means malformed input rather than a
+      // transient fault, and losing the suggestion is better than losing the
+      // sketch.
+      return null;
+    }
+  }, [state.mode, state.judge, state.rawNotes, state.durationSec]);
+
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
     if (rhythm === null || state.bpm === null) return [];
@@ -458,10 +480,13 @@ export function useCreationFlow(locale: Locale) {
       // Unprocessed shows the candidate exactly as it arrived; the Judge and
       // the Teacher both build on the repaired reading, because tidying notes
       // that still contain a harmonic artifact only produces a tidy mistake.
+      const judged = state.judge?.notes ?? state.rawNotes;
       const sourceNotes =
-        activeVersion !== null && activeVersion.id !== 'unprocessed' && state.judge !== null
-          ? state.judge.notes
-          : state.rawNotes;
+        activeVersion === null || activeVersion.id === 'unprocessed'
+          ? state.rawNotes
+          : activeVersion.id === 'teacher' && lesson !== null
+            ? lesson.notes
+            : judged;
 
       return refine(
         { notes: sourceNotes, drums: state.rawDrums },
@@ -500,6 +525,7 @@ export function useCreationFlow(locale: Locale) {
     sourceKind,
     activeVersion,
     state.judge,
+    lesson,
   ]);
 
   // --- Tempo -------------------------------------------------------------
@@ -1004,6 +1030,8 @@ export function useCreationFlow(locale: Locale) {
     /** The versions on offer; the original performance is always one of them. */
     versions,
     activeVersion,
+    /** What a teacher would suggest, and why. Null outside the voice path. */
+    lesson,
     /** Set when the heard tempo and the tapped tempo disagree. */
     tempoDisagreement,
     actions: {

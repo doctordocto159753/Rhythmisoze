@@ -206,7 +206,5 @@ from the report (`A2` where `A3` was sung, plus a harmonic ghost).
   and adds no infrastructure. If a corpus later shows the reference contour is
   the accuracy ceiling, a stronger tracker slots in behind
   `extractJudgeFeatures()` without touching scoring, repair or the optimizer.
-- **The Teacher is Phase 2.** Its current internals are the existing
-  best-practice retouch pass — grid alignment, scale snapping, dynamics
-  evening. That is a genuine first version of "what a teacher would fix", not a
-  placeholder, but it is not yet the deliberate musical layer Phase 2 describes.
+- **The Teacher is now built.** See [`music-teacher.md`](music-teacher.md). It
+  takes the Judge's output and never the raw candidate.

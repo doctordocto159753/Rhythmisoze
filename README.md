@@ -47,6 +47,7 @@ src/
     rhythm-extraction/ tempo, phase, meter, groove, version planning
     intent/            voice / instrument / beat classification
     musical-judge/     faithfulness scoring and deterministic repair
+    music-teacher/     musical suggestions, bounded by melody identity
     midi/              Standard MIDI File import/export, safe filenames
     synthesis/         sample + synth engines, registry, offline render
   features/            product behaviour, one directory per stage of the flow
@@ -122,6 +123,7 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 | [docs/runbooks/](docs/runbooks/) | Deploying, rolling back, moderating |
 | [docs/architecture/musical-intent.md](docs/architecture/musical-intent.md) | Intent routing, tempo detection and versions |
 | [docs/musical-judge.md](docs/musical-judge.md) | Faithfulness scoring, repair operators, beam search |
+| [docs/music-teacher.md](docs/music-teacher.md) | Musical suggestions and the identity constraints on them |
 | [docs/status.md](docs/status.md) | Story-by-story implementation state |
 
 ## Known gaps

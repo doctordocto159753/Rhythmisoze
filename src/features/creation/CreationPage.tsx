@@ -41,7 +41,7 @@ export interface CreationPageProps {
  */
 export function CreationPage({ publishEnabled }: CreationPageProps) {
   const { locale, t } = useLocale();
-  const { state, refined, rhythm, versions, activeVersion, tempoDisagreement, actions } =
+  const { state, refined, rhythm, versions, activeVersion, lesson, tempoDisagreement, actions } =
     useCreationFlow(locale);
   const support = useCoreSupport();
 
@@ -262,6 +262,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             rhythm={rhythm}
             tempoDisagreement={tempoDisagreement}
             judge={state.judge}
+            lesson={lesson}
             onVersionChange={actions.setVersion}
             refined={refined}
             rawNotes={state.rawNotes}

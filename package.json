@@ -34,6 +34,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "three": "^0.185.1",
+    "tonal": "^6.4.3",
     "zod": "4.4.3"
   },
   "devDependencies": {

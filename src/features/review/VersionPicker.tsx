@@ -1,6 +1,7 @@
 'use client';
 
 import type { JudgeVerdict } from '@contracts';
+import type { TeacherResult } from '@music-teacher';
 import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
 import type { TempoDisagreement } from '@rhythm-extraction';
 import { Row, Stack, Well } from '@/components/Layout';
@@ -15,6 +16,8 @@ export interface VersionPickerProps {
   disagreement: TempoDisagreement | null;
   /** The Judge's verdict, shown against the reading it produced. */
   judge: JudgeVerdict | null;
+  /** The teacher's suggestions, shown against the reading they apply to. */
+  lesson: TeacherResult | null;
   onSelect(id: VersionId): void;
 }
 
@@ -40,6 +43,7 @@ export function VersionPicker({
   rhythm,
   disagreement,
   judge,
+  lesson,
   onSelect,
 }: VersionPickerProps) {
   const t = useMessages();
@@ -91,6 +95,13 @@ export function VersionPicker({
                         : t.versions.judgeRepaired(judge.repairs.length)}
                     </span>
                   ) : null}
+                  {version.id === 'teacher' && lesson !== null ? (
+                    <span className={styles.repairs}>
+                      {lesson.edits.length === 0
+                        ? t.versions.teacherNone
+                        : t.versions.teacherSuggestions(lesson.edits.length)}
+                    </span>
+                  ) : null}
                   {/* Tempo and its provenance, isolated so the Latin BPM value
                       cannot reorder the Persian sentence around it. */}
                   <span className={styles.tempo}>
@@ -105,6 +116,17 @@ export function VersionPicker({
             );
           })}
         </ul>
+
+        {/* The suggestions in full, so a musician can disagree with a specific
+            decision rather than with a black box. Only while the Teacher's
+            reading is the one being heard. */}
+        {activeId === 'teacher' && lesson !== null && lesson.edits.length > 0 ? (
+          <ul className={styles.reasons}>
+            {lesson.edits.map((edit, index) => (
+              <li key={`${edit.kind}-${edit.noteIndex}-${index}`}>{edit.reason}</li>
+            ))}
+          </ul>
+        ) : null}
 
         {notice ? (
           <Row gap={2}>

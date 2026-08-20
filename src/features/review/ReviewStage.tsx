@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { JudgeVerdict, MelodyConfidence, Meter, ProcessingDiagnostics } from '@contracts';
+import type { TeacherResult } from '@music-teacher';
 import { RETOUCH_AMOUNT_MAX, RETOUCH_AMOUNT_MIN, pitchName, retouchLabel, type RefineResult } from '@retouch';
 import { getAudioContext } from '@audio-core';
 import { Button } from '@/components/Button';
@@ -22,6 +23,7 @@ export interface ReviewStageProps {
   rhythm: PerformanceRhythm | null;
   tempoDisagreement: TempoDisagreement | null;
   judge: JudgeVerdict | null;
+  lesson: TeacherResult | null;
   onVersionChange(id: VersionId): void;
   refined: RefineResult;
   rawNotes: RefineResult['notes'];
@@ -57,6 +59,7 @@ export function ReviewStage({
   rhythm,
   tempoDisagreement,
   judge,
+  lesson,
   onVersionChange,
   refined,
   rawNotes,
@@ -155,6 +158,7 @@ export function ReviewStage({
         rhythm={rhythm}
         disagreement={tempoDisagreement}
         judge={judge}
+        lesson={lesson}
         onSelect={onVersionChange}
       />
 

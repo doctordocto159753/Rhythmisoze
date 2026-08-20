@@ -64,6 +64,17 @@ const MODEL_SAMPLE_RATE = 22050;
 
 const cancelled = new Set<string>();
 
+/**
+ * The request currently being worked on.
+ *
+ * Needed so that an error which escapes the normal `try`/`catch` - thrown from
+ * a microtask deep inside a library, where no caller is awaiting it - can still
+ * be reported against the request it ruined instead of vanishing. An error that
+ * vanishes here leaves the UI on "working out what you sang" forever, which is
+ * exactly the failure this guards against.
+ */
+let inFlight: string | null = null;
+
 /** Cached across takes so a second recording does not reload the model. */
 let cachedModel: { url: string; instance: unknown } | null = null;
 
@@ -72,6 +83,54 @@ const post = (message: WorkerResponse): void => {
 };
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/**
+ * Turns an error that escaped every `catch` into a reported failure.
+ *
+ * TensorFlow.js registers backends during module evaluation, and some of those
+ * paths reference `window`, which does not exist in a worker. The resulting
+ * `ReferenceError` is raised outside any promise this file awaits, so without
+ * these two handlers the request simply never settles.
+ */
+function reportEscapedError(detail: string): void {
+  // A model attempt is in progress: turn the escaped error into a rejection of
+  // that attempt, so `runMelody` can fall back to the built-in tracker. Posting
+  // a failure here instead would deny the user a result the app can still
+  // produce perfectly well.
+  const attempt = modelAttempt;
+  if (attempt !== null) {
+    modelAttempt = null;
+    attempt.reject(new AppError('model_load_failed', 'retry', detail.slice(0, 120)));
+    return;
+  }
+
+  const id = inFlight;
+  if (id === null) return;
+  inFlight = null;
+  cancelled.add(id);
+  post({
+    type: 'error',
+    id,
+    code: 'transcription_failed',
+    recovery: 'retry',
+    detail: detail.slice(0, 200),
+  });
+}
+
+/**
+ * The in-progress Basic Pitch attempt, if any, and how to abandon it.
+ * Set only while the model path is running.
+ */
+let modelAttempt: { reject(error: unknown): void } | null = null;
+
+self.addEventListener('error', (event) => {
+  reportEscapedError((event as ErrorEvent).message ?? 'worker error');
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  const reason = (event as PromiseRejectionEvent).reason;
+  reportEscapedError(reason instanceof Error ? reason.message : String(reason));
+});
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
@@ -89,6 +148,7 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
     durationSec: request.durationSec,
   };
 
+  inFlight = request.id;
   try {
     const result =
       request.mode === 'rhythm'
@@ -113,6 +173,7 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
       detail: appError.detail,
     });
   } finally {
+    if (inFlight === request.id) inFlight = null;
     cancelled.delete(request.id);
   }
 }
@@ -130,19 +191,43 @@ async function runRhythm(
   );
 }
 
+/**
+ * How long the model path gets before it is abandoned.
+ *
+ * ADR-001 gives the built-in tracker the job of covering a model failure, and
+ * a hang is a failure - arguably the worst kind, because nothing is reported.
+ * The budget scales with the clip because inference is proportional to it, and
+ * it is deliberately loose: the PRD's target is 0.5x the clip duration, so
+ * eight times that is not a performance assertion, it is a liveness one.
+ */
+function modelBudgetMs(durationSec: number): number {
+  return Math.max(20_000, durationSec * 8_000);
+}
+
 async function runMelody(
   request: TranscribeRequest,
   audio: MonoAudio,
 ): Promise<TranscriptionResult> {
   if (request.allowModel) {
     try {
-      return await runBasicPitch(request, audio);
+      // `escapable` is rejected by the global error trap, so an error thrown
+      // from inside the library's own module graph still ends this attempt.
+      const escapable = new Promise<never>((_, reject) => {
+        modelAttempt = { reject };
+      });
+      return await withTimeout(
+        Promise.race([runBasicPitch(request, audio), escapable]),
+        modelBudgetMs(audio.durationSec),
+        'model_timeout',
+      );
     } catch (error) {
       // Falling through to the tracker is the whole point of having one, but
       // a cancelled run must not be "recovered" into a second inference.
       if (cancelled.has(request.id)) throw error;
       const detail = error instanceof AppError ? error.detail : 'load failed';
       return runPitchTracker(request, audio, [`model_unavailable:${detail ?? 'unknown'}`]);
+    } finally {
+      modelAttempt = null;
     }
   }
   return runPitchTracker(request, audio, []);
@@ -213,6 +298,7 @@ async function runBasicPitch(
   post({ type: 'progress', id: request.id, stage: 'loading_model', progress: 0.02 });
 
   const modelLoadStart = now();
+  prepareWorkerGlobalsForTensorflow();
   // Not named `module`: Next refuses to bundle an assignment to that
   // identifier, since it collides with the CommonJS wrapper.
   let basicPitch: BasicPitchModule;
@@ -314,8 +400,56 @@ async function runBasicPitch(
   return { notes, durationSec: audio.durationSec, diagnostics };
 }
 
+/**
+ * Makes a worker look enough like a document for TensorFlow.js to load.
+ *
+ * `@spotify/basic-pitch` depends on TensorFlow.js 3.21, whose WebGL backend
+ * reads `window` while its module is being evaluated. A worker has no `window`,
+ * only `self`, so the import throws `ReferenceError: window is not defined` -
+ * and it throws from inside the library's own module graph, where nothing this
+ * file wrote is on the stack to catch it.
+ *
+ * Aliasing `window` to the worker's global scope is the smallest change that
+ * lets the library initialise. It is a shim around a third-party assumption,
+ * kept to one function and applied lazily, immediately before the import that
+ * needs it, so nothing else in the worker is affected by it.
+ *
+ * If TensorFlow.js still cannot start, the caller falls back to the built-in
+ * pitch tracker; this makes the model path possible, it does not make it
+ * required.
+ */
+function prepareWorkerGlobalsForTensorflow(): void {
+  const scope = globalThis as Record<string, unknown>;
+  if (scope.window === undefined) scope.window = globalThis;
+}
+
 /** Basic Pitch emits one frame every 256 samples at 22.05 kHz. */
 const MODEL_FRAME_SEC = 256 / MODEL_SAMPLE_RATE;
+
+/**
+ * Rejects if `work` has not settled in time.
+ *
+ * The abandoned promise is left to finish in the background; there is no way to
+ * cancel work inside a third-party library, and attaching a no-op catch stops
+ * its eventual rejection from being reported as unhandled.
+ */
+function withTimeout<T>(work: Promise<T>, ms: number, detail: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AppError('model_load_failed', 'retry', detail));
+    }, ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function throwIfCancelled(id: string): void {
   if (cancelled.has(id)) throw new AppError('transcription_cancelled', 'none', 'cancelled');

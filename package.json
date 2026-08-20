@@ -2,7 +2,7 @@
   "name": "rhythmisoze",
   "version": "1.0.0",
   "private": true,
-  "description": "Turn your voice into an instrument \u2014 client-first voice-to-instrument sketchpad.",
+  "description": "Turn your voice into an instrument — client-first voice-to-instrument sketchpad.",
   "engines": {
     "node": ">=20.9.0"
   },
@@ -25,7 +25,6 @@
     "@fontsource-variable/vazirmatn": "^5.3.0",
     "@react-three/fiber": "9.7.0",
     "@spotify/basic-pitch": "1.0.1",
-    "@tensorflow/tfjs": "4.22.0",
     "@tonejs/midi": "2.0.28",
     "@vercel/blob": "2.8.0",
     "dexie": "4.4.5",

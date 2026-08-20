@@ -91,6 +91,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
+        # The capture project drives a synthesised hum through getUserMedia and
+        # is the only job that exercises the transcription worker end to end.
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

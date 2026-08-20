@@ -21,7 +21,7 @@ benchmark. Vercel's 250 MB unzipped function limit makes the Python stack
 SoundFont alone is 150 MB — and the 4.5 MB request body limit rules out sending
 raw audio through a Function. Those are hard platform facts, not estimates.
 
-Two facts discovered during implementation change the shape of the decision:
+Three facts discovered during implementation change the shape of the decision:
 
 1. **The model is 0.9 MB, not 20 MB.** `@spotify/basic-pitch@1.0.1` ships
    `model.json` (174 KB) plus one weight shard (742 KB). The PRD's 20 MB figure
@@ -29,11 +29,22 @@ Two facts discovered during implementation change the shape of the decision:
    model is now self-hosted at `public/models/basic-pitch/` and versioned with
    the package (`scripts/sync-model.mjs`), so there is no CDN dependency and no
    cross-origin request.
-2. **`@tensorflow/tfjs@3.x` no longer resolves cleanly.** basic-pitch declares
-   `^3.2.0`; installing it produced a tree missing `@tensorflow/tfjs-core`. The
-   project pins `4.22.0`, which keeps the `GraphModel` and tensor APIs the
-   library uses. This is a deviation from the library's declared peer range and
-   is the single largest untested risk in the audio path.
+2. **TensorFlow.js must be exactly one copy, and it must be basic-pitch's.**
+   An earlier attempt added a top-level `@tensorflow/tfjs@4.22.0` to work around
+   an install failure. npm kept basic-pitch's nested `3.21.0` alongside it, so
+   the worker bundled two runtimes competing over one kernel registry. Melody
+   transcription hung indefinitely; rhythm, which loads no model, was unaffected.
+   The top-level dependency has been removed and the library's own 3.21.0 is the
+   only copy.
+
+3. **TensorFlow.js 3.21 reads `window` while its modules evaluate**, which a
+   Web Worker does not have. The `ReferenceError` is raised from inside the
+   library's own module graph, where none of this project's code is on the stack
+   to catch it, so the request promise never settled and nothing was posted
+   back. The worker now aliases `window` to its global scope immediately before
+   the import (`prepareWorkerGlobalsForTensorflow`), traps escaped errors and
+   unhandled rejections, and applies a watchdog so an unsettled model attempt
+   falls back to the pitch tracker instead of stranding the user.
 
 ## Decision
 
@@ -95,8 +106,9 @@ from *accuracy on human input*.
 
 **Negative**
 
-- The primary path is unverified on real hardware. The pinned TensorFlow.js
-  major differs from the library's declared range.
+- The primary path is unverified on real hardware, though it is now verified in
+  Chromium end to end: `tests/e2e/capture.spec.ts` drives a synthesised hum
+  through `getUserMedia` and asserts the review screen is reached.
 - The fallback is monophonic and less accurate. A user who hits it gets a
   materially different result, labelled but different.
 - The 0.5 × clip duration target is unproven on a mid-range Android.
@@ -109,7 +121,7 @@ from *accuracy on human input*.
 3. Perform the blinded listening comparison.
 4. Re-open this ADR. If the browser path fails on low-end devices, the adapter
    already accommodates a server transcriber (US-0306) with no UI change; if
-   TensorFlow.js 4 proves incompatible with the shipped model, the fallback
-   carries the product while it is resolved.
+   TensorFlow.js proves unable to start on a device, the watchdog and the
+   fallback carry the product while it is resolved.
 
 Until step 4, this ADR is **Accepted for development, not for release**.

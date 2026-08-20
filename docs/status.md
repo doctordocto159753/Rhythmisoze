@@ -49,7 +49,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 |---|---|---|
 | US-0301 normalize audio | Done | `MonoAudio`, deterministic downmix, diagnostics, resampling |
 | US-0302 model load and cache | Built, unverified | Self-hosted 0.9 MB model, versioned, warmed on record hover; load time not measured |
-| US-0303 off the main thread | Built, unverified | Worker with typed protocol, real cancellation, no orphan state; responsiveness not measured on device |
+| US-0303 off the main thread | Done | Worker with typed protocol, real cancellation, an escaped-error trap and a watchdog; verified end to end in Chromium by `tests/e2e/capture.spec.ts` |
 | US-0304 result contract | Done | `TranscriptionResult` versioned; three implementations behind it |
 | US-0305 progress and recovery | Done | Real stages, typed errors, retry without re-recording |
 | US-0306 server adapter | **Not done** | Correctly conditional on ADR-001 selecting a server path. It did not. |
@@ -146,7 +146,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 |---|---|---|
 | US-1201 keyboard and SR | Built, unverified | Full keyboard path, live regions, canvas equivalents; no manual SR test run |
 | US-1202 reduced motion and 3D fallback | Done | Three tiers, designed fallback, identical interactions |
-| US-1203 browser matrix | Built, unverified | Playwright across five projects; no real-device microphone run |
+| US-1203 browser matrix | Built, unverified | Playwright across five projects, plus a capture project driving a fake microphone; no real-device microphone run |
 | US-1204 budgets | Built, unverified | All instrumented; none measured on the matrix |
 | US-1205 security review | Done | Threats and mitigations in ADR-004; 34 tests written as attacks |
 | US-1206 failure and recovery | Done | Offline creation intact, retry paths, localized errors |
@@ -189,7 +189,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 |---|---|
 | G0 product decisions | **Pass** — resolved or explicitly defaulted |
 | G1 architecture benchmark | **Fail** — not run |
-| G2 audio vertical slice | **Pass** — record → transcribe → retouch → instrument → playback |
+| G2 audio vertical slice | **Pass** — record → transcribe → retouch → instrument → playback, asserted end to end in a real browser |
 | G3 local MVP | **Pass** — full local creation, workspace, WAV and MIDI |
 | G4 publish | **Pass** — publish, share, delete, OG |
 | G5 design hardening | **Partial** — system, 3D, motion, RTL done; human audits not run |

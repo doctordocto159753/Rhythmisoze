@@ -18,7 +18,6 @@ migration runner are all implemented here rather than installed.
 | `next` | 16.3.1 | MIT | App Router, routing, server rendering, bundling, image/OG generation | The PRD selects the platform. Pinned exactly rather than to v15 per the package's 2026 correction. |
 | `react` / `react-dom` | 19.2.8 | MIT | UI runtime | Required by Next. |
 | `@spotify/basic-pitch` | 1.0.1 | Apache-2.0 | Audio→MIDI transcription, the PRD's primary path (T-01) | The whole point of the client-first architecture. Dynamically imported; absent from the initial bundle. |
-| `@tensorflow/tfjs` | 4.22.0 | Apache-2.0 | Runtime for the above | basic-pitch declares `^3.2.0`, but 3.x no longer resolves cleanly (`tfjs-core` missing). See ADR-001. |
 | `@tonejs/midi` | 2.0.28 | MIT | Standard MIDI File read and write | Writing a conformant SMF with tempo and time-signature meta events is more subtlety than it looks, and this is the PRD's choice. |
 | `dexie` | 4.4.5 | Apache-2.0 | IndexedDB wrapper for the local workspace | Raw IndexedDB is usable but its transaction and versioning ergonomics invite exactly the bugs that lose a user's work. |
 | `zod` | 4.4.3 | MIT | Server-side request validation | Hand-written validators for the publish endpoints would be the place a security hole hides. |
@@ -28,6 +27,22 @@ migration runner are all implemented here rather than installed.
 | `@react-three/fiber` | 9.7.0 | MIT | React integration for the above | The design package names it. Avoids a hand-rolled imperative bridge between React state and a scene graph. |
 | `@fontsource-variable/inter` | 5.3.0 | OFL-1.1 | Latin typeface | Self-hosted so the CSP stays closed to font CDNs. |
 | `@fontsource-variable/vazirmatn` | 5.3.0 | OFL-1.1 | Persian typeface | Same. Persian must not fall back to a system face (D-0101). |
+
+### TensorFlow.js is deliberately *not* a direct dependency
+
+`@spotify/basic-pitch` bundles its own `@tensorflow/tfjs@3.21.0`, and nothing in
+`src/` imports TensorFlow.js directly.
+
+A top-level `@tensorflow/tfjs@4.22.0` was added at one point to work around an
+install failure. It was a mistake and has been removed: npm kept basic-pitch's
+nested 3.21.0 as well, so **two** copies were bundled into the transcription
+worker, both registering kernels into one shared global registry. The result
+was the melody path hanging forever while rhythm — which never loads a model —
+worked fine.
+
+Do not add it back. If TensorFlow.js is ever needed directly, it has to be the
+same instance basic-pitch resolves, verified with
+`require.resolve('@tensorflow/tfjs', { paths: [...] })` from both roots.
 
 ## Development dependencies
 

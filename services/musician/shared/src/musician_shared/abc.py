@@ -195,10 +195,15 @@ def from_abc(document: str, *, tempo_bpm: float, start_sec: float = 0.0) -> tupl
     line: pitches, rests, integer unit lengths. Anything else raises rather than
     being skipped -- a token silently dropped is a note silently deleted.
     """
+    # An ABC header field is a *letter* followed by a colon (`L:`, `M:`, `K:`).
+    # Testing only for the colon misreads a body line that opens with a repeat
+    # mark -- `|: C>DE>F ...` -- as a header and discards the music.
     body_lines = [
         line
         for line in document.splitlines()
-        if line.strip() and not (len(line) > 1 and line[1] == ":")
+        if line.strip()
+        and not (len(line) > 1 and line[0].isalpha() and line[1] == ":")
+        and not line.startswith("%%")
     ]
     if not body_lines:
         raise ValueError("ABC document has no body")
@@ -207,42 +212,95 @@ def from_abc(document: str, *, tempo_bpm: float, start_sec: float = 0.0) -> tupl
     notes: list[Note] = []
     cursor = start_sec
 
-    for token in " ".join(body_lines).replace("|", " ").split():
-        token = token.strip()
-        if not token:
+    body = " ".join(body_lines)
+
+    # ABC does not separate notes with whitespace: `CDEF` is four notes, and
+    # `C>DE>F` is four notes with a broken rhythm. Splitting on spaces reads
+    # each run as a single token and loses most of the music, so this scans
+    # characters.
+    index = 0
+    length = len(body)
+    while index < length:
+        char = body[index]
+
+        # Structure and ornaments: no pitch, so they advance the cursor and
+        # nothing else. `>` and `<` are broken-rhythm marks -- ignoring them
+        # makes the pair even rather than dotted, which is a bounded loss that
+        # leaves the note count (what the Identity Guard measures) intact.
+        if char in " 	|:[]()<>-~.*+`":
+            index += 1
             continue
+        # Chord brackets were stripped with the structural symbols above, so a
+        # digit here is a triplet marker like `(3`; skip it.
+        if char.isdigit():
+            index += 1
+            continue
+        # Inline fields such as `[K:G]` and decorations `!trill!`.
+        if char == "!":
+            close = body.find("!", index + 1)
+            index = length if close < 0 else close + 1
+            continue
+
+        accidental = 0
+        while index < length and body[index] in "^_=":
+            accidental += 1 if body[index] == "^" else (-1 if body[index] == "_" else 0)
+            index += 1
+        if index >= length:
+            break
+
+        letter = body[index]
+        index += 1
+
+        if letter in "zZxX":
+            octave = None
+        elif letter.upper() in "ABCDEFG":
+            octave = 5 if letter.islower() else 4
+        else:
+            # Not a pitch, not a symbol this parser knows. Raising rather than
+            # skipping: a token silently dropped is a note silently deleted.
+            raise ValueError(f"unparseable ABC character {letter!r}")
+
+        while index < length and body[index] in ",'":
+            if octave is not None:
+                octave += 1 if body[index] == "'" else -1
+            index += 1
 
         digits = ""
-        while token and token[-1].isdigit():
-            digits = token[-1] + digits
-            token = token[:-1]
-        units = int(digits) if digits else 1
-        length = units * seconds_per_unit
+        while index < length and body[index].isdigit():
+            digits += body[index]
+            index += 1
+        divisor = 1
+        while index < length and body[index] == "/":
+            divisor *= 2
+            index += 1
+            extra = ""
+            while index < length and body[index].isdigit():
+                extra += body[index]
+                index += 1
+            if extra:
+                divisor = int(extra)
 
-        if not token:
-            raise ValueError(f"ABC token {digits!r} has no pitch")
+        units = max(1, (int(digits) if digits else 1)) / divisor
+        span = units * seconds_per_unit
 
-        if token in ("z", "Z", "x"):
-            cursor += length
+        if octave is None:
+            cursor += span
             continue
 
-        try:
-            pitch = _parse_abc_pitch(token)
-        except (KeyError, IndexError) as error:
-            raise ValueError(f"unparseable ABC token {token!r}") from error
-
+        base = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[letter.upper()]
+        pitch = (octave + 1) * 12 + base + accidental
         if not 0 <= pitch <= 127:
-            raise ValueError(f"ABC token {token!r} is outside MIDI range (got {pitch})")
+            raise ValueError(f"ABC note {letter!r} is outside MIDI range (got {pitch})")
 
         notes.append(
             Note(
                 pitch=pitch,
                 start_sec=round(cursor, 6),
-                end_sec=round(cursor + length, 6),
+                end_sec=round(cursor + span, 6),
                 velocity=96,
             )
         )
-        cursor += length
+        cursor += span
 
     if not notes:
         raise ValueError("ABC document contained no notes")

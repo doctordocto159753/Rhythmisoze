@@ -30,6 +30,7 @@ decorative.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -176,13 +177,25 @@ def _seeds_for(base_seed: int, policy: VariantPolicy) -> list[int]:
     return [base_seed + offset + i for i in range(policy.candidate_count)]
 
 
-def _rank(candidates: Sequence[_Candidate], source: MusicianInput) -> list[_Candidate]:
-    """Best first.
+def _rank(
+    candidates: Sequence[_Candidate], source: MusicianInput, policy: VariantPolicy
+) -> list[_Candidate]:
+    """Best first, for this variant's definition of best.
 
     Identity alone is the wrong ranking key: it is a guardrail, and maximising
     it selects the candidate that changed least, which is the candidate that did
     the least work. So survivors are ranked on musical structure, with identity
     acting only as the gate they already passed.
+
+    **Growth variants rank differently.** Among candidates that have all passed
+    the guard, the right Expanded result is the one that actually grew --
+    otherwise the smoothest short answer wins and Expanded quietly becomes a
+    second Developed. Found exactly that way: a parser improvement raised the
+    number of surviving candidates, and the ranking promptly picked an 18-note
+    result over a 61-note one.
+
+    The reward is on a log scale and capped, so it prefers growth without
+    turning into "longest wins" -- length past the useful point stops paying.
     """
     source_intervals = intervals_of(source.notes)
     source_smoothness = _local_coherence(source.notes)
@@ -201,8 +214,21 @@ def _rank(candidates: Sequence[_Candidate], source: MusicianInput) -> list[_Cand
                 if a != b
             )
             variety = changed / len(source_intervals)
+        growth = 0.0
+        if policy.identity.allow_growth:
+            source_span = source.notes[-1].end_sec - source.notes[0].start_sec
+            candidate_span = (
+                candidate.notes[-1].end_sec - candidate.notes[0].start_sec
+                if candidate.notes
+                else 0.0
+            )
+            if source_span > 0 and candidate_span > source_span:
+                # log2 so 2x is worth 1 and 8x only 3; capped so a runaway
+                # cannot outrank a musically better shorter passage.
+                growth = min(math.log2(candidate_span / source_span), 3.0) * 0.5
+
         # A little variety is the point; a lot of it is why the guard exists.
-        return (improvement + 0.25 * min(variety, 0.5), -candidate.seed)
+        return (improvement + 0.25 * min(variety, 0.5) + growth, -candidate.seed)
 
     return sorted(candidates, key=score, reverse=True)
 
@@ -390,7 +416,7 @@ def generate_variant(
         )
         return _to_variant(source, fallback, kind), outcomes
 
-    best = _rank(survivors, source)[0]
+    best = _rank(survivors, source, policy)[0]
     best = _run_infill(
         source=source,
         candidate=best,

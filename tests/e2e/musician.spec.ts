@@ -26,11 +26,14 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 
 const JOB_ID = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
 
-function variant(kind: 'refined' | 'developed', transpose: number) {
+function variant(kind: 'refined' | 'developed' | 'expanded', transpose: number, repeats = 1) {
   // Two audibly different variants, so a test can tell which one is playing
   // from the notes rather than from a label.
-  const notes = [0, 2, 4, 5, 7, 5, 4, 2].map((step, index) => ({
-    pitch: 60 + step + transpose,
+  // `repeats` lets Expanded be genuinely longer, so the six-version UI is
+  // exercised against variants that actually differ in length.
+  const shape = [0, 2, 4, 5, 7, 5, 4, 2];
+  const notes = Array.from({ length: shape.length * repeats }, (_, index) => ({
+    pitch: 60 + (shape[index % shape.length] as number) + transpose,
     start_sec: index * 0.5,
     end_sec: index * 0.5 + 0.45,
     velocity: 92,
@@ -68,6 +71,7 @@ function result(seedOffset = 0) {
     source_id: 'e2e',
     refined: variant('refined', seedOffset),
     developed: variant('developed', 7 + seedOffset),
+    expanded: variant('expanded', 2 + seedOffset, 4),
     provenance: {
       melody_t5_revision: 'test-melody-rev',
       midi_rwkv_revision: 'test-rwkv-rev',
@@ -78,7 +82,7 @@ function result(seedOffset = 0) {
       elapsed_ms: 1500,
     },
     diagnostics: {
-      candidate_counts: { refined: 4, developed: 4, accepted: 8 },
+      candidate_counts: { refined: 4, developed: 4, expanded: 5, accepted: 13 },
       rejected_candidates: [],
       identity_guard_summary: { rejection_rate: 0 },
     },
@@ -236,12 +240,21 @@ test.describe('generating Musician versions', () => {
     // Before the result lands, the two versions do not exist. Offering them
     // early would put unplayable entries in the picker.
     await expect(page.getByRole('button', { name: /Shaped/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Grown/i })).toHaveCount(0);
 
     await expect(page.getByRole('button', { name: /Shaped/i })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: /Taken further/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Grown/i })).toBeVisible();
 
-    // Five versions, all switchable without leaving the screen.
-    for (const name of [/Unprocessed/i, /What you played/i, /Tidied up/i, /Shaped/i, /Taken further/i]) {
+    // Six versions, all switchable without leaving the screen (AC-12).
+    for (const name of [
+      /Unprocessed/i,
+      /What you played/i,
+      /Tidied up/i,
+      /Shaped/i,
+      /Taken further/i,
+      /Grown/i,
+    ]) {
       const button = page.getByRole('button', { name }).first();
       await button.click();
       await expect(button).toHaveAttribute('aria-pressed', 'true');

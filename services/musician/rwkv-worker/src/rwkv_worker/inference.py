@@ -41,6 +41,7 @@ from musician_shared.contract import Meter, Note
 from .representation import (
     FILL_BAR_END,
     RepresentationError,
+    banned_token_ids,
     build_infill_prompt,
     check_vocabulary_matches_model,
     describe_layout,
@@ -291,6 +292,9 @@ class RwkvRuntime:
                 top_p=top_p,
                 seed=seed,
                 max_new_tokens=max_new_tokens,
+                bar_id=bar_id,
+                bars_to_infill=bar_count,
+                banned=banned_token_ids(self._vocab),
             )
 
         notes = self._decode_fill(
@@ -323,6 +327,9 @@ class RwkvRuntime:
         top_p: float,
         seed: int,
         max_new_tokens: int,
+        bar_id: int,
+        bars_to_infill: int,
+        banned: set[int],
     ) -> list[int]:
         """Backend-specific sampling over MMM ids.
 
@@ -338,6 +345,9 @@ class RwkvRuntime:
                 top_p=top_p,
                 seed=seed,
                 max_new_tokens=max_new_tokens,
+                bar_id=bar_id,
+                bars_to_infill=bars_to_infill,
+                banned=banned,
             )
         if self._backend == "rwkv.cpp":
             return self._sample_cpp(
@@ -348,28 +358,54 @@ class RwkvRuntime:
                 top_p=top_p,
                 seed=seed,
                 max_new_tokens=max_new_tokens,
+                bar_id=bar_id,
+                bars_to_infill=bars_to_infill,
+                banned=banned,
             )
         raise ModelNotLoaded(f"no sampling path for backend {self._backend!r}")
 
-    def _sample_pip(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens):
-        import torch  # noqa: PLC0415
+    def _sample_pip(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens, bar_id, bars_to_infill, banned):
+        import numpy as np  # noqa: PLC0415
 
-        torch.manual_seed(seed)
-        state = None
-        logits = None
-        for token in prompt:
-            logits, state = self._model.forward([token], state)
+        rng = np.random.default_rng(seed)
+        # Prefill in one call: the RWKV runtime accepts the whole prompt and is
+        # markedly faster than feeding it token by token.
+        logits, state = self._model.forward(list(prompt), None)
 
         out: list[int] = []
         for _ in range(max_new_tokens):
-            token = _sample_logits(logits, temperature=temperature, top_k=top_k, top_p=top_p)
-            if token == stop_id:
+            if self._fill_complete(out, bar_id=bar_id, bars_to_infill=bars_to_infill):
                 break
+            token = _sample_logits(
+                logits,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                rng=rng,
+                banned=banned | {stop_id},
+            )
             out.append(token)
             logits, state = self._model.forward([token], state)
         return out
 
-    def _sample_cpp(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens):
+    def _fill_complete(self, generated: list[int], *, bar_id: int, bars_to_infill: int) -> bool:
+        """Has the model written the bars it was asked for?
+
+        The fork's `StopLogitsProcessor` decides this by counting `Bar_None` in
+        the generated portion and forcing the end token once the count exceeds
+        the number of bars requested. Until then it forbids the end token
+        outright -- which is why `banned` above always includes `stop_id`.
+
+        Without this the model takes the p~0.28 exit immediately and returns an
+        empty bar. That reads as a model failure and is really a missing decode
+        constraint.
+        """
+        if not generated:
+            return False
+        base = from_model_ids(self._tokenizer, generated)
+        return sum(1 for token in base if token == bar_id) > bars_to_infill
+
+    def _sample_cpp(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens, bar_id, bars_to_infill, banned):
         import numpy as np  # noqa: PLC0415
 
         rng = np.random.default_rng(seed)
@@ -380,11 +416,16 @@ class RwkvRuntime:
 
         out: list[int] = []
         for _ in range(max_new_tokens):
-            token = _sample_logits(
-                logits, temperature=temperature, top_k=top_k, top_p=top_p, rng=rng
-            )
-            if token == stop_id:
+            if self._fill_complete(out, bar_id=bar_id, bars_to_infill=bars_to_infill):
                 break
+            token = _sample_logits(
+                logits,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                rng=rng,
+                banned=banned | {stop_id},
+            )
             out.append(token)
             logits, state = self._model.eval(token, state, state, logits)
         return out
@@ -448,7 +489,9 @@ class RwkvRuntime:
         return fitted
 
 
-def _sample_logits(logits, *, temperature: float, top_k: int, top_p: float, rng=None) -> int:
+def _sample_logits(
+    logits, *, temperature: float, top_k: int, top_p: float, rng=None, banned: set[int] | None = None
+) -> int:
     """Nucleus + top-k sampling over a logit vector.
 
     Written out rather than imported so both backends share one definition:
@@ -458,6 +501,10 @@ def _sample_logits(logits, *, temperature: float, top_k: int, top_p: float, rng=
     import numpy as np  # noqa: PLC0415
 
     array = np.asarray(logits, dtype=np.float64).reshape(-1)
+    if banned:
+        for token in banned:
+            if 0 <= token < array.size:
+                array[token] = -1e9
     if temperature <= 0:
         return int(array.argmax())
 

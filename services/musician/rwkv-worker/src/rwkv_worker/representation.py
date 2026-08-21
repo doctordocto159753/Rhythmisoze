@@ -196,6 +196,32 @@ def notes_to_score(
     return score
 
 
+#: Conditioning tokens appended after `FillBar_Start`.
+#:
+#: These are not optional decoration. They are the signal that tells the model
+#: how dense and how polyphonic the bar should be, and the fork's
+#: `python/inference.py` always appends them. Without them the model writes
+#: `Bar_None TimeSig` and then sits at roughly p=0.28 on "end the fill" against
+#: p=0.19 on a real note -- i.e. it produces an empty bar, which reads as a
+#: model failure and is actually a missing prompt.
+DEFAULT_ATTRIBUTE_CONTROLS = (
+    "ACBarOnsetPolyphonyMin_1",
+    "ACBarOnsetPolyphonyMax_1",
+    "ACBarNoteDensity_4",
+    "ACBarNoteDurationWhole_0",
+    "ACBarNoteDurationHalf_0",
+    "ACBarNoteDurationQuarter_1",
+    "ACBarNoteDurationEight_0",
+    "ACBarNoteDurationSixteenth_0",
+)
+
+#: Tokens the model must never emit mid-fill, from the fork's
+#: `StopLogitsProcessor`. 797 is a consecutive `Bar_None`; 663 is labelled
+#: "nonsense token???" in their source and is suppressed there too.
+STRUCTURAL_BANS = ("Track_Start", "Track_End", "Infill_Track", "PAD_None")
+EXTRA_BANNED_IDS = (797, 663, 0)
+
+
 def build_infill_prompt(
     token_ids: list[int],
     bar_token_id: int,
@@ -203,16 +229,16 @@ def build_infill_prompt(
     first_bar_index: int,
     bar_count: int,
     vocab: dict[str, int],
+    time_signature: str = "TimeSig_4/4",
+    attribute_controls: tuple[str, ...] = DEFAULT_ATTRIBUTE_CONTROLS,
 ) -> list[int]:
     """Assemble the bar-infilling prompt, in MIDI-RWKV's own layout.
 
-    Returns the ids up to and including ``FillBar_Start``. The caller samples
-    from there until ``FillBar_End``.
-
-    Mirrors `_tokenize_score`: the masked bars are lifted out, replaced in place
-    by exactly ``bar_count`` ``Infill_Bar`` tokens, and the remainder of the
-    track follows. The extracted content is *not* appended here — at inference
-    it is what the model has to produce.
+    Mirrors `_tokenize_score` for the masking, and the fork's
+    `python/inference.py` for the tail: the prompt does **not** stop at
+    ``FillBar_Start``. It continues with ``Bar_None``, the time signature and
+    the attribute controls for the bar being written, and the model generates
+    the note content from there.
     """
     bar_positions = [index for index, token in enumerate(token_ids) if token == bar_token_id]
     if first_bar_index < 0 or first_bar_index >= len(bar_positions):
@@ -230,7 +256,18 @@ def build_infill_prompt(
     after = token_ids[end_token:]
     masked = [vocab[INFILL_BAR]] * (end_bar_index - first_bar_index)
 
-    return [*before, *masked, *after, vocab[FILL_BAR_START]]
+    tail = [vocab[FILL_BAR_START], vocab["Bar_None"]]
+    if time_signature in vocab:
+        tail.append(vocab[time_signature])
+    tail.extend(vocab[name] for name in attribute_controls if name in vocab)
+
+    return [*before, *masked, *after, *tail]
+
+
+def banned_token_ids(vocab: dict[str, int]) -> set[int]:
+    """Ids the sampler must suppress while a fill is in progress."""
+    banned = {vocab[name] for name in STRUCTURAL_BANS if name in vocab}
+    return banned | set(EXTRA_BANNED_IDS)
 
 
 def to_model_ids(tokenizer, base_ids: list[int]) -> list[int]:
@@ -243,7 +280,7 @@ def to_model_ids(tokenizer, base_ids: list[int]) -> list[int]:
     """
     from miditok import TokSequence  # noqa: PLC0415
 
-    sequence = TokSequence(ids=list(base_ids))
+    sequence = TokSequence(ids=list(base_ids), are_ids_encoded=False)
     tokenizer.encode_token_ids(sequence)
     return list(sequence.ids)
 
@@ -252,7 +289,10 @@ def from_model_ids(tokenizer, model_ids: list[int]) -> list[int]:
     """BPE ids -> base MMM ids, for decoding back to a score."""
     from miditok import TokSequence  # noqa: PLC0415
 
-    sequence = TokSequence(ids=list(model_ids))
+    # `are_ids_encoded=True` is required, not cosmetic: decode_token_ids
+    # checks the flag and silently no-ops otherwise, leaving BPE ids in place
+    # where they look like base ids that are merely out of range.
+    sequence = TokSequence(ids=list(model_ids), are_ids_encoded=True)
     tokenizer.decode_token_ids(sequence)
     return list(sequence.ids)
 

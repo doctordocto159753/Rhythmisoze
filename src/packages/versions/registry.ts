@@ -322,6 +322,60 @@ export function freshGenerated(
 }
 
 /**
+ * Why a generated version is not in the picker.
+ *
+ * Two different things, kept apart because they mean different things to the
+ * person looking at a gap where a version should be.
+ */
+export interface WithheldReasons {
+  /** The Teacher material moved after these were generated. See `isStaleAgainst`. */
+  stale: boolean;
+  /**
+   * The service refused: nothing survived the Identity Guard, so it returned the
+   * Teacher's own notes rather than a variation.
+   *
+   * Not a failure. The model produced candidates and every one of them drifted
+   * too far from the user's idea, so none was offered as the Musician's work.
+   * Offering the fallback would be the exact substitution the guard exists to
+   * prevent — the Teacher presented as the Musician's output — arriving through
+   * the front door.
+   */
+  refused: boolean;
+}
+
+/**
+ * The generated versions that may actually be offered, and why the others cannot.
+ *
+ * Two filters for two different lies the picker would otherwise tell, applied in
+ * one place so the version list and the note resolver cannot disagree. Offering
+ * a version the resolver would refuse, or resolving one the picker withheld, is
+ * how a withheld version gets played anyway.
+ *
+ * Nothing is deleted: the stored record keeps its digest and its flag, so what
+ * happened stays inspectable and the panel can say which of the two occurred.
+ */
+export function offerableGenerated(
+  generated: Partial<Record<MusicalVersionId, GeneratedVersion>>,
+  teacherNotes: readonly NoteEvent[],
+): { offered: Partial<Record<MusicalVersionId, GeneratedVersion>>; withheld: WithheldReasons } {
+  const fresh = freshGenerated(generated, teacherNotes);
+  const offered: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
+  for (const id of MUSICIAN_VERSION_IDS) {
+    const entry = fresh[id];
+    if (entry && entry.provenance.sourceFallback !== true) offered[id] = entry;
+  }
+
+  const withheld: WithheldReasons = { stale: false, refused: false };
+  for (const id of MUSICIAN_VERSION_IDS) {
+    const entry = generated[id];
+    if (!entry) continue;
+    if (entry.provenance.sourceFallback === true) withheld.refused = true;
+    else if (isStaleAgainst(entry, teacherNotes)) withheld.stale = true;
+  }
+  return { offered, withheld };
+}
+
+/**
  * A stable key for a version's rendered audio.
  *
  * Rendering a WAV is expensive and the result is large, so the review screen

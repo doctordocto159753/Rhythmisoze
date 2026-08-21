@@ -196,10 +196,58 @@ export function createMasterBus(
   };
 }
 
+/**
+ * How long the material being played actually lasts, in seconds.
+ *
+ * ## Two durations, not one
+ *
+ * A sketch has a *source duration* — how long the person hummed — and a
+ * *musical duration* — how long the version they are listening to runs. For the
+ * Judge and the Teacher these are near enough the same number that one variable
+ * served for both. For the Musician they are not: Expanded is explicitly allowed
+ * to grow the idea, and a real 10.14 s take came back as a 38.74 s passage.
+ *
+ * The renderer sized its offline context from the source duration, so the WAV
+ * was 10.14 s of music plus the release tail and stopped there — 12.14 s of a
+ * 38.74 s piece, with the rest silently absent. Nothing errored; the file was
+ * just short. Deriving the length from the notes that will actually be
+ * scheduled is what makes that unrepresentable.
+ *
+ * `floorSec` is the source duration where it still matters: a take with trailing
+ * silence after the last note should still render its full length, which is the
+ * behaviour every non-generated version already had.
+ *
+ * The synthesis tail — release and reverb — is deliberately *not* included. It
+ * is appended by the renderer on top of this value, because it is decay after
+ * the music rather than part of it, and baking it in here would make every
+ * subsequent length calculation drift by a tail.
+ */
+export function musicalDurationSec(
+  notes: readonly NoteEvent[],
+  drums: readonly DrumEvent[],
+  floorSec = 0,
+): number {
+  let end = Number.isFinite(floorSec) && floorSec > 0 ? floorSec : 0;
+  for (const note of notes) {
+    if (Number.isFinite(note.endSec) && note.endSec > end) end = note.endSec;
+  }
+  for (const drum of drums) {
+    // A drum event has an onset and no length; its decay lives in the render
+    // tail, exactly like a note's release does.
+    if (Number.isFinite(drum.timeSec) && drum.timeSec > end) end = drum.timeSec;
+  }
+  return end;
+}
+
 export interface RenderRequest {
   instrumentId: string;
   notes: readonly NoteEvent[];
   drums: readonly DrumEvent[];
+  /**
+   * How much music to render, in seconds — the *musical* duration of what is
+   * being played, not the duration of the recording it came from. See
+   * `musicalDurationSec`. The release and reverb tail is added on top of this.
+   */
   durationSec: number;
   master?: MasterSettings;
   sampleRate?: number;
@@ -225,6 +273,9 @@ export interface RenderResult {
  * faster-than-real-time target achievable without any special-casing. The tail
  * is padded by the instrument's own release so a final held note is not cut off
  * mid-decay - a truncated last note is the single most noticeable render bug.
+ *
+ * `durationSec` is the *musical* length of what is being rendered, and acts as a
+ * floor rather than a ceiling: see `musicalDurationSec`.
  */
 export async function renderSketch(request: RenderRequest): Promise<RenderResult> {
   if (typeof OfflineAudioContext === 'undefined') {
@@ -240,7 +291,13 @@ export async function renderSketch(request: RenderRequest): Promise<RenderResult
   // Natural sample tail plus the generated room. Procedural instruments retain
   // the original two-second floor; the recorded kit needs its full room decay.
   const tail = Math.max(2, (instrument.renderTailSec ?? 0.4) + 1.6);
-  const length = Math.max(1, Math.ceil((request.durationSec + tail) * sampleRate));
+  // An invariant, not a fallback: the render is never shorter than the material
+  // it was handed. A buffer sized below the last scheduled event produces a file
+  // that is quietly missing the end of the piece, with no error anywhere — which
+  // is exactly how a 38.74 s Musician passage came out as a 12.14 s WAV. The
+  // caller still passes the right duration; this makes the wrong one harmless.
+  const musicalSec = musicalDurationSec(request.notes, request.drums, request.durationSec);
+  const length = Math.max(1, Math.ceil((musicalSec + tail) * sampleRate));
   const context = new OfflineAudioContext(2, length, sampleRate);
 
   request.onProgress?.(0.1);
@@ -265,7 +322,9 @@ export async function renderSketch(request: RenderRequest): Promise<RenderResult
   return {
     buffer,
     elapsedMs,
-    realtimeRatio: request.durationSec > 0 ? elapsedMs / 1000 / request.durationSec : 0,
+    // Against the music actually rendered, so the performance budget is not
+    // flattered by a long version that was measured as a short one.
+    realtimeRatio: musicalSec > 0 ? elapsedMs / 1000 / musicalSec : 0,
     engineId: preparation.engineId,
     fellBack: preparation.fellBack,
   };

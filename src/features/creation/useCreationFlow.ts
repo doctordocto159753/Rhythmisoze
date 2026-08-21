@@ -56,7 +56,10 @@ import {
   compareTempos,
   defaultVersion,
   planVersions,
+  resolveVersionTempo,
   type PerformanceRhythm,
+  type PerformanceTempo,
+  type TempoChoice,
   type TempoDisagreement,
   type VersionId,
   type VersionRecipe,
@@ -70,19 +73,18 @@ import {
 } from '@/features/musician';
 import {
   describeVersion,
-  freshGenerated,
   isMusicianVersion,
-  isStaleAgainst,
   notesForVersion,
+  offerableGenerated,
   renderCacheKey,
-  type GeneratedVersion,
   type MusicalVersionId,
   type VersionNoteSources,
 } from '@versions';
-import type { MusicianRequest } from '@musician-client';
+import { buildMusicianRequest as assembleMusicianRequest, type MusicianRequest } from '@musician-client';
 import { importMidi } from '@midi';
 import {
   DEFAULT_MASTER,
+  musicalDurationSec,
   playSketch,
   renderSketch,
   resolveInstrument,
@@ -126,6 +128,14 @@ export interface FlowState {
   audio: MonoAudio | null;
   /** Exact source bytes, retained locally for export and never published. */
   source: LocalSourceAsset | null;
+  /**
+   * How long the *recording* is.
+   *
+   * Source evidence, and only that. It is what the Judge, the Teacher and the
+   * Identity Guard measure the performance against, and it must keep meaning
+   * that even when the version being listened to is four times longer. What is
+   * played back and rendered is `musicalDurationSec`, derived from the notes.
+   */
   durationSec: number;
   validation: AudioValidation | null;
 
@@ -141,6 +151,14 @@ export interface FlowState {
   retouchAmount: number;
   /** Which performance version the user is listening to; null means the default. */
   versionId: VersionId | null;
+  /**
+   * Which tempo the user has asked the musical versions to be built on.
+   *
+   * `'performance'` unless they explicitly asked for the metronome value. It is
+   * never set by the app: a confidence score is not a user decision, and letting
+   * one act like one is the whole of the bug this field exists to close.
+   */
+  tempoChoice: TempoChoice;
   keyOverride: { root: string; mode: 'major' | 'minor' } | null;
 
   instrumentId: string;
@@ -215,6 +233,7 @@ type Action =
     }
   | { type: 'setRetouch'; amount: number }
   | { type: 'setVersion'; versionId: VersionId }
+  | { type: 'setTempoChoice'; choice: TempoChoice }
   | { type: 'setKey'; key: FlowState['keyOverride'] }
   | { type: 'setInstrument'; id: string }
   | { type: 'setMaster'; master: Partial<MasterSettings> }
@@ -256,6 +275,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     progress: null,
     retouchAmount: RETOUCH_AMOUNT_DEFAULT,
     versionId: null,
+    tempoChoice: 'performance',
     keyOverride: null,
     instrumentId: resolveInstrument(undefined, mode).id,
     master: DEFAULT_MASTER,
@@ -350,8 +370,10 @@ function reducer(state: FlowState, action: Action): FlowState {
         melodyQuality: action.melodyQuality,
         progress: null,
         // A new take has its own tempo and groove, so the previous choice of
-        // version described a performance that no longer exists.
+        // version described a performance that no longer exists. The same goes
+        // for a tempo override: it was a judgement about a different take.
         versionId: null,
+        tempoChoice: 'performance',
         // A new transcription invalidates any previous render.
         renderedAudio: null,
         renderRealtimeRatio: null,
@@ -361,6 +383,12 @@ function reducer(state: FlowState, action: Action): FlowState {
         ...state,
         mode: action.mode,
         bpm: action.bpm,
+        // A MIDI file states its own tempo, and a stated tempo is a fact about
+        // the music rather than a click track the performer was free to drift
+        // from. Detection exists for performances; here there is nothing to
+        // detect that the file has not already said. The user can still switch
+        // to the detected pulse from the picker.
+        tempoChoice: 'metronome',
         meter: action.meter,
         instrumentId: resolveInstrument(undefined, action.mode).id,
         audio: null,
@@ -380,6 +408,11 @@ function reducer(state: FlowState, action: Action): FlowState {
       return { ...state, retouchAmount: action.amount, renderedAudio: null };
     case 'setVersion':
       return { ...state, versionId: action.versionId, renderedAudio: null };
+    case 'setTempoChoice':
+      // Changes the grid every version is built on, so the render no longer
+      // matches. The render key would catch this anyway; clearing here keeps it
+      // consistent with every other input that moves the notes.
+      return { ...state, tempoChoice: action.choice, renderedAudio: null };
     case 'setKey':
       return { ...state, keyOverride: action.key, renderedAudio: null };
     case 'setInstrument':
@@ -460,6 +493,28 @@ export function useCreationFlow(locale: Locale) {
     const notes = state.judge?.notes ?? state.rawNotes;
     return notes.length > 0 ? analyzeMelodyRhythm(notes, state.durationSec) : null;
   }, [state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
+
+  /**
+   * The tempo the music is interpreted at, and where it came from.
+   *
+   * The single answer to "what tempo is this?", resolved once here and used by
+   * every consumer — the version recipes, the Musician request, the exported
+   * MIDI, the piano roll's bar lines. They previously each re-derived it from
+   * `rhythm.reliable`, which is how the Musician could be asked for one tempo
+   * while the picker displayed another.
+   *
+   * `resolveVersionTempo` owns the rule; this only supplies the inputs. In
+   * particular the tapped value reaches it as an explicit *choice*, never as a
+   * fallback triggered by low confidence.
+   */
+  const performanceTempo = useMemo<PerformanceTempo | null>(() => {
+    if (state.bpm === null) return null;
+    return resolveVersionTempo({
+      rhythm,
+      tappedBpm: state.bpm,
+      tempoChoice: state.tempoChoice,
+    });
+  }, [rhythm, state.bpm, state.tempoChoice]);
 
   /**
    * What a teacher would suggest, computed from the Judge's reading.
@@ -554,26 +609,14 @@ export function useCreationFlow(locale: Locale) {
    * Neither is deleted. The stored record keeps its digest and its flag, so what
    * happened stays inspectable and the panel can say which of the two occurred.
    */
-  const offeredGenerated = useMemo(() => {
-    const fresh = freshGenerated(musician.generated, teacherNotes);
-    const offered: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
-    for (const [id, entry] of Object.entries(fresh)) {
-      if (entry && !entry.provenance.sourceFallback) offered[id as MusicalVersionId] = entry;
-    }
-    return offered;
-  }, [musician.generated, teacherNotes]);
+  const offerable = useMemo(
+    () => offerableGenerated(musician.generated, teacherNotes),
+    [musician.generated, teacherNotes],
+  );
+  const offeredGenerated = offerable.offered;
 
   /** Why a generated version is missing, so the panel can say so rather than just omit it. */
-  const musicianWithheld = useMemo(() => {
-    let stale = false;
-    let refused = false;
-    for (const entry of Object.values(musician.generated)) {
-      if (!entry) continue;
-      if (entry.provenance.sourceFallback) refused = true;
-      else if (isStaleAgainst(entry, teacherNotes)) stale = true;
-    }
-    return { stale, refused };
-  }, [musician.generated, teacherNotes]);
+  const musicianWithheld = offerable.withheld;
 
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
@@ -581,13 +624,16 @@ export function useCreationFlow(locale: Locale) {
     return planVersions({
       rhythm,
       tappedBpm: state.bpm,
+      // Passed through rather than resolved here: `planVersions` and
+      // `performanceTempo` must agree, and they agree by calling the same rule.
+      tempoChoice: state.tempoChoice,
       mode: state.mode,
       amount: state.retouchAmount,
       // Only versions whose notes actually exist are offered, so the picker can
       // never show something that cannot be played.
       generated: Object.keys(offeredGenerated) as MusicalVersionId[],
     });
-  }, [rhythm, state.bpm, state.mode, state.retouchAmount, offeredGenerated]);
+  }, [rhythm, state.bpm, state.tempoChoice, state.mode, state.retouchAmount, offeredGenerated]);
 
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {
@@ -668,24 +714,17 @@ export function useCreationFlow(locale: Locale) {
   const refinedRef = useRef<RefineResult | null>(null);
 
   const buildMusicianRequest = useCallback((): MusicianRequest | null => {
-    const notes = notesForVersion('teacher', versionNoteSources);
-    if (!notes || notes.length === 0) return null;
     if (state.bpm === null) return null;
-
+    // Resolved once, in one place, and handed over already decided. The builder
+    // has no access to the tapped tempo, so the substitution this bug was made
+    // of cannot be reintroduced there.
+    const tempo = performanceTempo ?? resolveVersionTempo({ rhythm, tappedBpm: state.bpm });
     const analysis = refinedRef.current?.analysis ?? null;
-    return {
+    return assembleMusicianRequest({
       sourceId: state.sketchId,
-      notes,
-      bpm: rhythm?.reliable ? rhythm.tempo.bpm : state.bpm,
-      tempoConfidence: rhythm?.reliable ? rhythm.tempo.confidence : 0.4,
-      meter: {
-        numerator: state.meter.beatsPerBar,
-        denominator: state.meter.beatUnit,
-        // The service refuses a meter it is not confident about rather than
-        // assuming 4/4, so this has to be the real figure. The app does not
-        // detect meter, it is set by the user, which is a strong signal.
-        confidence: 0.8,
-      },
+      versionNotes: versionNoteSources,
+      tempo: { bpm: tempo.bpm, confidence: tempo.confidence },
+      meter: { beatsPerBar: state.meter.beatsPerBar, beatUnit: state.meter.beatUnit },
       key: analysis
         ? {
             tonic: analysis.keyRoot,
@@ -693,9 +732,20 @@ export function useCreationFlow(locale: Locale) {
             confidence: analysis.keyConfidence,
           }
         : null,
-      durationSec: state.durationSec,
-    };
-  }, [versionNoteSources, state.bpm, state.sketchId, state.meter, state.durationSec, rhythm]);
+      // The *source* duration. This is the span the Teacher material occupies
+      // and what the service's Identity Guard measures a candidate against; it
+      // is not a budget for the result, which Expanded is meant to exceed.
+      sourceDurationSec: state.durationSec,
+    });
+  }, [
+    versionNoteSources,
+    state.bpm,
+    state.sketchId,
+    state.meter,
+    state.durationSec,
+    rhythm,
+    performanceTempo,
+  ]);
 
   /** The refined result. Pure and cheap, so it is derived rather than stored. */
   const refined = useMemo<RefineResult | null>(() => {
@@ -760,6 +810,27 @@ export function useCreationFlow(locale: Locale) {
   }, [refined]);
 
   /**
+   * How long the version being listened to actually lasts.
+   *
+   * Not `state.durationSec`. That is how long the person hummed, and the two are
+   * different quantities that happened to be close enough to share a variable
+   * until the Musician arrived. Expanded is explicitly allowed to grow the idea:
+   * a real 10.14 s take came back as a 38.74 s passage, and because playback,
+   * the offline render, the piano roll and the render key all read the source
+   * duration, the exported WAV was 12.14 s — the recording's length plus the
+   * release tail — and the last twenty-six seconds of the piece simply were not
+   * there. No error, no warning, just a short file.
+   *
+   * The source duration stays in the calculation as a floor, so a take with
+   * silence after its last note still plays its full length, which is what every
+   * derived version already did.
+   */
+  const musicalDuration = useMemo(
+    () => musicalDurationSec(refined?.notes ?? [], refined?.drums ?? [], state.durationSec),
+    [refined, state.durationSec],
+  );
+
+  /**
    * Everything a render depends on, as one string.
    *
    * `renderCacheKey` supplies the version's own identity — for a generated
@@ -780,7 +851,9 @@ export function useCreationFlow(locale: Locale) {
         bpm: activeVersion?.bpm ?? state.bpm,
         retouchAmount: activeVersion?.amount ?? state.retouchAmount,
       }),
-      state.durationSec.toFixed(3),
+      // The rendered length, not the recorded one: two versions of one take
+      // that differ only in how long they run must not share a render.
+      musicalDuration.toFixed(3),
       state.master.volume.toFixed(3),
       state.master.reverb.toFixed(3),
       refined.drums.length,
@@ -792,7 +865,7 @@ export function useCreationFlow(locale: Locale) {
     state.instrumentId,
     state.bpm,
     state.retouchAmount,
-    state.durationSec,
+    musicalDuration,
     state.master,
   ]);
 
@@ -1195,7 +1268,11 @@ export function useCreationFlow(locale: Locale) {
         instrumentId: state.instrumentId,
         notes: refined.notes,
         drums: refined.drums,
-        durationSec: state.durationSec,
+        // The version's own length. Scheduling has always covered every note,
+        // but the playhead is driven from this and would otherwise finish a
+        // third of the way through an Expanded passage and sit at the end while
+        // the music kept going.
+        durationSec: musicalDuration,
         master: state.master,
       });
       playbackRef.current = handle;
@@ -1203,10 +1280,10 @@ export function useCreationFlow(locale: Locale) {
     } catch (error) {
       fail(error);
     }
-  }, [refined, state.instrumentId, state.master, state.durationSec, stopPlayback, fail]);
+  }, [refined, state.instrumentId, state.master, musicalDuration, stopPlayback, fail]);
 
   const render = useCallback(async () => {
-    if (!refined || state.durationSec <= 0) return null;
+    if (!refined || musicalDuration <= 0) return null;
     // Captured before the await, not after it. The ref moves when the screen
     // moves; stamping the *finished* key onto audio rendered from the material
     // as it was at the start would label a stale render as current, which is the
@@ -1221,7 +1298,8 @@ export function useCreationFlow(locale: Locale) {
         instrumentId: state.instrumentId,
         notes: refined.notes,
         drums: refined.drums,
-        durationSec: state.durationSec,
+        // The whole selected version, however far past the recording it runs.
+        durationSec: musicalDuration,
         master: state.master,
       });
       const channels: Float32Array[] = [];
@@ -1249,7 +1327,7 @@ export function useCreationFlow(locale: Locale) {
       fail(error);
       return null;
     }
-  }, [refined, state.durationSec, state.instrumentId, state.master, send, stopPlayback, fail]);
+  }, [refined, musicalDuration, state.instrumentId, state.master, send, stopPlayback, fail]);
 
   // --- Persistence -------------------------------------------------------
 
@@ -1363,6 +1441,25 @@ export function useCreationFlow(locale: Locale) {
     refined,
     /** What the performance itself said about tempo, meter and groove. */
     rhythm,
+    /**
+     * The tempo the music is interpreted at, and where that tempo came from.
+     *
+     * Read by everything that needs *the music's* tempo rather than the
+     * metronome's: the exported MIDI's tempo map, the piano roll's bar lines,
+     * the published metadata. `state.bpm` remains the metronome value and keeps
+     * driving the metronome, the count-in and the tempo controls.
+     */
+    performanceTempo,
+    /**
+     * How long the selected version runs, in seconds.
+     *
+     * Distinct from `state.durationSec`, which is how long the recording is.
+     * Playback, rendering, the piano roll and the published metadata all measure
+     * the music; the Judge, the Teacher and the Identity Guard all measure the
+     * recording. Collapsing the two truncated Expanded to the length of the hum
+     * it grew from.
+     */
+    musicalDurationSec: musicalDuration,
     /** The versions on offer; the original performance is always one of them. */
     versions,
     activeVersion,
@@ -1422,6 +1519,16 @@ export function useCreationFlow(locale: Locale) {
       reprocess,
       setRetouch,
       setVersion: (versionId: VersionId) => dispatch({ type: 'setVersion', versionId }),
+      /**
+       * The user overruling which tempo the versions are built on.
+       *
+       * The only route by which the tapped value can become the musical tempo of
+       * a take that had a measurable pulse of its own.
+       */
+      setTempoChoice: (choice: TempoChoice) => {
+        dispatch({ type: 'setTempoChoice', choice });
+        track('tempo_set', { method: choice === 'metronome' ? 'metronome-choice' : 'performance-choice', bpm: state.bpm ?? 0 });
+      },
       setKey: (key: FlowState['keyOverride']) => dispatch({ type: 'setKey', key }),
       setInstrument,
       setMaster: (master: Partial<MasterSettings>) => dispatch({ type: 'setMaster', master }),

@@ -14,7 +14,13 @@ import { useLocale } from '@/i18n/provider';
 import { PianoRoll } from './PianoRoll';
 import styles from './ReviewStage.module.css';
 
-import type { PerformanceRhythm, TempoDisagreement, VersionId, VersionRecipe } from '@rhythm-extraction';
+import type {
+  PerformanceRhythm,
+  TempoChoice,
+  TempoDisagreement,
+  VersionId,
+  VersionRecipe,
+} from '@rhythm-extraction';
 import { MusicianPanel, type MusicianPanelProps } from '@/features/musician';
 import { VersionPicker } from './VersionPicker';
 
@@ -40,8 +46,18 @@ export interface ReviewStageProps {
   diagnostics: ProcessingDiagnostics | null;
   melodyQuality: MelodyConfidence | null;
   mode: 'melody' | 'rhythm';
+  /** The tempo the music is built on. Not the metronome — see `tappedBpm`. */
   bpm: number;
+  /** What the user tapped or set on the metronome. Null before they set one. */
+  tappedBpm: number | null;
+  /** Which of the two the versions are currently built on. */
+  tempoChoice: TempoChoice;
+  onTempoChoiceChange(choice: TempoChoice): void;
   meter: Meter;
+  /**
+   * How long the selected version runs — the *musical* duration, which for a
+   * Musician version can be several times the length of the recording.
+   */
   durationSec: number;
   retouchAmount: number;
   instrumentId: string;
@@ -78,6 +94,9 @@ export function ReviewStage({
   melodyQuality,
   mode,
   bpm,
+  tappedBpm,
+  tempoChoice,
+  onTempoChoiceChange,
   meter,
   durationSec,
   retouchAmount,
@@ -100,10 +119,15 @@ export function ReviewStage({
   const analysis = refined.analysis;
   // A tapped tempo that is half or double what the app heard is the single most
   // common reason a result feels wrong, so it is surfaced rather than buried.
+  //
+  // Measured against the *tapped* value on purpose. `bpm` is now the tempo the
+  // music is built on, and comparing the detected tempo with itself would make
+  // this notice permanently silent.
   const tempoMismatch =
     mode === 'melody' &&
+    tappedBpm !== null &&
     analysis.detectedBpm > 0 &&
-    Math.abs(analysis.detectedBpm - bpm) / bpm > 0.15 &&
+    Math.abs(analysis.detectedBpm - tappedBpm) / tappedBpm > 0.15 &&
     refined.report.gridError < 0.2;
 
   return (
@@ -168,6 +192,9 @@ export function ReviewStage({
         activeId={activeVersionId}
         rhythm={rhythm}
         disagreement={tempoDisagreement}
+        tappedBpm={tappedBpm}
+        tempoChoice={tempoChoice}
+        onTempoChoiceChange={onTempoChoiceChange}
         judge={judge}
         lesson={lesson}
         onSelect={onVersionChange}

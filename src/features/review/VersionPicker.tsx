@@ -2,8 +2,9 @@
 
 import type { JudgeVerdict } from '@contracts';
 import type { TeacherResult } from '@music-teacher';
-import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
+import type { PerformanceRhythm, TempoChoice, VersionId, VersionRecipe } from '@rhythm-extraction';
 import type { TempoDisagreement } from '@rhythm-extraction';
+import { Button } from '@/components/Button';
 import { Row, Stack, Well } from '@/components/Layout';
 import { Bdi, Text } from '@/components/Text';
 import { useMessages } from '@/i18n/provider';
@@ -14,6 +15,11 @@ export interface VersionPickerProps {
   activeId: VersionId | null;
   rhythm: PerformanceRhythm | null;
   disagreement: TempoDisagreement | null;
+  /** What the user tapped. Offered as an alternative, never applied on its own. */
+  tappedBpm: number | null;
+  /** Which tempo the versions are built on right now. */
+  tempoChoice: TempoChoice;
+  onTempoChoiceChange(choice: TempoChoice): void;
   /** The Judge's verdict, shown against the reading it produced. */
   judge: JudgeVerdict | null;
   /** The teacher's suggestions, shown against the reading they apply to. */
@@ -42,6 +48,9 @@ export function VersionPicker({
   activeId,
   rhythm,
   disagreement,
+  tappedBpm,
+  tempoChoice,
+  onTempoChoiceChange,
   judge,
   lesson,
   onSelect,
@@ -54,9 +63,24 @@ export function VersionPicker({
       ? t.versions.halfOrDouble(Math.round(disagreement.detectedBpm), Math.round(disagreement.tappedBpm))
       : disagreement && disagreement.kind === 'different'
         ? t.versions.different(Math.round(disagreement.detectedBpm), Math.round(disagreement.tappedBpm))
-        : rhythm !== null && !rhythm.reliable
+        : // Only when there was genuinely no pulse to hear. An uncertain reading
+          // is still a reading, and saying "no tempo was heard" over one would
+          // misdescribe both what happened and what the versions are built on.
+          rhythm !== null && !rhythm.measured
           ? t.versions.tempoNotHeard
           : null;
+
+  /**
+   * The metronome value, offered rather than imposed.
+   *
+   * The app builds every version on the performance's own pulse. Someone who
+   * tapped 103 deliberately and drifted while humming may genuinely want 103
+   * back, and this is how they say so — an explicit choice with a visible
+   * effect, which is the only form in which the tapped tempo is allowed to
+   * become the musical tempo of a take that had a pulse of its own.
+   */
+  const canChooseMetronome = tappedBpm !== null && rhythm !== null && rhythm.measured;
+  const detectedBpm = rhythm !== null ? Math.round(rhythm.tempo.bpm) : null;
 
   return (
     <Well as="section" aria-labelledby="versions-heading">
@@ -104,11 +128,17 @@ export function VersionPicker({
                   ) : null}
                   {/* Tempo and its provenance, isolated so the Latin BPM value
                       cannot reorder the Persian sentence around it. */}
+                  {/* Three states, because there are three: heard clearly,
+                      heard but not certainly, and taken from the metronome.
+                      Collapsing the middle one into either neighbour is how the
+                      app either overclaims or hides which tempo it used. */}
                   <span className={styles.tempo}>
                     <Bdi dir="auto">
-                      {version.tempoSource === 'detected'
-                        ? t.versions.heardTempo(Math.round(version.bpm))
-                        : t.versions.tappedTempo(Math.round(version.bpm))}
+                      {version.tempoSource !== 'detected'
+                        ? t.versions.tappedTempo(Math.round(version.bpm))
+                        : version.tempoReliable
+                          ? t.versions.heardTempo(Math.round(version.bpm))
+                          : t.versions.heardTempoUncertain(Math.round(version.bpm))}
                     </Bdi>
                   </span>
                 </button>
@@ -133,6 +163,20 @@ export function VersionPicker({
             <Text variant="micro" muted>
               {notice}
             </Text>
+          </Row>
+        ) : null}
+
+        {canChooseMetronome && tappedBpm !== null && detectedBpm !== null ? (
+          <Row gap={2}>
+            {tempoChoice === 'metronome' ? (
+              <Button kind="quiet" size="small" onClick={() => onTempoChoiceChange('performance')}>
+                {t.versions.usePerformanceTempo(detectedBpm)}
+              </Button>
+            ) : (
+              <Button kind="quiet" size="small" onClick={() => onTempoChoiceChange('metronome')}>
+                {t.versions.useTappedTempo(Math.round(tappedBpm))}
+              </Button>
+            )}
           </Row>
         ) : null}
       </Stack>

@@ -154,8 +154,16 @@ export const en = {
       count === 1 ? '1 suggestion' : `${count} suggestions`,
     teacherNone: 'Nothing to suggest — this already works.',
     heardTempo: (bpm: number) => `heard at ${bpm} BPM`,
+    // The middle state, and the reason it has its own string: the app measured
+    // a pulse and is not certain of the number. It still uses it — the
+    // performance is the performance — but it says so rather than either
+    // claiming certainty or quietly swapping in the metronome.
+    heardTempoUncertain: (bpm: number) => `heard at about ${bpm} BPM`,
     tappedTempo: (bpm: number) => `your ${bpm} BPM`,
-    tempoNotHeard: 'No clear pulse was heard, so your tapped speed is used.',
+    // Only shown when there was genuinely nothing to measure.
+    tempoNotHeard: 'No pulse could be heard in this take, so your tapped speed is used.',
+    useTappedTempo: (bpm: number) => `Use my ${bpm} BPM instead`,
+    usePerformanceTempo: (bpm: number) => `Back to the ${bpm} BPM heard here`,
     halfOrDouble: (heard: number, tapped: number) =>
       `You tapped ${tapped} BPM and this sounds like ${heard} BPM — likely counted twice as fast or twice as slow.`,
     different: (heard: number, tapped: number) =>
@@ -199,8 +207,13 @@ export const en = {
       // Not failures. The musician ran, and the honest outcome was nothing to
       // offer -- said plainly, because a version quietly missing from the picker
       // is indistinguishable from a bug.
+      // Not a failure, and not "nothing to add" either. Candidates *were*
+      // produced; every one of them drifted far enough from the user's melody
+      // that the identity check refused it, and the Teacher's own version was
+      // returned instead of a variation pretending to be one. The old wording
+      // read as a technical fault and described a decision that was never made.
       refused:
-        'The musician could not find anything to add to this one, so it is not offered. Try another gives it a different starting point.',
+        'No Musician variation stayed close enough to your original idea, so this version was withheld. Try another for a different take.',
       stale:
         'You have changed the tidied version since these were made, so they are no longer offered. Generate again to match what you have now.',
       keepNew: 'Keep the new ones',

@@ -265,8 +265,13 @@ describe('version planning', () => {
     }
   });
 
-  it('falls back to the tapped tempo when detection is unreliable', () => {
+  it('falls back to the tapped tempo only when there was no pulse to measure', () => {
+    // Two onsets cannot establish a tempo at all, which is a different state
+    // from having measured one and being unsure of it. Low confidence keeps the
+    // measurement; no measurement is the one case that reaches for the tap. See
+    // `tests/unit/tempo-source.test.ts` for the distinction in full.
     const sparse = analyzeMelodyRhythm(notes.slice(0, 2), 2);
+    expect(sparse.measured).toBe(false);
     const plan = planVersions({ rhythm: sparse, tappedBpm: 132, mode: 'melody', amount: 55 });
     for (const version of plan) {
       expect(version.bpm).toBe(132);
@@ -298,8 +303,12 @@ describe('tempo disagreement', () => {
     expect(compareTempos(rhythm, 80).kind).toBe('none');
   });
 
-  it('says nothing when detection is unreliable', () => {
+  it('says nothing when there was no pulse to compare against', () => {
+    // It does still speak up for a measured-but-uncertain tempo: suppressing the
+    // comparison there hid the disagreement in exactly the case the user most
+    // needed to see it.
     const sparse = analyzeMelodyRhythm(notes.slice(0, 2), 2);
+    expect(sparse.measured).toBe(false);
     expect(compareTempos(sparse, 200).kind).toBe('none');
   });
 });

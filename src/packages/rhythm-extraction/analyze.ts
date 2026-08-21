@@ -22,7 +22,22 @@ export interface PerformanceRhythm {
   tempo: TempoEstimate;
   meter: MeterEstimate;
   groove: GrooveProfile;
-  /** `true` when the detection is solid enough to build a grid on. */
+  /**
+   * `true` when there was enough of a performance to estimate a tempo at all.
+   *
+   * This — not `reliable` — is what decides whether the music has a pulse of its
+   * own. A measured-but-uncertain estimate is still the performance's tempo; the
+   * only case where the app has no performance tempo is the one where it could
+   * not measure one.
+   */
+  measured: boolean;
+  /**
+   * `true` when the estimate is certain enough to state plainly as what the app
+   * heard.
+   *
+   * A presentation and hedging signal, never a source-of-truth switch. See
+   * `TEMPO_CONFIDENCE_FLOOR`.
+   */
   reliable: boolean;
   onsetCount: number;
 }
@@ -73,7 +88,8 @@ export function analyzePerformanceRhythm(
     tempo,
     meter,
     groove,
-    reliable: tempo.confidence >= TEMPO_CONFIDENCE_FLOOR,
+    measured: tempo.measured,
+    reliable: tempo.measured && tempo.confidence >= TEMPO_CONFIDENCE_FLOOR,
     onsetCount: onsets.length,
   };
 }

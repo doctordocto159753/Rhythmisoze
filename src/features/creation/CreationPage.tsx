@@ -49,6 +49,8 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
     activeVersion,
     lesson,
     tempoDisagreement,
+    performanceTempo,
+    musicalDurationSec,
     musician,
     versionNotes,
     versionProvenance,
@@ -107,6 +109,16 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
   }
 
   const beatSeconds = state.bpm !== null ? 60 / state.bpm : 0.6;
+  /**
+   * The tempo of the music, for everything downstream of the review screen.
+   *
+   * `state.bpm` is the metronome: it belongs to the recording session, and it
+   * still drives the count-in, the click and the tempo controls above. What the
+   * piano roll rules bar lines at, what the exported MIDI is stamped with and
+   * what the published sketch reports is the tempo the version is actually
+   * built on — which is the performance's own, unless the user asked otherwise.
+   */
+  const musicalBpm = activeVersion?.bpm ?? performanceTempo?.bpm ?? state.bpm ?? 100;
   // Register 0..1 from the current take's pitch range, used only to bias the
   // 3D object vertically. Falls back to the middle when there is nothing yet.
   const register =
@@ -295,9 +307,12 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             diagnostics={state.diagnostics}
             melodyQuality={state.melodyQuality}
             mode={state.mode}
-            bpm={state.bpm ?? 100}
+            bpm={musicalBpm}
+            tappedBpm={state.bpm}
+            tempoChoice={state.tempoChoice}
+            onTempoChoiceChange={actions.setTempoChoice}
             meter={state.meter}
-            durationSec={state.durationSec}
+            durationSec={musicalDurationSec}
             retouchAmount={state.retouchAmount}
             instrumentId={state.instrumentId}
             playing={state.playing}
@@ -331,7 +346,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             <ExportPanel
               title={state.title}
               mode={state.mode}
-              bpm={state.bpm ?? 100}
+              bpm={musicalBpm}
               meter={state.meter}
               instrumentId={state.instrumentId}
               notes={refined.notes}
@@ -355,14 +370,16 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               enabled={publishEnabled}
               title={state.title}
               mode={state.mode}
-              bpm={state.bpm ?? 100}
+              bpm={musicalBpm}
               meter={state.meter}
               instrumentId={state.instrumentId}
               notes={refined.notes}
               drums={refined.drums}
               keyRoot={refined.keyIsReliable ? refined.key.root : null}
               keyMode={refined.keyIsReliable ? refined.key.mode : null}
-              durationSec={state.durationSec}
+              // The length of the audio being published, which is the render,
+              // which is the version — not the recording it grew from.
+              durationSec={musicalDurationSec}
               renderedAudio={state.renderedAudio}
               publishedId={state.publishedId}
               shareUrl={state.shareUrl}

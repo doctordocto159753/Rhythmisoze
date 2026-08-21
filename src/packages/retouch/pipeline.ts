@@ -19,9 +19,11 @@
  *   8. playable-range clamp  keep the result inside the instrument
  *
  * Steps 3 and 5 both depend on the tempo, but on *different* tempos: the grid
- * uses the BPM the user tapped, always (Playbook 2.5). `estimateTempo` is run
- * only to report back what the app heard, so a user whose tap was half-time can
- * see the discrepancy instead of silently getting a wrong grid.
+ * uses `options.bpm`, which is the tempo of the version being built and is
+ * decided by the caller — `resolveVersionTempo` in `@rhythm-extraction`, which
+ * takes the performance's own pulse unless the user asked for the tapped value.
+ * `estimateTempo` is run only to report back what the port heard, so a
+ * discrepancy can be shown rather than silently producing a wrong grid.
  */
 
 import type {
@@ -218,7 +220,8 @@ function refineMelody(rawNotes: readonly NoteEvent[], options: ResolvedOptions):
   }
 
   // The port's own quantize, at reference settings, drives the report so the
-  // diagnostics stay comparable with the Python tool.
+  // diagnostics stay comparable with the Python tool. This is a diagnostic
+  // reading only: it never chooses the grid the notes are actually moved onto.
   const referenceGrid = quantize(octave.kept, options.bpm, params.grid / 4);
   const tempo = estimateTempo(octave.kept);
   const report = buildReport(

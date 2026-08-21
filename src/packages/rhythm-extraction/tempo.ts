@@ -47,8 +47,23 @@ export interface TempoEstimate {
   bpm: number;
   phaseSec: number;
   /**
-   * 0..1. Below `TEMPO_CONFIDENCE_FLOOR` the estimate is a guess and the UI
-   * must not present it as what the app heard.
+   * Whether there was enough evidence to estimate a tempo *at all*.
+   *
+   * Separate from `confidence`, and the separation is the point. "We measured a
+   * pulse and are only somewhat sure of the number" and "there was nothing to
+   * measure" are different facts with different correct responses, and folding
+   * them into one low number is how the second answer — fall back to the
+   * metronome — silently got applied to the first.
+   *
+   * `false` means `bpm` is a placeholder, not a reading.
+   */
+  measured: boolean;
+  /**
+   * 0..1. Below `TEMPO_CONFIDENCE_FLOOR` the estimate is uncertain and the UI
+   * must not present it as what the app definitely heard.
+   *
+   * Uncertainty about a measured number is not evidence for a different number.
+   * A low value here says how loudly to hedge; it never nominates a substitute.
    */
   confidence: number;
   /** Beat times in seconds, covering the clip. */
@@ -58,13 +73,19 @@ export interface TempoEstimate {
 }
 
 /**
- * Below this, the detected tempo is not trustworthy enough to build a grid on.
- * The caller falls back to the tapped tempo and says so.
+ * Below this, the detected tempo is not certain enough to *present* as what the
+ * app heard, so the UI hedges and offers the tapped value as an alternative.
+ *
+ * It is deliberately not a switch that swaps in the tapped tempo. The metronome
+ * is a recording guide; a performance hummed at 88 is at 88 whether or not the
+ * estimator is sure of it, and imposing 103 because the estimator scored 0.43
+ * instead of 0.45 would make the metronome the musical truth by accident. See
+ * `resolveVersionTempo` in `versions.ts` for the rule that replaced it.
  */
 export const TEMPO_CONFIDENCE_FLOOR = 0.45;
 
 /** Fewer onsets than this cannot establish a tempo at all. */
-const MIN_ONSETS = 4;
+export const MIN_ONSETS = 4;
 
 /**
  * Preferred tempo, in BPM, for the perceptual resonance curve.
@@ -137,9 +158,13 @@ export function estimatePerformanceTempo(
     .sort((a, b) => a.timeSec - b.timeSec);
 
   if (usable.length < MIN_ONSETS || durationSec <= 0) {
+    // Nothing was measured. `bpm` is a neutral placeholder so the field is
+    // never `NaN`, and `measured: false` is what stops any caller reading it as
+    // a reading of the performance.
     return {
       bpm: PREFERRED_BPM,
       phaseSec: 0,
+      measured: false,
       confidence: 0,
       beats: [],
       alternatives: [],
@@ -166,6 +191,7 @@ export function estimatePerformanceTempo(
   return {
     bpm: round1(best.bpm),
     phaseSec: best.phaseSec,
+    measured: true,
     confidence: confidenceOf(candidates, usable.length),
     beats: beatGrid(best.bpm, best.phaseSec, durationSec),
     alternatives: distinctAlternatives(candidates, best),

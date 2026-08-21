@@ -198,7 +198,7 @@ Python 3.12, not on the development machine.
 | production build | green | Linux, Node 20.20.2 |
 | humtool golden regeneration | green | Clean diff under Python 3.12. **Sensitive to the Python minor version** — 3.11 produces a last-bit float difference in `gridError`, because CPython 3.12 changed `sum()` to compensated summation. CI pins 3.12; the generator now documents this. |
 | retouch parity suite | green | 181 assertions, unchanged |
-| Playwright matrix | green | 129 passed, 22 skipped, 0 failed, three consecutive runs under CI settings |
+| Playwright matrix | green | 131 passed, 22 skipped, 0 failed on the GitHub runner (run `32438318388`), and in the CI container at `--cpus=2` |
 
 ### E2E skips are paired with assertions
 
@@ -212,16 +212,30 @@ condition: that the fallback appears, names what is missing, stays navigable and
 is localized. Every browser in the matrix now makes a positive assertion in one
 direction or the other.
 
-### Two real test defects fixed
+### Three real test defects fixed, and one removed race
 
 - **A crashed browser session reported as a failed assertion.** The too-short-take
   test clicked Stop in the same tick recording started. Stopping a MediaRecorder
   that has emitted nothing killed the Chromium session (`Protocol error: session
-  closed`) — a state no user can reach. It now takes a 350 ms take: past one
-  recorder timeslice, under half the 750 ms floor.
+  closed`) - a state no user can reach.
 - **A locator matching Next's route announcer.** `getByRole('alert')` resolved to
   both the error panel and `__next-route-announcer__`, tripping strict mode
   intermittently. The product was correct every time it "failed".
+- **A test that could not be made deterministic.** After the two fixes above, the
+  same test still failed on the GitHub runner, this time because the take was
+  *accepted*: a 350 ms sleep plus click latency exceeded the 750 ms floor there,
+  so no refusal ever appeared. The length of a real recording is decided by
+  scheduler latency across the runner, the browser and the page against a 750 ms
+  window, and no amount of selector work changes that.
+
+  It was not deleted or skipped. `ingestAudioBlob()` decodes and calls
+  `validateAudio()` for a recording and an upload alike, so the refusal is now
+  driven by a 0.4 s WAV whose duration is fixed by its header. **Coverage went
+  up**: the refusal is asserted deterministically, a new 1.2 s case proves the
+  floor is a boundary rather than "short uploads never work", and the recording
+  path keeps a test asserting what is genuinely deterministic about it - that
+  stopping early always reaches a terminal state and leaves the page usable,
+  which is exactly what regressed twice.
 
 ### Concurrency is declared
 

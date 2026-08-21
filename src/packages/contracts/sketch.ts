@@ -102,6 +102,16 @@ export interface LocalSketch {
 export interface StoredMusician {
   /** The accepted pair, keyed by version id. */
   versions: Record<string, StoredMusicianVersion>;
+  /**
+   * How many times this sketch has been handed to the Musician.
+   *
+   * Stored separately from `job` because `job` is only written while a
+   * generation is still resumable, and this has to survive a *finished* one:
+   * the seed is a pure function of the sketch id and this counter, so a sketch
+   * that reopens at zero replays seeds it has already used and hands back
+   * results the user has already rejected.
+   */
+  attempt?: number;
   /** In-flight job, so a reopened workspace can resume polling. */
   job?: {
     jobId: string | null;
@@ -125,6 +135,25 @@ export interface StoredMusicianVersion {
     sourceFingerprint: string;
     generatedAt: number;
     elapsedMs: number;
+    /**
+     * The service refused: nothing survived the Identity Guard, so these notes
+     * are the Teacher's rather than a model's.
+     *
+     * Persisted because the refusal has to survive a reopen. Without it a
+     * reopened sketch offers a version that is byte-identical to one the user
+     * already has, described as the Musician's work.
+     */
+    sourceFallback?: boolean;
+    /**
+     * Digest of the Teacher notes this was generated from, as computed by
+     * `noteDigest` in `@versions`.
+     *
+     * Optional, and absence is read as "cannot be checked" rather than
+     * "matches" -- so a sketch stored before this field existed offers its
+     * Musician versions for regeneration rather than presenting them as
+     * children of a Teacher that may have moved.
+     */
+    sourceDigest?: string;
   };
 }
 

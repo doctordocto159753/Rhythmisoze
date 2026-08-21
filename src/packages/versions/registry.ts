@@ -65,11 +65,16 @@ export const MUSICIAN_VERSION_IDS: readonly MusicianVersionId[] = [
   'musician-expanded',
 ];
 
-export function isMusicianVersion(id: MusicalVersionId): id is MusicianVersionId {
+export function isMusicianVersion(id: string): id is MusicianVersionId {
   // A type predicate rather than a boolean: callers that check this then index
   // a generated-only structure, and without the narrowing they would each need
   // their own cast.
-  return (MUSICIAN_VERSION_IDS as readonly MusicalVersionId[]).includes(id);
+  //
+  // Takes `string` rather than `MusicalVersionId` because the interesting call
+  // sites are boundaries -- a version id restored from IndexedDB, or the flow's
+  // wider `VersionId` union which still carries legacy ids. Narrowing is the job;
+  // requiring the caller to have already narrowed defeats it.
+  return (MUSICIAN_VERSION_IDS as readonly string[]).includes(id);
 }
 
 /**
@@ -168,6 +173,30 @@ export interface MusicianProvenance {
   sourceFingerprint: string;
   generatedAt: number;
   elapsedMs: number;
+  /**
+   * The service refused: nothing survived the Identity Guard, so these notes are
+   * the Teacher's rather than the model's.
+   *
+   * Recorded in provenance because that is where "where did these notes come
+   * from?" is answered, and the answer here is "not from a model". Optional so a
+   * version stored before this field existed still reads back.
+   */
+  sourceFallback?: boolean;
+  /**
+   * Digest of the Teacher notes this was generated *from*.
+   *
+   * The service's `input_fingerprint` records the same thing, and cannot be used
+   * for the comparison: it is a SHA-256 over a Python-side JSON encoding, so
+   * checking a local melody against it would mean reimplementing that encoding in
+   * TypeScript and keeping the two byte-identical forever. This is our own digest
+   * of our own notes, computed by `noteDigest`, and it only ever has to agree
+   * with itself.
+   *
+   * Optional so a version stored before this field existed still restores. A
+   * missing digest is treated as "cannot be checked", not as "matches" — see
+   * `isStaleAgainst`.
+   */
+  sourceDigest?: string;
 }
 
 /**
@@ -240,6 +269,59 @@ export function availableVersions(
 }
 
 /**
+ * Has the Teacher material moved out from under a generated version?
+ *
+ * ## The failure this exists to stop
+ *
+ * The three derived versions are recomputed from the transcription on every
+ * render, so they always describe the current take. The Musician's three are
+ * stored note data that cannot be recomputed. Nothing connected the two: adjust
+ * the cleanup slider, re-run the Judge, reprocess the audio — the Teacher changes,
+ * and the stored Refined/Developed/Expanded stay exactly where they were, still
+ * offered in the picker, still described as "your idea, shaped".
+ *
+ * They are now a variation on a phrase that no longer exists, presented as a
+ * variation on the one that does. That is the review screen quietly lying about
+ * provenance, and it is invisible: the notes are valid, the audio plays, and the
+ * only thing wrong is the relationship.
+ *
+ * ## Why absence is not a match
+ *
+ * A version stored before `sourceDigest` existed cannot be checked. Treating that
+ * as "matches" would make the guard silently vacuous for exactly the data most
+ * likely to be stale — the oldest. Treating it as stale is the conservative
+ * reading and costs one regeneration.
+ */
+export function isStaleAgainst(
+  generated: GeneratedVersion,
+  teacherNotes: readonly NoteEvent[],
+): boolean {
+  const recorded = generated.provenance.sourceDigest;
+  if (recorded === undefined) return true;
+  return recorded !== noteDigest(teacherNotes);
+}
+
+/**
+ * The generated versions that still belong to this Teacher material.
+ *
+ * Used where the version list and the note resolver are built, so a stale version
+ * is not offered and cannot be selected. It is *not* deleted: the stored record
+ * survives in the workspace with its own digest, so what happened stays
+ * inspectable rather than being quietly erased.
+ */
+export function freshGenerated(
+  generated: Partial<Record<MusicalVersionId, GeneratedVersion>>,
+  teacherNotes: readonly NoteEvent[],
+): Partial<Record<MusicalVersionId, GeneratedVersion>> {
+  const fresh: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
+  for (const id of MUSICIAN_VERSION_IDS) {
+    const entry = generated[id];
+    if (entry && !isStaleAgainst(entry, teacherNotes)) fresh[id] = entry;
+  }
+  return fresh;
+}
+
+/**
  * A stable key for a version's rendered audio.
  *
  * Rendering a WAV is expensive and the result is large, so the review screen
@@ -247,9 +329,18 @@ export function availableVersions(
  * affects the sound changes — the notes, the instrument, the tempo — and must
  * *not* change on unrelated re-renders, or the cache never hits.
  *
- * Generated versions key on their job id and seed rather than their notes: the
- * notes are large, hashing them on every render would cost more than it saves,
- * and a job id plus seed already identifies the result uniquely.
+ * ## Why generated versions key on content, not only on a job id
+ *
+ * A job id plus seed identifies a result uniquely *provided both are present*.
+ * They were not: `toPair` defaulted `jobId` to the empty string at every call
+ * site, and the seed is derived from the sketch id and attempt number — so two
+ * different generations of the same sketch produced the same key, and the review
+ * screen played the previous generation's audio for the new one's notes.
+ *
+ * So the key also carries `generatedAt`, the model revisions and a cheap digest
+ * of the notes themselves. `generatedAt` alone would be enough in practice; the
+ * digest is what makes the key correct rather than probably-correct, and it is
+ * computed from pitch and timing only, which is all the renderer reads.
  */
 export function renderCacheKey(
   id: MusicalVersionId,
@@ -259,7 +350,44 @@ export function renderCacheKey(
   const base = `${id}:${context.instrumentId}:${context.bpm.toFixed(3)}:${context.retouchAmount}`;
   const generated = sources.generated[id];
   if (generated) {
-    return `${base}:${generated.provenance.jobId}:${generated.provenance.seed}`;
+    const { jobId, seed, generatedAt, melodyModelRevision, infillModelRevision } =
+      generated.provenance;
+    return [
+      base,
+      jobId || 'no-job',
+      seed,
+      generatedAt,
+      melodyModelRevision,
+      infillModelRevision,
+      noteDigest(generated.notes),
+    ].join(':');
   }
   return base;
+}
+
+/**
+ * A short digest of what the renderer will actually read.
+ *
+ * Not a cryptographic hash and not trying to be: it exists so that two different
+ * note sequences cannot share a cache key. FNV-1a over quantised pitch and
+ * timing is a few microseconds for a melody of any length this product produces,
+ * which is cheap enough to run on every render and far cheaper than the WAV it
+ * prevents re-serving.
+ */
+export function noteDigest(notes: readonly NoteEvent[]): string {
+  let hash = 2166136261;
+  const mix = (value: number): void => {
+    hash ^= value | 0;
+    hash = Math.imul(hash, 16777619);
+  };
+  mix(notes.length);
+  for (const note of notes) {
+    mix(note.pitch);
+    // Milliseconds: finer resolution than any renderer distinguishes, and it
+    // keeps float noise out of the key.
+    mix(Math.round(note.startSec * 1000));
+    mix(Math.round(note.endSec * 1000));
+    mix(note.velocity);
+  }
+  return (hash >>> 0).toString(36);
 }

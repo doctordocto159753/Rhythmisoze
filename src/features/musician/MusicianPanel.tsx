@@ -37,6 +37,19 @@ export interface MusicianPanelProps {
   error: AppError | null;
   /** Configured and reachable. False hides the whole area rather than teasing. */
   available: boolean;
+  /**
+   * Versions that exist but are not being offered, and why.
+   *
+   * `refused` -- the service returned the Teacher's own notes because nothing
+   * survived the Identity Guard. `stale` -- the tidied version has moved since
+   * these were generated, so they are a variation on a phrase that is no longer
+   * on screen.
+   *
+   * Both are reported rather than silently omitted. A user who pressed a button,
+   * waited, and sees no new version needs to be able to tell "the musician had
+   * nothing to add" from "the app lost it".
+   */
+  withheld?: { stale: boolean; refused: boolean };
   onGenerate(): void;
   onRegenerate(): void;
   onCancel(): void;
@@ -51,6 +64,7 @@ export function MusicianPanel({
   hasPending,
   error,
   available,
+  withheld,
   onGenerate,
   onRegenerate,
   onCancel,
@@ -100,6 +114,22 @@ export function MusicianPanel({
             </Row>
           ) : null}
         </div>
+
+        {/*
+          Not an error, and not styled as one: nothing failed. These are outcomes
+          with a next step, so they read as explanations and sit above the
+          buttons that act on them.
+        */}
+        {withheld?.refused ? (
+          <Text variant="micro" muted>
+            {t.versions.musician.refused}
+          </Text>
+        ) : null}
+        {withheld?.stale ? (
+          <Text variant="micro" muted>
+            {t.versions.musician.stale}
+          </Text>
+        ) : null}
 
         {error ? (
           <Text variant="micro" className={styles.error}>

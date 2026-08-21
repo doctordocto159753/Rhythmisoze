@@ -4,7 +4,10 @@ import {
   availableVersions,
   baseVersions,
   describeVersion,
+  freshGenerated,
   isMusicianVersion,
+  isStaleAgainst,
+  noteDigest,
   notesForVersion,
   renderCacheKey,
   VERSION_ORDER,
@@ -199,6 +202,85 @@ describe('the version registry', () => {
       expect(renderCacheKey('musician-refined', first, context)).not.toBe(
         renderCacheKey('musician-refined', second, context),
       );
+    });
+
+    it('changes when the notes change but the job id does not', () => {
+      // The failure the job id alone could not catch: `toPair` used to default
+      // the job id to the empty string at every call site, so two generations of
+      // the same sketch produced the same key and the review screen played the
+      // previous generation's audio over the new one's notes.
+      const same = generated('musician-refined', '');
+      const moved: GeneratedVersion = {
+        ...same,
+        notes: [note(72, 0), note(76, 0.5)],
+      };
+      expect(
+        renderCacheKey('musician-refined', { ...sources, generated: { 'musician-refined': same } }, context),
+      ).not.toBe(
+        renderCacheKey('musician-refined', { ...sources, generated: { 'musician-refined': moved } }, context),
+      );
+    });
+  });
+
+  describe('note digests', () => {
+    it('separates sequences that differ in pitch, timing or length', () => {
+      const base = [note(60, 0), note(62, 0.5)];
+      expect(noteDigest(base)).not.toBe(noteDigest([note(61, 0), note(62, 0.5)]));
+      expect(noteDigest(base)).not.toBe(noteDigest([note(60, 0), note(62, 0.6)]));
+      expect(noteDigest(base)).not.toBe(noteDigest([...base, note(64, 1)]));
+    });
+
+    it('is the same for two equal sequences that are not the same array', () => {
+      // Otherwise every render would look like a change and no cache would hold.
+      expect(noteDigest([note(60, 0), note(62, 0.5)])).toBe(
+        noteDigest([note(60, 0), note(62, 0.5)]),
+      );
+    });
+  });
+
+  describe('staleness against the Teacher', () => {
+    const teacher = [note(60, 0), note(62, 0.5), note(65, 1)];
+
+    function fromTeacher(notes: readonly NoteEvent[]): GeneratedVersion {
+      const version = generated('musician-refined');
+      return {
+        ...version,
+        provenance: { ...version.provenance, sourceDigest: noteDigest(notes) },
+      };
+    }
+
+    it('accepts a version generated from the Teacher as it stands', () => {
+      expect(isStaleAgainst(fromTeacher(teacher), teacher)).toBe(false);
+    });
+
+    it('rejects a version once the Teacher material has moved', () => {
+      // The concrete case: the user nudges the cleanup slider, the Teacher
+      // recomputes, and the stored version silently becomes a variation on a
+      // phrase that no longer exists.
+      expect(isStaleAgainst(fromTeacher(teacher), [...teacher, note(67, 1.5)])).toBe(true);
+    });
+
+    it('treats a missing digest as unverifiable rather than as a match', () => {
+      // A version stored before the digest existed cannot be checked. Reading
+      // that as "matches" would make the guard vacuous for exactly the data most
+      // likely to be stale -- the oldest.
+      expect(isStaleAgainst(generated('musician-refined'), teacher)).toBe(true);
+    });
+
+    it('keeps only the versions that still belong to this Teacher', () => {
+      const fresh = fromTeacher(teacher);
+      const stale: GeneratedVersion = {
+        ...generated('musician-developed'),
+        provenance: {
+          ...generated('musician-developed').provenance,
+          sourceDigest: noteDigest([note(1, 0)]),
+        },
+      };
+      const kept = freshGenerated(
+        { 'musician-refined': fresh, 'musician-developed': stale },
+        teacher,
+      );
+      expect(Object.keys(kept)).toEqual(['musician-refined']);
     });
   });
 });

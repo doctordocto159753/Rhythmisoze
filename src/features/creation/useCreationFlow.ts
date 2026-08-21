@@ -68,7 +68,17 @@ import {
   type MusicianJobSnapshot,
   type MusicianPair,
 } from '@/features/musician';
-import { notesForVersion, type MusicalVersionId, type VersionNoteSources } from '@versions';
+import {
+  describeVersion,
+  freshGenerated,
+  isMusicianVersion,
+  isStaleAgainst,
+  notesForVersion,
+  renderCacheKey,
+  type GeneratedVersion,
+  type MusicalVersionId,
+  type VersionNoteSources,
+} from '@versions';
 import type { MusicianRequest } from '@musician-client';
 import { importMidi } from '@midi';
 import {
@@ -137,6 +147,22 @@ export interface FlowState {
   master: MasterSettings;
 
   renderedAudio: Blob | null;
+  /**
+   * What `renderedAudio` is a render *of*.
+   *
+   * The reducer nulls `renderedAudio` on every input it knows about — version,
+   * instrument, cleanup, key, master, a new transcription — and that list is a
+   * list of things somebody remembered. It did not include a Musician result
+   * arriving: press "Try another", keep the new set, and the notes under
+   * `musician-refined` change while the WAV rendered from the *previous* set
+   * stays in state. Playback reads the notes directly and sounds right; export
+   * and publish read this blob and ship the old audio. The two disagree and
+   * nothing says so.
+   *
+   * Recording the key turns "remember to invalidate" into "compare", which
+   * cannot be forgotten by the next feature.
+   */
+  renderedKey: string | null;
   renderRealtimeRatio: number | null;
   playing: boolean;
   playheadOrigin: number | null;
@@ -193,7 +219,7 @@ type Action =
   | { type: 'setInstrument'; id: string }
   | { type: 'setMaster'; master: Partial<MasterSettings> }
   | { type: 'setTitle'; title: string }
-  | { type: 'rendered'; blob: Blob; ratio: number }
+  | { type: 'rendered'; blob: Blob; ratio: number; key: string }
   | { type: 'playing'; playing: boolean; origin: number | null }
   | { type: 'published'; id: string; shareUrl: string; manageToken: string }
   | { type: 'unpublished' }
@@ -234,6 +260,7 @@ function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowStat
     instrumentId: resolveInstrument(undefined, mode).id,
     master: DEFAULT_MASTER,
     renderedAudio: null,
+    renderedKey: null,
     renderRealtimeRatio: null,
     playing: false,
     playheadOrigin: null,
@@ -362,7 +389,12 @@ function reducer(state: FlowState, action: Action): FlowState {
     case 'setTitle':
       return { ...state, title: action.title };
     case 'rendered':
-      return { ...state, renderedAudio: action.blob, renderRealtimeRatio: action.ratio };
+      return {
+        ...state,
+        renderedAudio: action.blob,
+        renderedKey: action.key,
+        renderRealtimeRatio: action.ratio,
+      };
     case 'playing':
       return { ...state, playing: action.playing, playheadOrigin: action.origin };
     case 'published':
@@ -488,6 +520,61 @@ export function useCreationFlow(locale: Locale) {
     onPersist: handleMusicianPersist,
   });
 
+  /**
+   * The Teacher material as it stands right now.
+   *
+   * Read out here rather than only inside `versionNoteSources` because it is
+   * what the Musician's stored versions are checked against, and the check has
+   * to happen before the picker is built.
+   */
+  const teacherNotes = useMemo<readonly NoteEvent[]>(
+    () => lesson?.notes ?? state.judge?.notes ?? state.rawNotes,
+    [lesson, state.judge, state.rawNotes],
+  );
+
+  /**
+   * The Musician's versions that may still be offered.
+   *
+   * Two filters, for two different lies the picker would otherwise tell.
+   *
+   * **Stale.** The three derived versions are recomputed from the transcription
+   * on every render, so they always describe the current take. The Musician's
+   * three are stored note data that cannot be recomputed. Move the cleanup
+   * slider, re-run the Judge, reprocess the audio — the Teacher changes and the
+   * stored versions do not, yet they stay in the picker still described as
+   * "your idea, shaped". They have become a variation on a phrase that no longer
+   * exists, presented as a variation on the one that does, and nothing about it
+   * looks wrong: the notes are valid and the audio plays.
+   *
+   * **Refused.** `source_fallback` means no candidate survived the Identity
+   * Guard and the service returned the Teacher's own notes. Offering that is the
+   * exact failure the guard exists to prevent — the Teacher presented as the
+   * Musician's work — arriving through the front door.
+   *
+   * Neither is deleted. The stored record keeps its digest and its flag, so what
+   * happened stays inspectable and the panel can say which of the two occurred.
+   */
+  const offeredGenerated = useMemo(() => {
+    const fresh = freshGenerated(musician.generated, teacherNotes);
+    const offered: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
+    for (const [id, entry] of Object.entries(fresh)) {
+      if (entry && !entry.provenance.sourceFallback) offered[id as MusicalVersionId] = entry;
+    }
+    return offered;
+  }, [musician.generated, teacherNotes]);
+
+  /** Why a generated version is missing, so the panel can say so rather than just omit it. */
+  const musicianWithheld = useMemo(() => {
+    let stale = false;
+    let refused = false;
+    for (const entry of Object.values(musician.generated)) {
+      if (!entry) continue;
+      if (entry.provenance.sourceFallback) refused = true;
+      else if (isStaleAgainst(entry, teacherNotes)) stale = true;
+    }
+    return { stale, refused };
+  }, [musician.generated, teacherNotes]);
+
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
     if (rhythm === null || state.bpm === null) return [];
@@ -498,15 +585,32 @@ export function useCreationFlow(locale: Locale) {
       amount: state.retouchAmount,
       // Only versions whose notes actually exist are offered, so the picker can
       // never show something that cannot be played.
-      generated: Object.keys(musician.generated) as MusicalVersionId[],
+      generated: Object.keys(offeredGenerated) as MusicalVersionId[],
     });
-  }, [rhythm, state.bpm, state.mode, state.retouchAmount, musician.generated]);
+  }, [rhythm, state.bpm, state.mode, state.retouchAmount, offeredGenerated]);
 
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {
     if (versions.length === 0) return null;
     const wanted = state.versionId ?? (rhythm ? defaultVersion(rhythm) : 'grid');
-    return versions.find((version) => version.id === wanted) ?? versions[0] ?? null;
+    const chosen = versions.find((version) => version.id === wanted);
+    if (chosen) return chosen;
+
+    // The selection has gone away. That used to be impossible -- the generated
+    // set only ever grew -- and is now routine: a Musician version is withheld
+    // the moment the Teacher moves underneath it. Falling through to
+    // `versions[0]` would drop the user on `unprocessed`, the rawest take, which
+    // is a strange place to land after editing a *tidied* one.
+    //
+    // The registry already records what each version was derived from, so the
+    // material the withheld reading was a reading *of* is the answer.
+    const parent = isMusicianVersion(wanted) ? describeVersion(wanted).sourceVersionId : null;
+    return (
+      (parent ? versions.find((version) => version.id === parent) : undefined) ??
+      versions.find((version) => version.id === (rhythm ? defaultVersion(rhythm) : 'grid')) ??
+      versions[0] ??
+      null
+    );
   }, [versions, state.versionId, rhythm]);
 
   /**
@@ -533,10 +637,13 @@ export function useCreationFlow(locale: Locale) {
     return {
       unprocessed: state.rawNotes,
       judge: judged,
-      teacher: lesson?.notes ?? judged,
-      generated: musician.generated,
+      teacher: teacherNotes,
+      // The filtered set, not the raw one. The picker and the note resolver have
+      // to agree: offering a version the resolver would answer for, or resolving
+      // one the picker withheld, is how a withheld version gets played anyway.
+      generated: offeredGenerated,
     };
-  }, [state.rawNotes, state.judge, lesson, musician.generated]);
+  }, [state.rawNotes, state.judge, teacherNotes, offeredGenerated]);
 
   /**
    * The payload for a Musician request.
@@ -652,6 +759,62 @@ export function useCreationFlow(locale: Locale) {
     refinedRef.current = refined;
   }, [refined]);
 
+  /**
+   * Everything a render depends on, as one string.
+   *
+   * `renderCacheKey` supplies the version's own identity — for a generated
+   * version that includes the job, the seed, the model revisions and a digest of
+   * its notes, which is what makes one Musician result distinguishable from the
+   * next. The rest is added here because `renderSketch` reads it and the
+   * registry cannot see it: the master chain, the sketch duration and the drum
+   * track.
+   *
+   * Null while there is nothing to render, which is not the same as "the render
+   * is current" — see `renderedAudio` below, where null never matches.
+   */
+  const renderKey = useMemo<string | null>(() => {
+    if (!refined || state.bpm === null) return null;
+    return [
+      renderCacheKey(activeVersion?.id ?? 'unprocessed', versionNoteSources, {
+        instrumentId: state.instrumentId,
+        bpm: activeVersion?.bpm ?? state.bpm,
+        retouchAmount: activeVersion?.amount ?? state.retouchAmount,
+      }),
+      state.durationSec.toFixed(3),
+      state.master.volume.toFixed(3),
+      state.master.reverb.toFixed(3),
+      refined.drums.length,
+    ].join('|');
+  }, [
+    refined,
+    activeVersion,
+    versionNoteSources,
+    state.instrumentId,
+    state.bpm,
+    state.retouchAmount,
+    state.durationSec,
+    state.master,
+  ]);
+
+  /**
+   * The rendered WAV, but only while it is a render of what is on screen.
+   *
+   * Derived rather than dispatched. An effect that nulls stale audio leaves one
+   * render in which the stale blob is still readable, and the thing reading it
+   * is the export button — the single place where being one render behind means
+   * shipping the wrong file. Comparing on read has no such window.
+   */
+  const renderedAudio = useMemo(
+    () => (state.renderedKey !== null && state.renderedKey === renderKey ? state.renderedAudio : null),
+    [state.renderedAudio, state.renderedKey, renderKey],
+  );
+
+  /** The key as of *now*, for the stamp written after an await. */
+  const renderKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    renderKeyRef.current = renderKey;
+  }, [renderKey]);
+
   const versionNotes = useMemo<Record<string, readonly NoteEvent[]>>(() => {
     const out: Record<string, readonly NoteEvent[]> = {};
     for (const version of versions) {
@@ -663,11 +826,13 @@ export function useCreationFlow(locale: Locale) {
 
   const versionProvenance = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
-    for (const [id, generated] of Object.entries(musician.generated)) {
+    // Keyed off the offered set so an export's provenance manifest describes
+    // exactly the versions the export contains.
+    for (const [id, generated] of Object.entries(offeredGenerated)) {
       if (generated) out[id] = generated.provenance;
     }
     return out;
-  }, [musician.generated]);
+  }, [offeredGenerated]);
 
   // --- Tempo -------------------------------------------------------------
 
@@ -1042,6 +1207,11 @@ export function useCreationFlow(locale: Locale) {
 
   const render = useCallback(async () => {
     if (!refined || state.durationSec <= 0) return null;
+    // Captured before the await, not after it. The ref moves when the screen
+    // moves; stamping the *finished* key onto audio rendered from the material
+    // as it was at the start would label a stale render as current, which is the
+    // failure this key exists to catch.
+    const keyAtStart = renderKeyRef.current;
     stopPlayback();
     send('RENDER');
     track('render_started', { instrument: state.instrumentId });
@@ -1064,6 +1234,10 @@ export function useCreationFlow(locale: Locale) {
         type: 'rendered',
         blob,
         ratio: result.realtimeRatio,
+        // Stamped with what it was rendered from. `renderKeyRef` rather than
+        // `renderKey` because this callback awaits, and the key it closed over
+        // could describe a screen the user has already moved on from.
+        key: keyAtStart ?? '',
       });
       send('RENDER_DONE');
       track('render_completed', {
@@ -1113,7 +1287,10 @@ export function useCreationFlow(locale: Locale) {
         rawDrums: state.rawDrums,
         analysis: refined?.analysis ?? null,
         durationSec: state.durationSec,
-        renderedAudio: state.renderedAudio ?? undefined,
+        // The validated blob, not the raw one. Persisting a render that no
+        // longer matches the sketch would put the mismatch beyond the reach of
+        // the in-memory check and hand it to the next session as fact.
+        renderedAudio: renderedAudio ?? undefined,
         source: state.source ?? undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -1150,7 +1327,7 @@ export function useCreationFlow(locale: Locale) {
     state.instrumentId,
     state.rawNotes,
     state.referenceNotes,
-    state.renderedAudio,
+    renderedAudio,
     state.source,
     state.durationSec,
     state.publishedId,
@@ -1168,8 +1345,21 @@ export function useCreationFlow(locale: Locale) {
     [stopEverything, stopPlayback],
   );
 
+  /**
+   * The state as everything below this hook sees it.
+   *
+   * Identical to the reducer's, except that `renderedAudio` is the key-checked
+   * value. Overridden here rather than at each call site so that no component
+   * can read a render that no longer matches what is on screen by forgetting to
+   * ask.
+   */
+  const publicState = useMemo<FlowState>(
+    () => ({ ...state, renderedAudio }),
+    [state, renderedAudio],
+  );
+
   return {
-    state,
+    state: publicState,
     refined,
     /** What the performance itself said about tempo, meter and groove. */
     rhythm,
@@ -1195,6 +1385,14 @@ export function useCreationFlow(locale: Locale) {
     musician: {
       ...musician,
       available: musicianAvailability.available,
+      /**
+       * Why a generated version is not in the picker.
+       *
+       * Withholding without saying so is its own failure: the user pressed a
+       * button, waited, and then found nothing new, with no way to tell a model
+       * that had nothing to add from an app that lost the result.
+       */
+      withheld: musicianWithheld,
       generate: () => {
         const request = buildMusicianRequest();
         if (request) musician.generate(request);

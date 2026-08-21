@@ -91,6 +91,17 @@ export const variantSchema = z.object({
   duration_sec: z.number().finite().positive(),
   identity: identityReportSchema,
   infill_spans: z.array(infillSpanSchema),
+  /**
+   * The service refused: nothing survived the Identity Guard and these notes are
+   * the Teacher's, unchanged.
+   *
+   * Defaulted rather than required so an older service still parses. It has to
+   * be read, not merely carried: without it a refusal is indistinguishable from
+   * a generation — same notes as the Teacher, `identity.passed` true (the guard
+   * compared the Teacher against itself), `kind` still `refined`. Showing that
+   * as the Musician's work is exactly the failure the guard exists to prevent.
+   */
+  source_fallback: z.boolean().default(false),
 });
 
 export const provenanceSchema = z.object({

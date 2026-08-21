@@ -171,7 +171,7 @@ export const en = {
      */
     musician: {
       title: 'Take it further',
-      intro: 'Hand your tidied version to the musician and get two more readings back.',
+      intro: 'Hand your tidied version to the musician and get three more readings back.',
       start: 'Create musician versions',
       // Present tense, no percentages. A progress bar we cannot honestly fill
       // is worse than a sentence that says what is happening.
@@ -194,7 +194,15 @@ export const en = {
       developedSummary: 'Same idea, developed.',
       expandedSummary: 'The idea grown into a longer passage.',
       tryAnother: 'Try another',
-      tryAnotherHint: 'Generates a fresh pair. Your current versions stay until the new ones arrive.',
+      tryAnotherHint:
+        'Generates a fresh set. Your current versions stay until the new ones arrive.',
+      // Not failures. The musician ran, and the honest outcome was nothing to
+      // offer -- said plainly, because a version quietly missing from the picker
+      // is indistinguishable from a bug.
+      refused:
+        'The musician could not find anything to add to this one, so it is not offered. Try another gives it a different starting point.',
+      stale:
+        'You have changed the tidied version since these were made, so they are no longer offered. Generate again to match what you have now.',
       keepNew: 'Keep the new ones',
       keepOld: 'Keep the previous ones',
       compareReady: 'New versions are ready. Which do you want to keep?',

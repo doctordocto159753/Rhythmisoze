@@ -37,6 +37,7 @@ import {
 } from '@musician-client';
 import {
   MUSICIAN_VERSION_IDS,
+  noteDigest,
   type GeneratedVersion,
   type MusicalVersionId,
   type MusicianVersionId,
@@ -114,9 +115,33 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
 
   const [state, setState] = useState<MusicianJobState>(() =>
     options.restore?.result
-      ? { ...INITIAL, result: options.restore.result, phase: 'completed' }
+      ? {
+          ...INITIAL,
+          result: options.restore.result,
+          phase: 'completed',
+          // Restored, not reset. The attempt number is the only thing that makes
+          // one regeneration of a sketch differ from another -- `deriveSeed` is a
+          // pure function of the sketch id and this counter -- so dropping it on
+          // reopen meant "Try another" replayed the seed the second attempt had
+          // already used, and handed back a result the user had seen and
+          // rejected. Silently, because a reproduced seed looks exactly like a
+          // model that keeps its opinion.
+          attempt: options.restore.job?.attempt ?? INITIAL.attempt,
+        }
       : INITIAL,
   );
+
+  /**
+   * The attempt counter, readable synchronously.
+   *
+   * `state.attempt` is a snapshot of the last committed render. Two regenerate
+   * presses inside one render batch both read the same value, both compute
+   * `+ 1`, and both derive the *same* seed -- so the second generation spends a
+   * full model run reproducing the first. A ref advances on the call rather than
+   * on the render, which is the only ordering that makes consecutive attempts
+   * genuinely consecutive.
+   */
+  const attemptRef = useRef(state.attempt);
 
   const abortRef = useRef<AbortController | null>(null);
   // Guards against a resolved promise writing into a component that has moved
@@ -156,7 +181,7 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
       abortRef.current = controller;
       const runId = ++runIdRef.current;
 
-      const attempt = mode === 'again' ? state.attempt + 1 : state.attempt;
+      const attempt = mode === 'again' ? (attemptRef.current += 1) : attemptRef.current;
       setState((current) => ({
         ...current,
         phase: 'queued',
@@ -164,6 +189,13 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
         pending: null,
         attempt,
       }));
+
+      // The id of the job this run created, captured so the result can record
+      // where it came from. Held here rather than read back from state: the
+      // setState that stores it has not necessarily flushed by the time the
+      // generation resolves, and provenance that is sometimes empty is worse
+      // than no provenance at all.
+      let startedJobId = '';
 
       try {
         const result = await client.generate(
@@ -176,6 +208,7 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
           {
             signal: controller.signal,
             onJobId: (jobId) => {
+              startedJobId = jobId;
               if (runId !== runIdRef.current) return;
               setState((current) => {
                 const next = { ...current, jobId };
@@ -192,7 +225,7 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
 
         if (runId !== runIdRef.current) return;
 
-        const pair = toPair(result);
+        const pair = toPair(result, startedJobId, request.notes);
         setState((current) => {
           const next: MusicianJobState = {
             ...current,
@@ -224,7 +257,10 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [client, enabled, persist, state.attempt],
+    // No `state.attempt` here any more: the counter lives in `attemptRef`, so
+    // this callback no longer has to be rebuilt on every generation to stay
+    // correct.
+    [client, enabled, persist],
   );
 
   const generate = useCallback(
@@ -322,6 +358,7 @@ function toGenerated(
   variant: MusicianVariant,
   result: MusicianResult,
   jobId: string,
+  sourceDigest: string,
 ): GeneratedVersion {
   return {
     id,
@@ -335,6 +372,12 @@ function toGenerated(
       sourceFingerprint: result.provenance.input_fingerprint,
       generatedAt: Date.now(),
       elapsedMs: result.provenance.elapsed_ms,
+      // Carried through so the UI can say "the musician had nothing to add"
+      // instead of presenting the Teacher's own notes as a new version.
+      sourceFallback: variant.source_fallback,
+      // What this was generated *from*, so a later change to the Teacher can be
+      // detected rather than silently ignored.
+      sourceDigest,
     },
     identityAggregate: variant.identity.aggregate,
     changedSpans: variant.infill_spans.map((span) => ({
@@ -345,11 +388,34 @@ function toGenerated(
   };
 }
 
-export function toPair(result: MusicianResult, jobId = ''): MusicianSet {
+/**
+ * The three versions, as the app stores them.
+ *
+ * `jobId` is required rather than defaulted. It used to default to the empty
+ * string and every call site took the default, so every stored version claimed to
+ * come from job `''` — which made the provenance record unable to answer the one
+ * question it exists for, and made the render cache key identical across
+ * regenerations of the same sketch.
+ *
+ * `sourceNotes` is the Teacher material that was sent. Its digest is what later
+ * lets a stale version be recognised when the Teacher moves.
+ */
+export function toPair(
+  result: MusicianResult,
+  jobId: string,
+  sourceNotes: readonly NoteEvent[] = [],
+): MusicianSet {
+  const digest = noteDigest(sourceNotes);
   return {
-    'musician-refined': toGenerated('musician-refined', result.refined, result, jobId),
-    'musician-developed': toGenerated('musician-developed', result.developed, result, jobId),
-    'musician-expanded': toGenerated('musician-expanded', result.expanded, result, jobId),
+    'musician-refined': toGenerated('musician-refined', result.refined, result, jobId, digest),
+    'musician-developed': toGenerated(
+      'musician-developed',
+      result.developed,
+      result,
+      jobId,
+      digest,
+    ),
+    'musician-expanded': toGenerated('musician-expanded', result.expanded, result, jobId, digest),
   };
 }
 
@@ -385,6 +451,9 @@ export function toStoredMusician(
 
   return {
     versions,
+    // Kept whether or not the job is resumable, unlike `job` below. This is the
+    // only record of how many seeds the sketch has already spent.
+    attempt: job.attempt,
     // A job is only worth recording while it could still be resumed. Storing a
     // finished job id would make a reopened workspace poll something that will
     // never change.

@@ -283,6 +283,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               hasPending: musician.pending !== null,
               error: musician.error,
               available: musician.available,
+              withheld: musician.withheld,
               onGenerate: musician.generate,
               onRegenerate: musician.regenerate,
               onCancel: musician.cancel,

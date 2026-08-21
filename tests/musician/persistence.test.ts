@@ -64,6 +64,19 @@ describe('persisting Musician output', () => {
     expect(stored!.job).toBeUndefined();
   });
 
+  it('keeps the attempt count even when the job itself is not worth recording', () => {
+    // The seed is a pure function of the sketch id and this counter. Losing it
+    // on reopen means "Try another" replays a seed the sketch has already spent,
+    // and hands back a result the user has already seen and rejected --
+    // indistinguishable from a model that will not change its mind.
+    const stored = toStoredMusician({
+      result: pair(),
+      job: { jobId: 'job-1', phase: 'completed', attempt: 3 },
+    });
+    expect(stored!.job).toBeUndefined();
+    expect(stored!.attempt).toBe(3);
+  });
+
   it('records an in-flight job so it can be resumed', () => {
     const stored = toStoredMusician({
       result: null,

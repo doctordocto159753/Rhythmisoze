@@ -220,17 +220,42 @@ export class MusicianClient {
       signal?: AbortSignal;
     } = {},
   ): Promise<MusicianResult> {
+    try {
+      return await this.poll(jobId, callbacks);
+    } catch (error) {
+      // Every abort path has to reach the service.
+      //
+      // The loop checks `signal.aborted` at the top of each iteration, but most
+      // of a poll cycle is spent inside `delay`, which rejects on abort — so a
+      // user pressing Stop mid-interval left the client with a `cancelled`
+      // error and the *server* still generating. The model kept working for
+      // minutes on a result nobody would read, holding the single worker slot
+      // against anyone else's job.
+      //
+      // `cancel` never throws, so this cannot mask the original failure.
+      const stopped =
+        error instanceof MusicianError && (error.kind === 'cancelled' || error.kind === 'timeout');
+      if (stopped) await this.cancel(jobId);
+      throw error;
+    }
+  }
+
+  private async poll(
+    jobId: string,
+    callbacks: {
+      onPhase?(phase: 'queued' | 'generating_global' | 'refining_local'): void;
+      signal?: AbortSignal;
+    },
+  ): Promise<MusicianResult> {
     const startedAt = Date.now();
     let runningSince: number | null = null;
     let lastPhase: string | null = null;
 
     for (;;) {
       if (callbacks.signal?.aborted) {
-        await this.cancel(jobId);
         throw new MusicianError('cancelled', 'generation was cancelled');
       }
       if (Date.now() - startedAt > this.timeoutMs) {
-        await this.cancel(jobId);
         throw new MusicianError('timeout', 'generation took too long');
       }
 

@@ -1,7 +1,6 @@
 # MelodyT5: architecture and runtime decision
 
-**Status:** architecture settled and verified; runtime decision **pending the
-real-weight spike**.
+**Status:** **settled.** The maintained runtime is adopted, on evidence.
 **Date:** 2026-08-21
 
 ---
@@ -108,7 +107,82 @@ This settles the *representation*. It does not settle the runtime.
 
 ---
 
-## The runtime question — still open
+## The runtime question — RESOLVED
+
+**Adopted: the maintained runtime.** Python 3.12.10 / torch 2.13.0 /
+transformers 4.40.2 / numpy 2.5.2, with the upstream architecture and weights
+untouched.
+
+### The evidence
+
+`load_state_dict` against the real 1,357,746,623-byte checkpoint:
+
+| | |
+|---|---|
+| **missing keys** | **0** |
+| unexpected keys | 60 — every one a causal-mask buffer |
+| unexpected keys that are learned parameters | **0** |
+| parameters | 112,969,728 |
+| cold load | 3.14 s |
+| RSS after load | 1940 MB |
+
+Zero missing keys is the decisive signal: every parameter the model declares was
+found in the checkpoint. The 60 extras are GPT-2's `attn.bias` (the
+lower-triangular causal mask) and `masked_bias` (a −1e4 constant), which were
+*persistent* buffers in the transformers 4.18 upstream pins and became
+non-persistent later. Dropping them discards no learned value — the mask is
+regenerated from config — and the worker **verifies** that rather than assuming
+it: anything outside that pattern, or anything that is an actual parameter,
+refuses to load.
+
+### The one shim required
+
+`samplings.random_sampling` ends in `np.random.choice(p=probs)`, and modern numpy
+checks `abs(sum(p) − 1) < ~1e-8`. After top-p, top-k and temperature have each
+rescaled a float32 vector, the sum lands a few ULPs off and generation dies on
+the first bar with "probabilities do not sum to 1".
+
+The distribution is correct; only its float32 sum is not exactly 1. The shim
+casts to float64 and divides by the sum — the normalisation the maths already
+assumes — and changes no sampling semantics. It is applied in our own source
+rather than by editing the vendored package.
+
+### Why the legacy runtime was not needed
+
+The alternative was pinning Python 3.7.9 / torch 1.13.1 / CUDA 11.6 in an
+isolated container. That would have been defensible and is now unnecessary: the
+architecture loads cleanly, generation produces real variations, and the only
+incompatibility was a two-line numeric shim rather than anything structural.
+
+The worker image can therefore move off the conservative Python 3.10 pin.
+
+### Real generated output
+
+Upstream defaults (`top_p=0.8`, `top_k=8`, `temperature=2.6`), seed 20260821:
+
+```text
+A. 4/4  |: C>DE>F G>AB>c | G>FE>D E>CD>E | C>DE>F G>AB>c |
+           d>fe>d (3ccc :: c>d | e>fe>d c>dc>A | G>EG>A G>Ac>d |
+           e>ge>d (3cBA G>c | d>fe>d (3ccc :|          9 bars, 1.6 s
+
+B. 6/8  |: B | AFD DFA | BdB BAF | ABA F2 D | FEE E2 B |
+           ... |1 FDD D2 e :|2 FDD D2 ||                19 bars, 2.4 s
+```
+
+Both are genuine variations rather than echoes: A introduces dotted rhythms and
+triplets the source did not contain, B produces a complete two-part tune with
+first and second endings.
+
+### A parser bug this exposed
+
+Reading that output back revealed our ABC reader was losing most of it: it split
+on whitespace, but ABC does not separate notes with spaces — `C>DE>F` is four
+notes. It also rejected `]`, `(3` and `>`, and misread a body line opening with
+`|:` as a header field. Real output that parsed as 11 notes now parses as 41.
+
+---
+
+## How the decision was reached (for the record)
 
 Upstream documents Python 3.7.9 / PyTorch 1.13.1 / CUDA 11.6, and pins
 `transformers==4.18.0`.
@@ -143,12 +217,7 @@ reason that has nothing to do with correctness.
 
 ### Current state
 
-**Not yet run.** The 1,357,746,623-byte weight was still downloading when this
-was written. Until the spike runs, the worker image pins **Python 3.10** as the
-conservative choice.
-
-That default is **the absence of a decision, not one**, and is labelled here so
-nobody later reads it as settled.
+**Run, and resolved.** See the section above.
 
 ---
 

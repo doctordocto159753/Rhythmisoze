@@ -6,16 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "melodyt5-worker"
 version = "0.1.0"
 description = "Isolated MelodyT5 inference worker"
-# Pinned separately from the API on purpose: this stack is the old one, and
-# forcing it to share an environment with rwkv-worker is what the brief calls a
-# dependency graveyard.
+# Separate from the API and from rwkv-worker because the dependency sets are
+# genuinely incompatible: transformers 4.40 pins tokenizers <0.20, and MIDI-RWKV
+# needs >=0.21 to read its own tokenizer file.
 requires-python = ">=3.10"
 dependencies = [
   "musician-shared",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
   "torch>=2.0",
-  "transformers>=4.30",
+  # 4.40.2 is the version the real weights were verified against. Newer majors
+  # may change weight-tying behaviour in EncoderDecoderModel, which would load
+  # cleanly and generate subtly wrong output -- so this is pinned, not floated.
+  "transformers>=4.40,<4.41",
+  # Upstream's own sampling helpers, and the unicode fold Patchilizer applies.
+  "samplings>=0.1.7",
+  "unidecode>=1.3",
+  "numpy>=1.26",
 ]
 
 [tool.setuptools.packages.find]

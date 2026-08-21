@@ -1,12 +1,19 @@
 # MelodyT5 worker. INTERNAL ONLY -- never published to a host port.
 #
-# Python 3.10 rather than 3.12: upstream's published environment is an old
-# Python/PyTorch line, and this container exists precisely so that constraint
-# stays contained. Whether the inference adapter can be modernised is decided by
-# the compatibility spike and recorded in docs/architecture/musician-runtime-adr.md;
-# until that spike has been run against real weights, this is the conservative
-# choice.
-FROM python:3.10-slim-bookworm
+# Python 3.12. The compatibility spike has been run against the real weights and
+# the maintained runtime is adopted -- see
+# docs/architecture/melodyt5-runtime-decision.md.
+#
+# The evidence, briefly: load_state_dict reports **zero missing keys** against
+# the published checkpoint, and the 60 unexpected ones are all GPT-2 causal-mask
+# buffers that older transformers persisted and newer ones do not declare. The
+# worker verifies that rather than assuming it, and refuses to load if anything
+# outside that pattern appears.
+#
+# This container still exists as its own image: MelodyT5 needs transformers 4.40
+# (tokenizers <0.20) and MIDI-RWKV needs tokenizers >=0.21, so the two genuinely
+# cannot share an environment.
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

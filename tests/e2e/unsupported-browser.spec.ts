@@ -24,7 +24,33 @@ import { expect, test } from '@playwright/test';
  * Between the two, every browser in the matrix makes a positive assertion about
  * capability handling, and no behaviour is quietly marked as passing when it was
  * never executed.
+ *
+ * ## Why the panel assertions wait longer than the default
+ *
+ * The fallback is gated on `support.measured`, which is only true once the
+ * client has hydrated and actually looked at the browser. That gate is
+ * deliberate -- rendering "this browser cannot run Rhythmisoze" during prerender
+ * would put the accusation into the static HTML of every page, before anything
+ * had been checked -- and it means the panel is a *post-hydration* element.
+ *
+ * The probe below is not: `page.evaluate` reads the live globals immediately.
+ * So the test can know the browser is unsupported several seconds before the app
+ * has had the chance to say so, and the gap is exactly hydration time.
+ *
+ * Under five parallel WebKit workers that gap exceeded Playwright's 5 s default
+ * and these two tests failed intermittently -- 2 of 12 runs. Serialised, the
+ * same assertions pass 16 of 16, each in under 1.2 s. So the assertion was
+ * right and the patience was wrong.
  */
+
+/**
+ * Long enough to cover hydration on a loaded worker, short enough that a panel
+ * which never appears still fails the run rather than hanging it.
+ *
+ * Not a blanket timeout raise: it is applied only to the assertions that depend
+ * on the app having hydrated, so an ordinary missing element still fails fast.
+ */
+const HYDRATION_TIMEOUT = 20_000;
 
 /** The same primitives the app's own capability detection reads. */
 async function mediaSupport(page: import('@playwright/test').Page): Promise<{
@@ -68,7 +94,7 @@ test.describe('capability handling', () => {
       // And the creation screen really is usable.
       await expect(page.getByRole('slider').first()).toBeVisible();
     } else {
-      await expect(unsupportedPanel).toBeVisible();
+      await expect(unsupportedPanel).toBeVisible({ timeout: HYDRATION_TIMEOUT });
     }
   });
 
@@ -84,7 +110,9 @@ test.describe('capability handling', () => {
 
     // The panel must name the missing capability. "Something went wrong" would
     // leave the user with nothing to act on.
-    await expect(page.getByText(/Missing:|secure connection/i).first()).toBeVisible();
+    await expect(page.getByText(/Missing:|secure connection/i).first()).toBeVisible({
+      timeout: HYDRATION_TIMEOUT,
+    });
   });
 
   test('an unsupported browser can still read the page and navigate', async ({ page }) => {
@@ -108,6 +136,6 @@ test.describe('capability handling', () => {
     // Persian users must not be handed an English error.
     await expect(
       page.getByRole('heading', { name: /نمی‌تواند ریتمیسوز را اجرا کند|اتصال امن/ }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: HYDRATION_TIMEOUT });
   });
 });

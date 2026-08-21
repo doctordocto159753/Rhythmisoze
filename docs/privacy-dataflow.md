@@ -159,6 +159,7 @@ Musician versions works identically.
 | `MUSICIAN_API_URL` | Where note data goes. **Server-side only** — never exposed to the browser |
 | `MUSICIAN_REQUEST_TIMEOUT_MS` | How long a request may live before it is abandoned |
 | `MUSICIAN_JOB_TTL_SEC` | How long the service keeps a job and its result |
+| `MUSICIAN_MAX_QUEUE_DEPTH` | How many jobs may wait before the service refuses. A refused job holds no note data at all |
 | `STORAGE_DRIVER` | `local-disk` keeps published audio on your own volume; `vercel-blob` sends it to Vercel |
 
 The service URL is deliberately never sent to the client. The browser talks only

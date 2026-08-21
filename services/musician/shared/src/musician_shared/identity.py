@@ -98,10 +98,29 @@ def intervals_of(notes: Sequence[Note]) -> list[int]:
     return [b.pitch - a.pitch for a, b in zip(notes, notes[1:])]
 
 
+#: What a ratio becomes when its reference dimension is zero.
+#:
+#: `float('inf')` is the mathematically honest answer and an unshippable one:
+#: `json.dumps` writes it as bare `Infinity`, which is not JSON, and every strict
+#: parser -- including the browser's own `JSON.parse` -- rejects the whole
+#: response. A monotone hum has a pitch range of zero, so this is not a corner
+#: case: it is scenario "repeated same pitch", and it turned a working refusal
+#: into an unparseable reply.
+#:
+#: A large finite sentinel keeps the comparison behaviour identical (it is far
+#: past every threshold in `policies.py`) while staying serialisable.
+UNBOUNDED_RATIO = 1e6
+
+
 def _safe_ratio(candidate: float, reference: float) -> float:
     if reference <= 0.0:
-        return 1.0 if candidate <= 0.0 else float("inf")
-    return candidate / reference
+        return 1.0 if candidate <= 0.0 else UNBOUNDED_RATIO
+    ratio = candidate / reference
+    # Guards the other direction: a candidate span of inf cannot arise from
+    # validated notes, but a ratio that is not finite must never reach a report.
+    if ratio != ratio or ratio in (float("inf"), float("-inf")):
+        return UNBOUNDED_RATIO
+    return ratio
 
 
 def _contour_similarity(reference: Sequence[Note], candidate: Sequence[Note]) -> float:

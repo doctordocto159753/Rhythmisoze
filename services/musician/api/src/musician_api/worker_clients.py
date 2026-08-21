@@ -25,12 +25,23 @@ from musician_shared.adapters.base import (
     MelodyResponse,
     ModelUnavailableError,
 )
-from musician_shared.contract import Meter, Note
+from musician_shared.contract import Meter, Note, check_monophonic
 
 logger = logging.getLogger(__name__)
 
 
 class _WorkerClient:
+    #: How this worker is named in an error a user might eventually read.
+    #:
+    #: Never the URL. `ModelUnavailableError` messages reach `job.error`, which
+    #: `/v1/jobs/{id}` returns verbatim and the web proxy forwards to the browser
+    #: -- so an unreachable worker used to publish `http://melodyt5-worker:8081`
+    #: to every client that polled during an outage. The internal address is
+    #: exactly what `src/app/api/musician/config.ts` exists to keep server-side,
+    #: and leaking it through an error message defeats that at the one moment
+    #: something is already wrong.
+    label = "model worker"
+
     def __init__(self, *, base_url: str, timeout: float) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=timeout)
@@ -71,26 +82,56 @@ class _WorkerClient:
         try:
             response = self._client.post(f"{self._base_url}{path}", json=payload)
         except httpx.HTTPError as error:
-            raise ModelUnavailableError(f"{self._base_url} unreachable: {error}") from error
+            # The address goes to the log, the label goes to the caller.
+            logger.warning(
+                "%s unreachable at %s: %s", self.label, self._base_url, error
+            )
+            raise ModelUnavailableError(f"the {self.label} is unreachable") from error
 
         if response.status_code == 503:
-            raise ModelUnavailableError(f"{self._base_url} reports the model is not loaded")
+            raise ModelUnavailableError(f"the {self.label} reports its model is not loaded")
         if response.status_code >= 400:
-            raise GenerationError(f"{self._base_url}{path} returned {response.status_code}")
+            logger.warning(
+                "%s returned %s for %s%s",
+                self.label,
+                response.status_code,
+                self._base_url,
+                path,
+            )
+            raise GenerationError(f"the {self.label} returned {response.status_code}")
 
         try:
             return response.json()
         except ValueError as error:
-            raise GenerationError("worker returned a body that is not JSON") from error
+            raise GenerationError(f"the {self.label} returned a body that is not JSON") from error
+
 
 
 def _notes_from(payload: list[dict]) -> tuple[Note, ...]:
+    """Validate what came off the wire, as a *line* and not only note by note.
+
+    Each ``Note`` validates itself, and that is not enough: a worker can return
+    eight individually-valid notes that overlap, or that arrive out of order, and
+    every stage downstream assumes neither. The pipeline splices by index, the
+    guard derives phrase gaps from consecutive pairs, and the renderer schedules
+    in order -- all three read nonsense from an unordered line without failing.
+
+    So the sequence property is checked here, at the boundary, where it is a
+    rejected candidate rather than a corrupt result.
+    """
     try:
-        return tuple(Note.model_validate(item) for item in payload)
+        notes = tuple(Note.model_validate(item) for item in payload)
     except Exception as error:
         # A model returning unusable notation is an ordinary outcome, not a
         # crash: the candidate is rejected and the next seed is tried.
         raise GenerationError(f"worker returned notes that fail validation: {error}") from error
+
+    try:
+        check_monophonic(notes)
+    except ValueError as error:
+        raise GenerationError(f"worker returned a line that is not monophonic: {error}") from error
+
+    return notes
 
 
 def _notes_to(notes: tuple[Note, ...]) -> list[dict]:
@@ -98,6 +139,8 @@ def _notes_to(notes: tuple[Note, ...]) -> list[dict]:
 
 
 class HttpMelodyAdapter(_WorkerClient):
+    label = "melody model"
+
     def generate(self, request: MelodyRequest) -> MelodyResponse:
         body = self._post(
             "/generate",
@@ -114,12 +157,14 @@ class HttpMelodyAdapter(_WorkerClient):
         )
         notes = _notes_from(body.get("notes", []))
         if not notes:
-            raise GenerationError("MelodyT5 worker returned no notes")
+            raise GenerationError("the melody model returned no notes")
         meter = Meter.model_validate(body.get("meter", request.meter.model_dump(mode="json")))
         return MelodyResponse(notes=notes, meter=meter, raw_abc=body.get("rawAbc"))
 
 
 class HttpRwkvAdapter(_WorkerClient):
+    label = "local-repair model"
+
     def infill(self, request: InfillRequest) -> InfillResponse:
         body = self._post(
             "/infill",

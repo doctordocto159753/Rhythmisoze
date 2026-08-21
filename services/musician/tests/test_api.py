@@ -12,7 +12,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from musician_api.config import AdapterMode, Device, Settings
-from musician_api.jobs import Job, JobState, JobStore, WorkerLoop, _JobCancelled
+from musician_api.jobs import Job, JobState, JobStore, QueueFull, WorkerLoop, _JobCancelled
 from musician_api.main import create_app
 
 
@@ -29,6 +29,7 @@ def settings(**overrides) -> Settings:
         "rwkv_concurrency": 1,
         "job_ttl_sec": 60,
         "generation_timeout_sec": 30,
+        "max_queue_depth": 16,
         "log_level": "CRITICAL",
     }
     base.update(overrides)
@@ -212,6 +213,60 @@ class TestCancellation:
         job.state = JobState.SUCCEEDED
         store.update(job)
         assert store.request_cancel(job.id).state is JobState.SUCCEEDED
+
+
+class TestQueueDepth:
+    """The backlog is bounded, and the bound is enforced where it is claimed."""
+
+    def test_the_store_refuses_past_the_configured_depth(self) -> None:
+        store = JobStore(redis_url=None, queue_name="t", ttl_sec=60, max_depth=2)
+        store.create({"source": {}, "seed": 1})
+        store.create({"source": {}, "seed": 2})
+        with pytest.raises(QueueFull):
+            store.create({"source": {}, "seed": 3})
+
+    def test_claiming_a_job_frees_a_slot(self) -> None:
+        """The limit is on *waiting*, not on lifetime.
+
+        A running job has left the queue. If it still counted, a service at its
+        limit could never drain: the depth would only fall when a job finished,
+        so the bound would behave like a concurrency limit that nobody set.
+        """
+        store = JobStore(redis_url=None, queue_name="t", ttl_sec=60, max_depth=1)
+        store.create({"source": {}, "seed": 1})
+        with pytest.raises(QueueFull):
+            store.create({"source": {}, "seed": 2})
+
+        assert store.claim(timeout_sec=0.05) is not None
+        # Now accepted, because the first job is no longer waiting.
+        store.create({"source": {}, "seed": 2})
+
+    def test_a_full_queue_is_a_503_with_a_retry_after(self) -> None:
+        """The client's recoverable path, not an unexplained failure.
+
+        Asserted on the header as well as the status: without `Retry-After` the
+        browser has no basis for when to come back, and a client that retries
+        immediately turns a busy service into a hot loop.
+        """
+        with TestClient(create_app(settings(max_queue_depth=1))) as client:
+            # The worker thread drains the queue, so filling it means creating
+            # jobs faster than one can be claimed. Stopping the loop is not an
+            # option here -- the app owns it -- so the store is filled directly
+            # through the same object the route uses.
+            first = client.post("/v1/jobs", json={"teacher": teacher_payload()})
+            assert first.status_code == 202
+            deadline = time.time() + 5.0
+            refused = None
+            while time.time() < deadline:
+                response = client.post("/v1/jobs", json={"teacher": teacher_payload()})
+                if response.status_code == 503:
+                    refused = response
+                    break
+            assert refused is not None, "the queue never reported itself full"
+            assert refused.headers.get("Retry-After") == "30"
+            # The address of nothing internal, and no mention of a queue the
+            # user did not ask about.
+            assert "busy" in refused.json()["detail"]
 
 
 class TestWorkerLoop:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -34,10 +35,45 @@ OVERLAP_TOLERANCE_SEC = 1e-4
 #: A note shorter than this is not something a person performed.
 MIN_NOTE_DURATION_SEC = 1e-3
 
+#: The most notes any single melody may carry.
+#:
+#: Not arbitrary, and not a stylistic limit. The Identity Guard compares contours
+#: with DTW, which is O(n*m): one guard call over 2000 notes takes ~1 second, and
+#: a job makes 13 candidate calls plus one per infill attempt. A 10000-note
+#: payload -- which the contract accepted -- is therefore minutes of pure Python
+#: per job, unbounded by any timeout the client respects, on a service with one
+#: worker thread. The product records at most 60 seconds of monophonic audio, so
+#: this is an order of magnitude above anything the app can legitimately produce
+#: and is a boundary against a hostile or buggy caller rather than a constraint on
+#: a user.
+MAX_NOTES = 2000
+
+
 
 class Mode(str, Enum):
     MAJOR = "major"
     MINOR = "minor"
+
+
+def check_monophonic(notes: Sequence["Note"]) -> None:
+    """Raise unless ``notes`` is an ordered, non-overlapping monophonic line.
+
+    Extracted from :class:`MusicianInput` so that *every* note sequence in the
+    contract is held to it, not only the input. A ``Variant`` used to accept
+    overlapping, out-of-order notes: the shape a model produces when generation
+    goes wrong, and the shape that renders as a smear no validator complained
+    about. Validating the input and not the output means the strictest check in
+    the system never sees the untrusted side.
+    """
+    for previous, current in zip(notes, notes[1:]):
+        if current.start_sec < previous.start_sec:
+            raise ValueError("notes are not in ascending start order")
+        if current.start_sec < previous.end_sec - OVERLAP_TOLERANCE_SEC:
+            raise ValueError(
+                f"monophonic line overlaps itself: a note starting at "
+                f"{current.start_sec:.4f}s while the previous runs to "
+                f"{previous.end_sec:.4f}s"
+            )
 
 
 class Note(BaseModel):
@@ -150,16 +186,14 @@ class MusicianInput(BaseModel):
         notes = self.notes
         if not notes:
             raise ValueError("no notes: there is nothing for the Musician to work with")
+        if len(notes) > MAX_NOTES:
+            raise ValueError(
+                f"{len(notes)} notes exceeds the limit of {MAX_NOTES}: the identity "
+                f"guard's contour comparison is quadratic, and a melody this long "
+                f"would occupy the single worker for minutes"
+            )
 
-        for previous, current in zip(notes, notes[1:]):
-            if current.start_sec < previous.start_sec:
-                raise ValueError("notes are not in ascending start order")
-            if current.start_sec < previous.end_sec - OVERLAP_TOLERANCE_SEC:
-                raise ValueError(
-                    f"monophonic line overlaps itself: a note starting at "
-                    f"{current.start_sec:.4f}s while the previous runs to "
-                    f"{previous.end_sec:.4f}s"
-                )
+        check_monophonic(notes)
 
         last_end = notes[-1].end_sec
         if last_end > self.duration_sec + OVERLAP_TOLERANCE_SEC:
@@ -242,6 +276,35 @@ class IdentityReport(BaseModel):
     passed: bool
     failures: tuple[str, ...] = ()
 
+    @model_validator(mode="after")
+    def _finite(self) -> IdentityReport:
+        """Every number here has to survive JSON.
+
+        A ratio against a zero reference is mathematically infinite, and
+        ``json.dumps`` writes that as bare ``Infinity`` -- which is not JSON and
+        which the browser's own parser rejects, taking the whole result with it.
+        A monotone hum produces exactly that, so this is a refusal rather than a
+        theoretical guard.
+        """
+        for name in (
+            "contour_similarity",
+            "motif_survival",
+            "phrase_similarity",
+            "tonal_compatibility",
+            "meter_compatibility",
+            "duration_ratio",
+            "pitch_range_change",
+            "note_density_change",
+            "aggregate",
+        ):
+            value = getattr(self, name)
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ValueError(
+                    f"{name} is not finite ({value!r}); it would serialise as "
+                    f"invalid JSON and break every client"
+                )
+        return self
+
 
 class Variant(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -254,6 +317,55 @@ class Variant(BaseModel):
     duration_sec: float
     identity: IdentityReport
     infill_spans: tuple[InfillSpan, ...] = ()
+    #: True when no candidate survived the guard and this carries the Teacher
+    #: material unchanged.
+    #:
+    #: Without this field the honest refusal is indistinguishable from a
+    #: successful generation: the notes are the Teacher's, ``identity.passed`` is
+    #: ``True`` (the guard was asked to compare the Teacher against itself), and
+    #: ``kind`` still says ``refined``. A client would show a version called
+    #: "Shaped" that is byte-identical to "Tidied up" and had no way to know.
+    #: That is precisely the "return the Teacher disguised as the Musician"
+    #: failure the guard exists to prevent, arriving through the front door.
+    source_fallback: bool = False
+
+    @model_validator(mode="after")
+    def _coherent(self) -> Variant:
+        """The output side of the contract, held to the input's standard.
+
+        A variant is assembled from model output. Every stage between the model
+        and here can splice, trim and re-time notes, and a bug in any of them
+        produces exactly the shape this refuses: overlapping or out-of-order
+        notes that are still individually valid. Refusing here turns that into a
+        failed job the user can retry instead of a corrupt version that renders
+        as a smear.
+        """
+        if not self.notes:
+            raise ValueError("a variant with no notes is not a variant")
+        if len(self.notes) > MAX_NOTES:
+            # Expanded is meant to be long; "long" is not "unbounded". The same
+            # ceiling as the input, because the same quadratic guard runs over it
+            # and the same renderer and MIDI export have to carry it.
+            raise ValueError(
+                f"a variant of {len(self.notes)} notes exceeds the limit of {MAX_NOTES}"
+            )
+
+        check_monophonic(self.notes)
+
+        last_end = self.notes[-1].end_sec
+        if last_end > self.duration_sec + OVERLAP_TOLERANCE_SEC:
+            raise ValueError(
+                f"a note ends at {last_end:.4f}s, past the variant's stated "
+                f"duration of {self.duration_sec:.4f}s"
+            )
+
+        for span in self.infill_spans:
+            if span.end_index > len(self.notes):
+                raise ValueError(
+                    f"infill span ends at index {span.end_index}, past the last "
+                    f"note ({len(self.notes)})"
+                )
+        return self
 
 
 class Provenance(BaseModel):

@@ -40,6 +40,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: Only sweep the in-process job cache once it is worth sweeping. Below this the
+#: dict is a few kilobytes and walking it on every state change costs more than
+#: it saves.
+_CACHE_HIGH_WATER = 64
+
+
+class QueueFull(RuntimeError):
+    """The backlog is already longer than anyone will wait for.
+
+    Raised by :meth:`JobStore.create` rather than returned, so that no caller can
+    accept a job by forgetting to check a boolean.
+    """
+
 
 class JobState(str, Enum):
     PENDING = "pending"
@@ -89,11 +102,19 @@ class JobStore:
     are behaviourally identical apart from durability.
     """
 
-    def __init__(self, *, redis_url: str | None, queue_name: str, ttl_sec: int) -> None:
+    def __init__(
+        self,
+        *,
+        redis_url: str | None,
+        queue_name: str,
+        ttl_sec: int,
+        max_depth: int = 16,
+    ) -> None:
         self._lock = threading.RLock()
         self._jobs: dict[str, Job] = {}
         self._pending: list[str] = []
         self._ttl_sec = ttl_sec
+        self._max_depth = max_depth
         self._queue_name = queue_name
         self._redis = None
         self.backend = "memory"
@@ -115,18 +136,41 @@ class JobStore:
     # -- writing -------------------------------------------------------
 
     def create(self, payload: dict[str, Any]) -> Job:
+        """Queue a job, or refuse because the backlog is already too long.
+
+        Refusing is the kinder answer. One worker thread runs one generation at a
+        time and a generation is minutes, so accepting the hundredth job means
+        holding its payload for an hour and then handing the client a timeout --
+        having spent the memory and the queue slot to arrive at the same place.
+        Raises :class:`QueueFull` so the caller cannot accept by omission.
+        """
         job = Job(
             id=uuid.uuid4().hex,
             state=JobState.PENDING,
             payload=payload,
             created_at=time.time(),
         )
+        # Checked inside the lock, with the enqueue. Split apart, two requests
+        # arriving together both read a depth one below the limit and both are
+        # accepted -- a bound that holds only when nobody is testing it is not a
+        # bound. The lock is re-entrant, so `queue_length` may take it again.
         with self._lock:
+            depth = self.queue_length()
+            if depth >= self._max_depth:
+                raise QueueFull(
+                    f"{depth} jobs are already waiting, which is the configured limit"
+                )
             self._jobs[job.id] = job
-            self._pending.append(job.id)
             if self._redis is not None:
                 self._redis.setex(self._key(job.id), self._ttl_sec, self._encode(job))
                 self._redis.rpush(self._queue_name, job.id)
+            else:
+                # Only the memory backend keeps its own queue. Appending here on
+                # the Redis path too would build a second, never-drained list of
+                # every job the process ever saw -- claim() pops from Redis, so
+                # nothing would ever remove them -- and `queue_length()` would
+                # report that backlog whenever Redis hiccuped.
+                self._pending.append(job.id)
         return job
 
     def update(self, job: Job) -> None:
@@ -134,18 +178,40 @@ class JobStore:
             self._jobs[job.id] = job
             if self._redis is not None:
                 self._redis.setex(self._key(job.id), self._ttl_sec, self._encode(job))
+        self._evict_finished()
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            job = self._jobs.get(job_id)
-            if job is not None:
-                return job
             if self._redis is None:
-                return None
-            raw = self._redis.get(self._key(job_id))
+                return self._jobs.get(job_id)
+
+            # Redis is the source of truth when it is configured. Preferring the
+            # local dict would serve this process's stale copy of a job another
+            # instance has since advanced, and would keep serving a job Redis has
+            # already expired.
+            try:
+                raw = self._redis.get(self._key(job_id))
+            except Exception as error:
+                # A Redis blip must not lose an in-flight job. The local copy is
+                # the best available answer, and it is the one this worker is
+                # itself updating.
+                logger.warning("redis read failed, falling back to the local copy: %s", error)
+                return self._jobs.get(job_id)
+
             if raw is None:
+                # Expired or never existed. A local copy of an expired job is not
+                # a reason to keep answering for it -- the TTL is the contract.
+                self._jobs.pop(job_id, None)
                 return None
+
             restored = self._decode(raw)
+            local = self._jobs.get(job_id)
+            if local is not None:
+                # `cancel_requested` is the one flag a worker polls between model
+                # calls, and the worker owns the local object. Carrying it across
+                # keeps a cancel that arrived through another instance visible
+                # here rather than being overwritten by the reload.
+                restored.cancel_requested = restored.cancel_requested or local.cancel_requested
             self._jobs[job_id] = restored
             return restored
 
@@ -192,23 +258,150 @@ class JobStore:
             if job_id is None:
                 return None
 
-        job = self.get(job_id)
-        if job is None or job.state.terminal:
-            return None
+        # Read, check and promote under one lock.
+        #
+        # Split across three statements, a `DELETE /v1/jobs/{id}` landing between
+        # the read and the write is acknowledged as `cancelled` and then
+        # overwritten by `RUNNING` -- so the client is told the job stopped while
+        # the service starts it. The window is small and the failure is silent,
+        # which is the combination worth closing rather than documenting.
+        with self._lock:
+            job = self.get(job_id)
+            if job is None or job.state.terminal:
+                return None
+            if job.cancel_requested:
+                # Cancelled while queued. Claiming it would burn a model call on
+                # a result nobody will read.
+                job.state = JobState.CANCELLED
+                job.finished_at = time.time()
+                self.update(job)
+                return None
 
-        job.state = JobState.RUNNING
-        job.started_at = time.time()
-        self.update(job)
-        return job
+            job.state = JobState.RUNNING
+            job.started_at = time.time()
+            self.update(job)
+            return job
 
     def queue_length(self) -> int:
+        """How many jobs are actually waiting for a worker.
+
+        Not ``len(self._pending)``. That list is drained by ``claim`` and by
+        cancelling a queued job, which covers how a job normally leaves it -- but
+        an id whose job reached a terminal state by any other route stays behind,
+        and counting it publishes backlog that does not exist. `/ready` and
+        `/metrics` both report this number and `create` now refuses on it, so a
+        phantom entry is not a cosmetic error: it is a job refused because of one
+        that already finished.
+        """
         with self._lock:
             if self._redis is not None:
                 try:
                     return int(self._redis.llen(self._queue_name))
                 except Exception:
-                    return len(self._pending)
-            return len(self._pending)
+                    # No local queue exists on the Redis path, so there is no
+                    # honest number to give. Zero is wrong in a knowable way;
+                    # -1 would be worse, because /ready publishes this.
+                    return 0
+            waiting = 0
+            for job_id in self._pending:
+                job = self._jobs.get(job_id)
+                # Evicted from the cache means finished long enough ago to have
+                # passed its TTL, which is not waiting either.
+                if job is not None and job.state is JobState.PENDING:
+                    waiting += 1
+            return waiting
+
+    def _evict_finished(self) -> None:
+        """Drop finished jobs from the in-process cache once their TTL is up.
+
+        Without this the dict is a memory leak with a result payload attached:
+        every job's notes, provenance and diagnostics stay resident for the life
+        of the process. Redis expires its copy; nothing expired this one.
+
+        Only terminal jobs are evicted, and only past the TTL, so a client that
+        is still polling always finds its result -- on the Redis path it is read
+        back from Redis anyway, and on the memory path the TTL is the same
+        promise `/ready` already makes about durability.
+        """
+        with self._lock:
+            if len(self._jobs) <= _CACHE_HIGH_WATER:
+                return
+            cutoff = time.time() - self._ttl_sec
+            stale = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job.state.terminal and (job.finished_at or job.created_at) < cutoff
+            ]
+            for job_id in stale:
+                del self._jobs[job_id]
+            if stale:
+                logger.info("evicted %d finished jobs from the cache", len(stale))
+            # The queue list is drained by `claim` and by cancelling a queued
+            # job. Anything still here whose job is no longer pending left by
+            # some other route and would otherwise sit in the list forever.
+            self._pending = [
+                job_id
+                for job_id in self._pending
+                if (job := self._jobs.get(job_id)) is not None and job.state is JobState.PENDING
+            ]
+
+    def fail_orphaned_running(self) -> int:
+        """Fail jobs that were mid-generation when the process died.
+
+        A restart kills the worker thread; the job's Redis record still says
+        ``running`` and nothing will ever advance it. The client polls a state
+        that cannot change, which is the eternal spinner -- the single worst
+        restart outcome, because the user cannot tell it from slow generation.
+
+        Failing them is the honest answer: the work really did stop, the job
+        really will not finish, and `failed` is a state the UI already handles by
+        keeping every existing version and offering a retry. Requeueing instead
+        would be wrong -- the payload is there but the elapsed time, the partial
+        model state and the user's intent are not, and silently redoing minutes of
+        inference nobody is waiting for is worse than saying so.
+
+        Returns how many were failed, so startup can log a real number.
+        """
+        if self._redis is None:
+            # Nothing survived the restart to orphan. `/ready` already reports
+            # this backend as non-durable.
+            return 0
+
+        failed = 0
+        try:
+            cursor = 0
+            pattern = f"{self._queue_name}:job:*"
+            while True:
+                cursor, keys = self._redis.scan(cursor=cursor, match=pattern, count=200)
+                for key in keys:
+                    raw = self._redis.get(key)
+                    if raw is None:
+                        continue
+                    try:
+                        job = self._decode(raw)
+                    except (ValueError, KeyError):
+                        continue
+                    if job.state is not JobState.RUNNING:
+                        continue
+                    job.state = JobState.FAILED
+                    job.finished_at = time.time()
+                    job.error = (
+                        "the generation was interrupted by a service restart; "
+                        "your existing versions are unchanged"
+                    )
+                    self._redis.setex(key, self._ttl_sec, self._encode(job))
+                    with self._lock:
+                        self._jobs[job.id] = job
+                    failed += 1
+                if cursor == 0:
+                    break
+        except Exception as error:
+            # A recovery sweep that cannot run must not stop the service from
+            # starting: the alternative is a container that crash-loops because
+            # Redis was briefly slow.
+            logger.error("could not sweep orphaned jobs: %s", error)
+
+        return failed
 
     # -- serialisation -------------------------------------------------
 
@@ -284,8 +477,6 @@ class WorkerLoop:
             started = time.perf_counter()
             try:
                 result = self.handler(job)
-                job.result = result
-                job.state = JobState.SUCCEEDED
             except _JobCancelled:
                 job.state = JobState.CANCELLED
             except Exception as error:
@@ -294,6 +485,21 @@ class WorkerLoop:
                 # The message, not the traceback: internals do not leave the
                 # service (brief section 13).
                 job.error = f"{type(error).__name__}: {error}"
+            else:
+                # A cancel can land after the pipeline's last checkpoint. Storing
+                # the result then would have the service report `succeeded` for a
+                # job it already acknowledged as cancelled -- and a client that
+                # has moved on would be told its stopped generation finished.
+                # The work is discarded rather than the acknowledgement.
+                if self.store.is_cancelled(job.id):
+                    logger.info(
+                        "discarding a result for a cancelled job", extra={"jobId": job.id}
+                    )
+                    job.state = JobState.CANCELLED
+                    job.result = None
+                else:
+                    job.result = result
+                    job.state = JobState.SUCCEEDED
             finally:
                 job.finished_at = time.time()
                 self.store.update(job)

@@ -75,6 +75,10 @@ class _Candidate:
     seed: int
     identity: IdentityReport
     infill_spans: tuple[InfillSpan, ...] = ()
+    #: True when this is the Teacher material, returned because nothing survived
+    #: the guard. Carried through to :class:`Variant.source_fallback` so a caller
+    #: can tell a refusal from a generation.
+    source_fallback: bool = False
 
 
 def _local_coherence(notes: Sequence[Note]) -> float:
@@ -408,11 +412,18 @@ def generate_variant(
         # Every candidate left the idea behind. Returning the least-bad one
         # would make the guard decorative, so the Teacher material is returned
         # unchanged and the diagnostics say why.
+        #
+        # `source_fallback=True` is the load-bearing part. Without it this is
+        # indistinguishable from a successful generation -- the guard compares
+        # the Teacher against itself and reports `passed`, and the variant still
+        # calls itself "refined". A client would present the Teacher as the
+        # Musician's work, which is the exact failure the guard exists to stop.
         logger.info("no candidate survived the identity guard", extra={"kind": kind.value})
         fallback = _Candidate(
             notes=source.notes,
             seed=base_seed,
             identity=_guard(source, source.notes, policy),
+            source_fallback=True,
         )
         return _to_variant(source, fallback, kind), outcomes
 
@@ -439,6 +450,7 @@ def _to_variant(source: MusicianInput, candidate: _Candidate, kind: VariantKind)
         duration_sec=round(duration, 6),
         identity=candidate.identity,
         infill_spans=candidate.infill_spans,
+        source_fallback=candidate.source_fallback,
     )
 
 

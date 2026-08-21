@@ -524,6 +524,12 @@ def _sample_logits(
     """
     import numpy as np  # noqa: PLC0415
 
+    # On CUDA the runtime hands back a device tensor, and numpy cannot read one
+    # without an explicit copy to host. Detached first so this never drags a
+    # gradient graph along with it.
+    if hasattr(logits, "detach"):
+        logits = logits.detach().to("cpu")
+
     array = np.asarray(logits, dtype=np.float64).reshape(-1)
     if banned:
         for token in banned:

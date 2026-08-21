@@ -154,9 +154,46 @@ Both models fit comfortably in 32 GB with room to spare — combined peak is und
 2.7 GB. A 4 vCPU / 8 GB server runs this; 16 GB gives headroom for the web app
 and Postgres alongside.
 
-**GPU: not measured.** The CUDA build of torch is a 2.4 GB wheel and the
-download did not complete in this environment across four attempts. The code
-path is device-agnostic (`MUSICIAN_DEVICE=auto` resolves CUDA when present and
-falls back to CPU otherwise, and both runtimes report the device they chose), so
-enabling it is a dependency change rather than a code change — but no GPU figure
-is claimed here, because none was taken.
+### On the GPU
+
+Measured on the same machine with `torch 2.5.1+cu121` against the RTX 4060
+Laptop GPU (8188 MB, compute capability 8.9), via `SPIKE_DEVICE=cuda
+scripts/spike/benchmark_real.py`:
+
+| | Cold load | Peak RSS | Peak VRAM | Warm generation |
+|---|---|---|---|---|
+| MelodyT5 | 8.67 s | 983 MB | **1727 MB** | 1.20 s at a 4-bar budget, 1.91 s at 19 bars |
+| MIDI-RWKV | 5.52 s | 892 MB | 81 MB | 6.08 s mean per infill |
+
+**The two models want different devices, and the measurement is what says so.**
+
+MelodyT5 gains where it matters: the expanded-length generation drops from
+2.75 s to 1.91 s, and host memory halves because the weights move to the card.
+The cold load is *slower* — 8.67 s against 3.14 s — which is the one-off cost of
+initialising the CUDA context and copying 113 M parameters across, paid once per
+process rather than once per request.
+
+MIDI-RWKV is **slower on the GPU**: 6.08 s per infill against 4.41 s on the CPU,
+using 81 MB of VRAM. That is not a surprise once the shape of the work is clear.
+RWKV generates one token at a time through a recurrent state, so a 35 M-parameter
+step is far too small to fill the card and the run is dominated by per-launch
+overhead — of which there is one per token. The CPU has no such overhead.
+
+Both devices produced the same fill for the same seed (`[65, 67, 69, 70, 69]`),
+so this is a latency finding and not a numerical one.
+
+**Recommended: MelodyT5 on the GPU, MIDI-RWKV on the CPU.** The workers are
+already separate containers with their own `MUSICIAN_DEVICE`, so the hybrid
+needs configuration rather than code — which is the case `compose.gpu.yaml`
+exists for.
+
+A GPU bug was found by taking the measurement rather than by reasoning about it:
+`_sample_logits` called `numpy.asarray` on what CUDA hands back, which is a
+device tensor and cannot be read without an explicit copy to host. Every infill
+failed. The CPU path had never exercised it.
+
+**Provenance of these numbers.** They come from a local CUDA build of torch
+installed for the measurement, which is not part of the repository and not
+recreated by `scripts/models/bootstrap`. The CPU figures above are the supported
+baseline; these are evidence for the device recommendation, not a second
+supported configuration.

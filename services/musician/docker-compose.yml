@@ -28,6 +28,7 @@ services:
       MUSICIAN_REDIS_URL: redis://redis:6379/0
       MUSICIAN_LOG_LEVEL: "${MUSICIAN_LOG_LEVEL:-INFO}"
       MUSICIAN_GENERATION_TIMEOUT_SEC: "${MUSICIAN_GENERATION_TIMEOUT_SEC:-300}"
+      MUSICIAN_MAX_QUEUE_DEPTH: "${MUSICIAN_MAX_QUEUE_DEPTH:-16}"
     depends_on:
       redis:
         condition: service_healthy

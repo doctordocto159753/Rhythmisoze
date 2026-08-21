@@ -98,6 +98,49 @@ range would average out respectably. The aggregate is `0.65 × weighted mean +
 The Teacher material is returned unchanged. Handing back the least-bad reject
 would make the guard decorative, which is the exact failure it exists to prevent.
 
+**And it says so.** The variant carries `source_fallback: true`.
+
+Without that flag the honest refusal is indistinguishable from a successful
+generation: the notes are the Teacher's, `identity.passed` is `true` (the guard
+was asked to compare the Teacher against itself, which it passes perfectly), and
+`kind` still reads `refined`. A client would show a version called "Shaped" that
+is byte-identical to "Tidied up", label it the Musician's work, and export it
+under `musician-refined.mid` — the Teacher disguised as the Musician, arriving
+through the front door of the mechanism built to stop it.
+
+The app reads the flag and does not offer that version at all, and the Musician
+panel says which of the two things happened rather than leaving a gap in the
+picker. See `freshGenerated` and `MusicianPanel`.
+
+### When the Teacher moves underneath a result
+
+The three derived versions are recomputed from the transcription on every render,
+so they always describe the current take. The Musician's three are stored note
+data that cannot be recomputed — the same seed on a different model revision is a
+different result.
+
+Nothing connected the two. Nudge the cleanup slider, re-run the Judge, reprocess
+the audio: the Teacher changes and the stored versions do not, yet they stay in
+the picker still described as "your idea, shaped". They have become a variation
+on a phrase that no longer exists, presented as a variation on the one that does
+— and nothing about it looks wrong, because the notes are valid and the audio
+plays.
+
+Each generated version therefore records `sourceDigest`, a cheap content digest
+of the Teacher notes it was generated *from*, and a version whose digest no
+longer matches is withheld rather than offered. It is not deleted: the stored
+record keeps its digest, so what happened stays inspectable.
+
+The digest is ours rather than the service's `input_fingerprint`. That
+fingerprint is a SHA-256 over a Python-side JSON encoding, so comparing against
+it would mean reimplementing that encoding in TypeScript and keeping the two
+byte-identical forever. This one only ever has to agree with itself.
+
+A version stored before the field existed has no digest, and that is read as
+"cannot be checked" rather than "matches" — the conservative reading, which costs
+one regeneration and avoids making the guard vacuous for exactly the data most
+likely to be stale.
+
 ---
 
 ## Weak-span selection
@@ -142,6 +185,10 @@ optional stage would take the feature away for no reason.
 | Generation is reproducible from seed + parameters | seeds derived, not drawn; asserted |
 | No raw audio anywhere | the contract has no audio field; asserted |
 | Nothing accepted because a model returned it | guard gates every stage |
+| A refusal is never presented as a generation | `Variant.source_fallback`, read by the client |
+| A generated version is never played against a Teacher it did not come from | `sourceDigest` compared on every render |
+| Rendered audio is never served for notes it is not a render of | `renderedKey` compared on read, not invalidated on write |
+| Model output is validated as a *line*, not only note by note | `check_monophonic` at the worker boundary and on `Variant` |
 
 ---
 
@@ -150,6 +197,20 @@ optional stage would take the feature away for no reason.
 `POST /v1/jobs` returns a job id immediately; generation is asynchronous.
 `GET /v1/jobs/{id}`, `DELETE /v1/jobs/{id}` to cancel. Also `/health`, `/ready`,
 `/v1/models`, `/metrics`.
+
+**The queue is bounded** (`MUSICIAN_MAX_QUEUE_DEPTH`, 16). One worker thread runs
+one generation at a time and a generation is minutes, so accepting an unbounded
+backlog means holding every payload in memory and then handing each client a
+timeout — having spent the memory to arrive at the same place. Past the limit,
+`POST /v1/jobs` answers `503` with `Retry-After`, which the client already
+handles as a recoverable state.
+
+**`/ready` requires MelodyT5, not both models.** MelodyT5 writes the candidates,
+so without it a job can only fail; infill is an improvement pass that the
+pipeline already skips when RWKV is unreachable. Reporting not-ready for a
+missing RWKV made the probe disagree with the pipeline, and the proxy turned that
+into "the musician is not available" — refusing results the service was perfectly
+able to produce. It now reports `degraded` and keeps working.
 
 Cancellation is cooperative: the pipeline checks between candidates and between
 infill spans, so a cancel waits at most one model call. Killing mid-inference

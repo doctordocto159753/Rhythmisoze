@@ -39,6 +39,7 @@ from .adapters.base import (
     InfillRequest,
     MelodyModelAdapter,
     MelodyRequest,
+    ModelUnavailableError,
     RwkvModelAdapter,
 )
 from .contract import (
@@ -215,6 +216,22 @@ def _run_infill(
                         sampling=policy.infill_sampling,
                         seed=seed,
                     )
+                )
+            except ModelUnavailableError as error:
+                # Infill is an improvement pass, not a requirement. If the RWKV
+                # worker is down, the MelodyT5 candidate has already passed the
+                # guard and is a perfectly good result -- failing the whole
+                # variant would take the feature away over an optional stage.
+                # Further spans are pointless too, so stop rather than retry.
+                logger.warning(
+                    "infill unavailable, keeping the candidate unchanged",
+                    extra={"reason": str(error)},
+                )
+                return _Candidate(
+                    notes=notes,
+                    seed=candidate.seed,
+                    identity=candidate.identity,
+                    infill_spans=tuple(applied),
                 )
             except GenerationError:
                 logger.warning("infill candidate failed", extra={"span": span.start_index})

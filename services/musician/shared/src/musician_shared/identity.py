@@ -183,6 +183,20 @@ def _normalise_tonic(tonic: str) -> str:
     return flats.get(cleaned, cleaned)
 
 
+def _span_sec(notes: Sequence[Note]) -> float:
+    """First onset to last offset.
+
+    Used instead of a stated ``duration_sec`` because the two are not the same
+    quantity. A Teacher input's duration includes trailing silence; a candidate
+    has no stated duration at all, only notes. Comparing one against the other
+    penalises every candidate by however much silence the source happened to
+    carry -- which is a property of the recording, not of the candidate.
+    """
+    if not notes:
+        return 0.0
+    return max(0.0, notes[-1].end_sec - notes[0].start_sec)
+
+
 def _pitch_range(notes: Sequence[Note]) -> int:
     if not notes:
         return 0
@@ -208,7 +222,13 @@ def evaluate_identity(
     candidate_duration_sec: float,
     thresholds: IdentityThresholds,
 ) -> IdentityReport:
-    """Compare a candidate against the Teacher material it came from."""
+    """Compare a candidate against the Teacher material it came from.
+
+    ``reference_duration_sec`` and ``candidate_duration_sec`` are accepted for
+    the caller's convenience and deliberately **not** used for the duration or
+    density comparisons -- those derive their own spans from the notes, because
+    the two arguments do not measure the same thing. See :func:`_span_sec`.
+    """
     contour = _contour_similarity(reference, candidate)
     motif = _motif_survival(reference_motifs, candidate)
     phrase = _phrase_similarity(reference, candidate)
@@ -220,11 +240,14 @@ def evaluate_identity(
     )
     meter_score = 1.0 if meter_matches else 0.0
 
-    duration_ratio = _safe_ratio(candidate_duration_sec, reference_duration_sec)
+    # Like against like: note span on both sides. See _span_sec.
+    reference_span = _span_sec(reference)
+    candidate_span = _span_sec(candidate)
+    duration_ratio = _safe_ratio(candidate_span, reference_span)
     range_change = _safe_ratio(float(_pitch_range(candidate)), float(_pitch_range(reference)))
     density_change = _safe_ratio(
-        _note_density(candidate, candidate_duration_sec),
-        _note_density(reference, reference_duration_sec),
+        _note_density(candidate, candidate_span),
+        _note_density(reference, reference_span),
     )
 
     weights = {

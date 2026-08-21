@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -91,18 +92,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     loop = WorkerLoop(store=store, handler=handle)
 
-    app = FastAPI(
-        title="Rhythmisoze AI Musician",
-        version=SERVICE_VERSION,
-        docs_url="/docs",
-    )
-    app.state.settings = settings
-    app.state.store = store
-    app.state.metrics = metrics
-    app.state.adapters = (melody, rwkv)
-
-    @app.on_event("startup")
-    def _startup() -> None:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
         loop.start()
         logger.info(
             "musician api started",
@@ -112,10 +103,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "queue": store.backend,
             },
         )
+        try:
+            yield
+        finally:
+            # Draining rather than abandoning: a job mid-generation finishes its
+            # current model call before the loop exits, so a redeploy does not
+            # leave a worker holding weights in an unknown state.
+            loop.stop()
 
-    @app.on_event("shutdown")
-    def _shutdown() -> None:
-        loop.stop()
+    app = FastAPI(
+        title="Rhythmisoze AI Musician",
+        version=SERVICE_VERSION,
+        docs_url="/docs",
+        lifespan=lifespan,
+    )
+    app.state.settings = settings
+    app.state.store = store
+    app.state.metrics = metrics
+    app.state.adapters = (melody, rwkv)
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):

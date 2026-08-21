@@ -128,3 +128,35 @@ Three distinct outputs; the length progression is the policy separation.
 Rejection is tested as well as acceptance: a passage of the same length as a
 successful expansion, valid in every mechanical sense and not derived from the
 seed, is **rejected**. Length never earns acceptance.
+
+
+---
+
+## Measured on the target machine
+
+Windows 11, Intel i7, 32 GB RAM, NVIDIA RTX 4060 (8 GB). **CPU**, which is the
+supported baseline:
+
+| | Cold load | Peak RSS | Warm generation |
+|---|---|---|---|
+| MelodyT5 | 3.14 s | 1940 MB | 0.68 s at a 4-bar budget, 2.75 s at 19 bars |
+| MIDI-RWKV | 3.00 s | 711 MB | 4.41 s mean per infill |
+
+End-to-end, warm, through the two workers:
+
+| Variant | Latency |
+|---|---|
+| Refined | 1.9 s |
+| Developed | 8.3 s |
+| Expanded | 14.5 s |
+
+Both models fit comfortably in 32 GB with room to spare — combined peak is under
+2.7 GB. A 4 vCPU / 8 GB server runs this; 16 GB gives headroom for the web app
+and Postgres alongside.
+
+**GPU: not measured.** The CUDA build of torch is a 2.4 GB wheel and the
+download did not complete in this environment across four attempts. The code
+path is device-agnostic (`MUSICIAN_DEVICE=auto` resolves CUDA when present and
+falls back to CPU otherwise, and both runtimes report the device they chose), so
+enabling it is a dependency change rather than a code change — but no GPU figure
+is claimed here, because none was taken.

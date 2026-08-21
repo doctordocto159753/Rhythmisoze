@@ -187,9 +187,49 @@ describe('version planning', () => {
   }));
   const rhythm = analyzeMelodyRhythm(notes, 10);
 
-  it('offers all four versions', () => {
+  it('offers the three local versions without the Musician', () => {
+    // The Musician is optional and may never have run, so the default plan is
+    // the three versions that can always be derived from the transcription.
+    // Offering more would put an unplayable entry in the picker.
     const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
-    expect(plan.map((version) => version.id)).toEqual([...VERSION_IDS]);
+    expect(plan.map((version) => version.id)).toEqual(['unprocessed', 'judge', 'teacher']);
+  });
+
+  it('adds a Musician version only once its notes exist', () => {
+    const plan = planVersions({
+      rhythm,
+      tappedBpm: 120,
+      mode: 'melody',
+      amount: 55,
+      generated: ['musician-refined'],
+    });
+    expect(plan.map((version) => version.id)).toEqual([
+      'unprocessed',
+      'judge',
+      'teacher',
+      'musician-refined',
+    ]);
+    // Its partner was not generated, so it is not offered.
+    expect(plan.map((version) => version.id)).not.toContain('musician-developed');
+  });
+
+  it('leaves Musician timing alone', () => {
+    // These notes are a model's explicit, recorded decisions about pitch and
+    // timing. Quantising on top of them would overwrite those decisions with an
+    // unexplained grid, and the stored provenance would then describe something
+    // the user never heard.
+    const plan = planVersions({
+      rhythm,
+      tappedBpm: 120,
+      mode: 'melody',
+      amount: 55,
+      generated: ['musician-refined', 'musician-developed'],
+    });
+    for (const version of plan.filter((entry) => entry.id.startsWith('musician-'))) {
+      expect(version.amount).toBe(0);
+      expect(version.paramOverrides?.timingStrength).toBe(0);
+      expect(version.paramOverrides?.scaleSnapStrength).toBe(0);
+    }
   });
 
   it('builds every version on the detected tempo when one was heard', () => {

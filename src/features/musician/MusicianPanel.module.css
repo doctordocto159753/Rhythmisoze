@@ -1,0 +1,50 @@
+/**
+ * The Musician area.
+ *
+ * Sits below the version list rather than beside it: the versions are the
+ * subject of the screen, and this is a way of getting two more of them.
+ */
+
+.status {
+  /* Reserved even when empty, so the panel does not jump when generation
+     starts and the status line appears. Layout shift under a button the user
+     is about to press is how a click lands on the wrong thing. */
+  min-block-size: 1.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.spinner {
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  flex: none;
+  border: 2px solid var(--color-line-strong);
+  border-block-start-color: var(--color-accent);
+  border-radius: 50%;
+  animation: musician-spin 0.9s linear infinite;
+}
+
+.error {
+  color: var(--color-danger, var(--color-text));
+}
+
+@keyframes musician-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * Reduced motion: the spinner stops rotating rather than disappearing.
+ *
+ * It is the only indication that work is still happening, so removing it would
+ * leave a user who prefers reduced motion unable to tell a running generation
+ * from a stalled one. A static ring next to a live status line still carries
+ * that information.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-block-start-color: var(--color-accent);
+  }
+}

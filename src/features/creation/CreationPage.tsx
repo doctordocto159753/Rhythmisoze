@@ -41,7 +41,19 @@ export interface CreationPageProps {
  */
 export function CreationPage({ publishEnabled }: CreationPageProps) {
   const { locale, t } = useLocale();
-  const { state, refined, rhythm, versions, activeVersion, lesson, tempoDisagreement, actions } =
+  const {
+    state,
+    refined,
+    rhythm,
+    versions,
+    activeVersion,
+    lesson,
+    tempoDisagreement,
+    musician,
+    versionNotes,
+    versionProvenance,
+    actions,
+  } =
     useCreationFlow(locale);
   const support = useCoreSupport();
 
@@ -264,6 +276,19 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             judge={state.judge}
             lesson={lesson}
             onVersionChange={actions.setVersion}
+            musician={{
+              phase: musician.phase,
+              busy: musician.busy,
+              hasResult: musician.result !== null,
+              hasPending: musician.pending !== null,
+              error: musician.error,
+              available: musician.available,
+              onGenerate: musician.generate,
+              onRegenerate: musician.regenerate,
+              onCancel: musician.cancel,
+              onKeepPending: musician.keepPending,
+              onDiscardPending: musician.discardPending,
+            }}
             refined={refined}
             rawNotes={state.rawNotes}
             diagnostics={state.diagnostics}
@@ -313,6 +338,14 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               renderedAudio={state.renderedAudio}
               source={state.source}
               cleanupLabel={t.review.cleanupLevels[retouchLabel(state.retouchAmount)]}
+              versionNotes={versionNotes}
+              selectedVersionId={activeVersion?.id ?? undefined}
+              versionProvenance={versionProvenance}
+              analysis={
+                refined.analysis
+                  ? { keyRoot: refined.analysis.keyRoot, keyMode: refined.analysis.keyMode }
+                  : null
+              }
               onRender={() => actions.render()}
               onError={actions.fail}
             />

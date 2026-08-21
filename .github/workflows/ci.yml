@@ -6,6 +6,7 @@
 #   golden   regenerates the humtool fixtures from Python and fails if the port
 #            has drifted from the reference implementation
 #   e2e      the browser matrix
+#   musician the AI Musician service, on deterministic fake adapters
 #
 # `golden` is the unusual one and it is the point: the retouch engine is a port,
 # and a port that is not continuously re-verified against its source is just a
@@ -100,3 +101,42 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  musician:
+    name: AI Musician service
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # The orchestrator's runtime. The model workers pin their own older
+          # interpreters inside their images; nothing here imports them.
+          python-version: '3.12'
+
+      - name: Install
+        working-directory: services/musician
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e shared -e "api[dev]"
+
+      - name: Test
+        working-directory: services/musician
+        # No model weights, and no network. Both models sit behind adapters with
+        # deterministic fakes, so the whole pipeline - orchestration, Identity
+        # Guard, ranking, span selection, contract, API - is exercised here
+        # without downloading 1.43 GB (AC-09). The real-model suite is opt-in
+        # via MUSICIAN_REAL_MODELS=1 and is skipped by this run.
+        run: python -m pytest -q
+
+      - name: No weights were downloaded
+        # Asserted rather than trusted. The guarantee that CI never pulls
+        # gigabytes is worth one line, and it fails loudly the day someone adds
+        # a fetch to a fixture.
+        run: |
+          if find models vendor -type f ! -name '.gitkeep' ! -name 'README.md'                ! -name 'manifest.json' | grep -q .; then
+            echo "::error::CI downloaded model artifacts; it must not"
+            find models vendor -type f
+            exit 1
+          fi
+          echo "clean: no model artifacts present"

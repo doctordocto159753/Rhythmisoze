@@ -29,6 +29,18 @@ export interface ExportPanelProps {
   renderedAudio: Blob | null;
   source: LocalSourceAsset | null;
   cleanupLabel: string;
+  /**
+   * Every version that has notes, for the complete package.
+   *
+   * Only versions that actually exist appear -- a zip containing an empty
+   * `musician-refined.mid` would suggest a generation happened when it did not
+   * (§11). The selected version is still what the rendered WAV contains.
+   */
+  versionNotes?: Readonly<Record<string, readonly NoteEvent[]>>;
+  selectedVersionId?: string;
+  /** Provenance for generated versions, recorded in the manifest. */
+  versionProvenance?: Readonly<Record<string, unknown>>;
+  analysis?: { keyRoot: string | null; keyMode: string | null } | null;
   onRender(): Promise<Blob | null>;
   onError(error: unknown): void;
 }
@@ -54,6 +66,10 @@ export function ExportPanel({
   renderedAudio,
   source,
   cleanupLabel,
+  versionNotes,
+  selectedVersionId,
+  versionProvenance,
+  analysis,
   onRender,
   onError,
 }: ExportPanelProps) {
@@ -104,8 +120,32 @@ export function ExportPanel({
       const wav = renderedAudio ?? (await onRender());
       if (wav === null) return;
       const midi = createMidi();
+      // One MIDI file per version that has notes. Named by version id so the
+      // zip is self-describing without reading the manifest.
+      const versionEntries = Object.entries(versionNotes ?? {})
+        .filter(([, versionNoteList]) => (versionNoteList?.length ?? 0) > 0)
+        .map(([versionId, versionNoteList]) => ({
+          name: `${versionId}.mid`,
+          data: new Blob(
+            [
+              new Uint8Array(
+                melodyToMidi(versionNoteList as readonly NoteEvent[], {
+                  bpm,
+                  meter,
+                  title: `${effectiveTitle} (${versionId})`,
+                  program: gmProgram,
+                  instrumentName,
+                }),
+              ),
+            ],
+            { type: 'audio/midi' },
+          ),
+        }));
+
       const manifest = {
-        schemaVersion: 1,
+        // 2 adds per-version files and their source relationships. The reader
+        // for version 1 still works: every field it knew is still here.
+        schemaVersion: 2,
         title: effectiveTitle,
         mode,
         bpm,
@@ -113,9 +153,32 @@ export function ExportPanel({
           beatsPerBar: meter.beatsPerBar,
           beatUnit: meter.beatUnit,
         },
+        key: analysis ? { root: analysis.keyRoot, mode: analysis.keyMode } : null,
+        createdAt: new Date().toISOString(),
         instrumentId,
         instrumentName,
         cleanupLabel,
+        // Which version the WAV was rendered from. Without this, a package with
+        // five MIDI files gives no way to tell which one you are hearing.
+        selectedVersionId: selectedVersionId ?? null,
+        versions: versionEntries.map((entry) => {
+          const versionId = entry.name.replace(/\.mid$/, '');
+          return {
+            id: versionId,
+            file: entry.name,
+            // The pipeline relationship, so a reader can reconstruct how each
+            // version came to exist without knowing the product.
+            derivedFrom:
+              versionId === 'unprocessed'
+                ? null
+                : versionId === 'judge'
+                  ? 'unprocessed'
+                  : versionId === 'teacher'
+                    ? 'judge'
+                    : 'teacher',
+            provenance: versionProvenance?.[versionId] ?? null,
+          };
+        }),
         source: source
           ? {
               kind: source.kind,
@@ -127,7 +190,10 @@ export function ExportPanel({
       };
       const entries = [
         { name: 'rendered.wav', data: wav },
+        // Kept at its original name for compatibility: an existing reader that
+        // looks for notes.mid keeps working, and it is the selected version.
         { name: 'notes.mid', data: midi },
+        ...versionEntries,
         ...(source && safeSourceFilename
           ? [{ name: `source/${safeSourceFilename}`, data: source.blob }]
           : []),
@@ -156,6 +222,11 @@ export function ExportPanel({
     safeSourceFilename,
     download,
     onError,
+    versionNotes,
+    selectedVersionId,
+    versionProvenance,
+    analysis,
+    gmProgram,
   ]);
 
   const downloadWav = useCallback(async () => {

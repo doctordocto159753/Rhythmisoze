@@ -8,7 +8,15 @@
 
 import type { CreationMode, DrumEvent, GridDivision, KeyMode, Meter, NoteEvent, PitchClassName } from './music';
 
-export const LOCAL_SCHEMA_VERSION = 2 as const;
+/**
+ * 3 adds the Musician versions.
+ *
+ * Every field it introduces is optional, so a version-2 row is already a valid
+ * version-3 row -- the migration is a re-stamp, not a rewrite. That matters
+ * more than it sounds: a migration that has to reshape rows is a migration that
+ * can lose them, and there is no server copy of this data to restore from.
+ */
+export const LOCAL_SCHEMA_VERSION = 3 as const;
 export const PUBLISHED_SCHEMA_VERSION = 1 as const;
 
 export type Locale = 'fa' | 'en';
@@ -77,6 +85,47 @@ export interface LocalSketch {
   updatedAt: number;
   publishedId?: string;
   schemaVersion: number;
+  /**
+   * Musician output, when it has been generated.
+   *
+   * Stored rather than derived: unlike the other versions these notes cannot be
+   * recomputed, because the same seed against a different model revision is a
+   * different result. Absent on every sketch made before the feature existed,
+   * and on every sketch where the user never asked for it.
+   */
+  musician?: StoredMusician;
+  /** Which version the user was last listening to. */
+  selectedVersionId?: string;
+}
+
+/** Persisted Musician state. See `@versions` for the note-level shapes. */
+export interface StoredMusician {
+  /** The accepted pair, keyed by version id. */
+  versions: Record<string, StoredMusicianVersion>;
+  /** In-flight job, so a reopened workspace can resume polling. */
+  job?: {
+    jobId: string | null;
+    phase: string;
+    attempt: number;
+    /** Lets a stale job be recognised rather than polled forever. */
+    startedAt: number;
+  };
+}
+
+export interface StoredMusicianVersion {
+  notes: NoteEvent[];
+  identityAggregate: number;
+  changedSpans: { startIndex: number; endIndex: number; reason: string }[];
+  provenance: {
+    jobId: string;
+    seed: number;
+    serviceVersion: string;
+    melodyModelRevision: string;
+    infillModelRevision: string;
+    sourceFingerprint: string;
+    generatedAt: number;
+    elapsedMs: number;
+  };
 }
 
 export interface PublishedSketch {

@@ -48,13 +48,41 @@ class WorkspaceDatabase extends Dexie {
 
   constructor() {
     super('rhythmisoze');
-    // Version 1. A future migration adds a `.version(2).stores(...).upgrade()`
-    // block here; the schemaVersion field on each row lets an upgrade decide
-    // per-record rather than assuming the whole store moved at once.
     this.version(1).stores({
       sketches: 'id, updatedAt, createdAt, mode, publishedId',
       blobs: 'key, sketchId, updatedAt',
     });
+
+    /**
+     * Version 2 -> 3: the Musician versions.
+     *
+     * The indexes do not change, because nothing is queried by the new fields.
+     * Declaring the version is still necessary so Dexie runs the upgrade and
+     * older rows get re-stamped rather than being read back with a stale
+     * `schemaVersion` forever.
+     *
+     * The upgrade is additive by construction: every field version 3 adds is
+     * optional, so an existing row is already valid and the callback only
+     * updates the stamp. A migration that reshapes rows is a migration that can
+     * lose them, and there is no server copy of this data to restore from
+     * (AC-08).
+     */
+    this.version(3)
+      .stores({
+        sketches: 'id, updatedAt, createdAt, mode, publishedId',
+        blobs: 'key, sketchId, updatedAt',
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<StoredSketch, string>('sketches')
+          .toCollection()
+          .modify((row) => {
+            // Deliberately does not touch notes, blobs, retouch settings or
+            // any other field. Nothing about an older sketch is wrong; it
+            // simply predates a feature.
+            row.schemaVersion = LOCAL_SCHEMA_VERSION;
+          });
+      });
   }
 }
 
@@ -160,6 +188,8 @@ export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
     updatedAt: Date.now(),
     publishedId: sketch.publishedId,
     schemaVersion: LOCAL_SCHEMA_VERSION,
+    musician: sketch.musician,
+    selectedVersionId: sketch.selectedVersionId,
     hasAudio: sketch.renderedAudio !== undefined,
     hasMidi: sketch.midi !== undefined,
     hasSource: sketch.source !== undefined,

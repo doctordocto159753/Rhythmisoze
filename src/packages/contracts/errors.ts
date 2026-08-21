@@ -35,6 +35,12 @@ export const APP_ERROR_CODES = [
   'publish_upload_failed',
   'publish_rejected',
   'publish_rate_limited',
+  // The Musician is optional, so its failures are their own category: none of
+  // them may be treated as fatal, and each has a different right next step.
+  'musician_unavailable',
+  'musician_timeout',
+  'musician_failed',
+  'musician_cancelled',
   'network_unavailable',
   'unsupported_browser',
   'unknown',

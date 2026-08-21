@@ -33,12 +33,20 @@ test('audio upload follows the real transcription path and packages the untouche
   const path = await download.path();
   expect(path).toBeTruthy();
   const entries = readStoredZip(readFileSync(path as string));
+  // One MIDI per version that has notes, plus `notes.mid` at its original name
+  // so an existing reader keeps working. The Musician was never asked here, so
+  // its two versions must be absent -- an empty musician-refined.mid would
+  // suggest a generation happened when none did.
   expect([...entries.keys()]).toEqual([
     'rendered.wav',
     'notes.mid',
+    'unprocessed.mid',
+    'judge.mid',
+    'teacher.mid',
     'source/hum-melody.wav',
     'manifest.json',
   ]);
+  expect([...entries.keys()].some((name) => name.startsWith('musician-'))).toBe(false);
   expect(entries.get('source/hum-melody.wav')).toEqual(readFileSync(AUDIO_FIXTURE));
 
   const midi = new Midi(entries.get('notes.mid'));
@@ -49,7 +57,28 @@ test('audio upload follows the real transcription path and packages the untouche
 
   const manifest = JSON.parse(new TextDecoder().decode(entries.get('manifest.json'))) as {
     source: { kind: string; filename: string; bytes: number };
+    selectedVersionId: string | null;
+    versions: { id: string; file: string; derivedFrom: string | null; provenance: unknown }[];
   };
+
+  // A package with several MIDI files gives no way to tell which one the WAV
+  // was rendered from unless the manifest says so.
+  expect(manifest.selectedVersionId).toBeTruthy();
+  expect(manifest.versions.map((version) => version.id)).toEqual([
+    'unprocessed',
+    'judge',
+    'teacher',
+  ]);
+
+  // The pipeline relationships, so a reader can reconstruct how each version
+  // came to exist without knowing the product.
+  expect(manifest.versions.find((version) => version.id === 'unprocessed')?.derivedFrom).toBeNull();
+  expect(manifest.versions.find((version) => version.id === 'judge')?.derivedFrom).toBe(
+    'unprocessed',
+  );
+  expect(manifest.versions.find((version) => version.id === 'teacher')?.derivedFrom).toBe('judge');
+  // No AI ran, so there is no model provenance to record.
+  expect(manifest.versions.every((version) => version.provenance === null)).toBe(true);
   expect(manifest.source).toEqual(
     expect.objectContaining({
       kind: 'audio-upload',

@@ -62,6 +62,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +79,40 @@ _MASK_BUFFER = re.compile(r"\.(attn|crossattention)\.(bias|masked_bias)$")
 MODEL_DIR = Path(os.environ.get("MUSICIAN_MODELS_DIR", "/models"))
 VENDOR_DIR = Path(os.environ.get("MUSICIAN_VENDOR_DIR", "/vendor"))
 MELODYT5_WEIGHTS = MODEL_DIR / "melodyt5" / "weights.pth"
+
+
+def _default_runtime_dir() -> Path:
+    """Where this worker is allowed to write.
+
+    ``tempfile.gettempdir()`` rather than a literal ``/tmp`` so the same code
+    runs on a Windows checkout, where the container's path does not exist. The
+    Dockerfile sets ``MUSICIAN_RUNTIME_DIR`` explicitly, so the default is what
+    local development and the test suite get.
+    """
+    return Path(tempfile.gettempdir()) / "rhythmisoze-melodyt5"
+
+
+#: The one writable directory this worker owns.
+#:
+#: ## Why this exists
+#:
+#: `/vendor` and `/models` are mounted read-only, deliberately: vendored upstream
+#: source pinned at a SHA and a 1.36 GB checkpoint are both immutable inputs, and
+#: a worker that can rewrite either of them can silently stop running the thing
+#: it claims to run.
+#:
+#: But loading MelodyT5 requires writing something. `PatchLevelEnDecoder` calls
+#: ``EncoderDecoderModel.from_encoder_decoder_pretrained("random_model", ...)``
+#: -- a *relative* path -- so a randomly-initialised GPT-2 has to exist on disk
+#: before construction. We were creating it inside the vendored tree, which
+#: worked in a writable local checkout and failed in the real topology with
+#: ``OSError: [Errno 30] Read-only file system: '/vendor/melodyt5/random_model'``,
+#: restart-looping the container.
+#:
+#: The scaffold is neither vendored source nor a model artifact: every parameter
+#: in it is overwritten by the checkpoint moments later. It is constructor
+#: scaffolding, so it belongs where runtime state belongs.
+RUNTIME_DIR = Path(os.environ.get("MUSICIAN_RUNTIME_DIR", "")) or _default_runtime_dir()
 
 #: Upstream's own defaults, from `inference.py`. Kept as the neutral centre that
 #: the Refined and Developed policies move away from.
@@ -163,7 +198,28 @@ def _patch_samplings_for_modern_numpy() -> None:
     logger.info("patched samplings.random_sampling for modern numpy strictness")
 
 
-def _ensure_random_model(source_dir: Path) -> None:
+def _ensure_runtime_dir() -> Path:
+    """The writable directory, created on demand and checked rather than assumed.
+
+    Failing here with a readable message beats failing three frames deeper inside
+    ``save_pretrained`` with an ``Errno 30`` that names a path nobody chose.
+    """
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        probe = RUNTIME_DIR / ".writable"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+    except OSError as error:
+        raise ModelNotLoaded(
+            f"the MelodyT5 runtime directory {RUNTIME_DIR} is not writable ({error}). "
+            f"It holds constructor scaffolding, not model data -- set "
+            f"MUSICIAN_RUNTIME_DIR to a writable path. Do not point it at /vendor "
+            f"or /models, which are read-only by design."
+        ) from error
+    return RUNTIME_DIR
+
+
+def _ensure_random_model(runtime_dir: Path) -> None:
     """Create the `random_model` directory upstream expects.
 
     `PatchLevelEnDecoder` builds its base with
@@ -175,8 +231,15 @@ def _ensure_random_model(source_dir: Path) -> None:
     The weights it contains are overwritten wholesale by the checkpoint a moment
     later, so this is scaffolding for the constructor rather than anything that
     influences output.
+
+    **It is written to the runtime directory, never to the vendored tree.** It
+    used to go into `source_dir`, which is `/vendor/melodyt5` in the real
+    topology and read-only there -- so the container crash-looped on startup with
+    ``Errno 30`` while every local test passed, because a local checkout is
+    writable. Ownership, not permissions, was the bug: this is runtime state and
+    was living in an immutable input.
     """
-    target = source_dir / "random_model"
+    target = runtime_dir / "random_model"
     if (target / "config.json").exists():
         return
 
@@ -266,17 +329,30 @@ class MelodyT5Runtime:
             if self._model is not None:
                 return
 
-            source_dir = _ensure_upstream_importable()
+            # Read from the vendored tree, write to the runtime directory. The
+            # two are separated deliberately -- see RUNTIME_DIR.
+            _ensure_upstream_importable()
+            runtime_dir = _ensure_runtime_dir()
+
             previous_cwd = Path.cwd()
             try:
-                # Upstream resolves `random_model` relative to the working
-                # directory, so the load happens from inside its own tree.
-                os.chdir(source_dir)
-                self._load_locked(source_dir)
+                # Upstream resolves `random_model` relative to the *working
+                # directory*, and that is the only runtime-relative lookup on the
+                # inference path -- checked against the pinned source, where
+                # `utils.py:96` is the sole occurrence and the remaining relative
+                # paths in `config.py` (`total_data_*.jsonl`, `logs.txt`,
+                # `weights.pth`) are training-only and never read by this worker.
+                #
+                # So the load runs from the runtime directory rather than from
+                # the vendored one. `import config` and `from utils import ...`
+                # still resolve, because they go through `sys.path`, which points
+                # at the immutable vendored source.
+                os.chdir(runtime_dir)
+                self._load_locked(runtime_dir)
             finally:
                 os.chdir(previous_cwd)
 
-    def _load_locked(self, source_dir: Path) -> None:
+    def _load_locked(self, runtime_dir: Path) -> None:
         try:
             import torch  # noqa: PLC0415
             import transformers  # noqa: PLC0415
@@ -292,7 +368,7 @@ class MelodyT5Runtime:
             )
             raise ModelNotLoaded(self._load_error)
 
-        _ensure_random_model(source_dir)
+        _ensure_random_model(runtime_dir)
         _patch_samplings_for_modern_numpy()
 
         import config as upstream_config  # noqa: PLC0415

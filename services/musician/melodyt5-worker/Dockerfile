@@ -42,6 +42,22 @@ USER worker
 ENV MUSICIAN_MODELS_DIR=/models \
     MUSICIAN_DEVICE=auto
 
+# The one path this worker writes to.
+#
+# `/vendor` and `/models` are mounted read-only on purpose, and loading MelodyT5
+# needs to write something: upstream's `PatchLevelEnDecoder` calls
+# `from_encoder_decoder_pretrained("random_model", ...)` with a *relative* path,
+# so a throwaway randomly-initialised GPT-2 has to exist on disk before
+# construction. Every parameter in it is overwritten by the checkpoint moments
+# later -- it is constructor scaffolding, not model data.
+#
+# It used to be written into the vendored tree, which is writable in a local
+# checkout and read-only here, so the container crash-looped on startup with
+# `[Errno 30] Read-only file system: '/vendor/melodyt5/random_model'` while every
+# local test passed. Under `/tmp`, which the unprivileged `worker` user can write
+# and which is discarded with the container.
+ENV MUSICIAN_RUNTIME_DIR=/tmp/rhythmisoze-melodyt5
+
 EXPOSE 8081
 
 CMD ["uvicorn", "melodyt5_worker.main:app", "--host", "0.0.0.0", "--port", "8081"]

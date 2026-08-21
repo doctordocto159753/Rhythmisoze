@@ -37,7 +37,14 @@ export function extractHumanMelody(
     ...options.pitchTracker,
   });
   const contour = smoothPitchContour(tracked);
-  const segments = segmentPitchContour(contour.frames, options.segmentation);
+  const segments = segmentPitchContour(contour.frames, {
+    // The register the contour established, so an octave repair at the segment
+    // level cannot place a note outside the range this person actually sang in.
+    register: contour.range
+      ? { lowMidi: contour.range.lowMidi, highMidi: contour.range.highMidi }
+      : null,
+    ...options.segmentation,
+  });
   const notes = generateMelodyNoteEvents(segments);
   return {
     frames: contour.frames,
@@ -53,3 +60,4 @@ export * from './contour';
 export * from './segmentation';
 export * from './midi-generator';
 export * from './quality';
+export * from './diagnostics';

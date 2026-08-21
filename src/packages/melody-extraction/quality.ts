@@ -37,8 +37,13 @@ export function calculateMelodyConfidence(
     ? notes.reduce((sum, note) => sum + (note.confidence ?? 0), 0) / notes.length
     : 0;
 
-  // Voiced coverage saturates at 45% because natural takes contain breaths and
-  // count-in silence. Continuity and octave stability carry the musical signal.
+  // Voiced coverage saturates rather than scaling, because a take is not better
+  // for having less silence in it: natural performances contain breaths, phrase
+  // ends and count-in, and a fully-voiced clip is more likely to be a drone
+  // than a melody. The saturation point is well below what a healthy take now
+  // reaches — the tracker keeps around two thirds of a hummed clip, against a
+  // quarter before voicing became hysteretic — so this stays a floor that a
+  // sparse or mistracked take fails, not a target a good one has to hit.
   const voicedScore = Math.min(1, voicedFramePercentage / 0.45);
   const baseConfidence = clamp01(
     voicedScore * 0.25 +

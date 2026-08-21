@@ -1,5 +1,34 @@
 import { readFileSync } from 'node:fs';
 import type { MonoAudio } from '@contracts';
+import { midiToFrequency, type PitchFrame } from '@/packages/melody-extraction';
+
+/**
+ * A contour frame, for tests that want to drive one stage directly.
+ *
+ * `PitchFrame` carries the tracker's provisional evidence alongside its
+ * accepted reading, and a test that only cares about the accepted pitch should
+ * not have to restate the rest. Omitting `midiPitch` makes an unvoiced frame
+ * that still carries a candidate, which is the interesting case for bridging.
+ */
+export function frameAt(
+  timeSec: number,
+  midiPitch: number | null,
+  options: { confidence?: number; clarity?: number; rms?: number; candidateMidi?: number | null } = {},
+): PitchFrame {
+  const confidence = options.confidence ?? 0.9;
+  const candidateMidi = options.candidateMidi === undefined ? midiPitch : options.candidateMidi;
+  return {
+    timeSec,
+    frequencyHz: midiPitch === null ? null : midiToFrequency(midiPitch),
+    midiPitch,
+    candidateHz: candidateMidi === null ? null : midiToFrequency(candidateMidi),
+    candidateMidi,
+    clarity: options.clarity ?? confidence,
+    confidence,
+    rms: options.rms ?? 0.2,
+    voiced: midiPitch !== null,
+  };
+}
 
 export function readPcm16Wav(path: string): MonoAudio {
   const bytes = readFileSync(path);
@@ -71,4 +100,66 @@ export function synthesizeMelody(
     }
   });
   return { audio: { samples, sampleRate, durationSec }, labels };
+}
+
+/**
+ * A voice-like tone described as a pitch-and-amplitude curve over time.
+ *
+ * The existing `synthesizeMelody` makes clean, evenly-spaced notes, which is
+ * the one thing real humming never is. These fixtures need the awkward cases:
+ * a note whose level dips to a whisper in the middle, a phrase that slides
+ * between two pitches, an attack that arrives breathy before it settles.
+ *
+ * `pitchAt` returns MIDI (fractional is fine) or `null` for silence; `gainAt`
+ * returns 0..1. Both are sampled per output sample, so a curve can be as
+ * detailed as it likes. `breathiness` mixes in shaped noise, which is what
+ * actually drives YIN's clarity down — the thing the old voicing gate could not
+ * tell apart from the note ending.
+ */
+export function synthesizeVoice(options: {
+  durationSec: number;
+  pitchAt: (timeSec: number) => number | null;
+  gainAt?: (timeSec: number) => number;
+  breathiness?: number;
+  sampleRate?: number;
+}): MonoAudio {
+  const sampleRate = options.sampleRate ?? 16_000;
+  const length = Math.ceil(options.durationSec * sampleRate);
+  const samples = new Float32Array(length);
+  const breath = options.breathiness ?? 0.02;
+  let phase = 0;
+  // Deterministic noise, so a failure is reproducible.
+  let state = 0x2545f491;
+  const noise = (): number => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state / 0x7fffffff) % 1;
+  };
+
+  for (let index = 0; index < length; index += 1) {
+    const timeSec = index / sampleRate;
+    const midi = options.pitchAt(timeSec);
+    const gain = options.gainAt ? options.gainAt(timeSec) : 1;
+    if (midi === null || gain <= 0) {
+      // Room tone, not digital silence: a real recording never has none.
+      samples[index] = noise() * 0.0015;
+      continue;
+    }
+    const frequency = 440 * 2 ** ((midi - 69) / 12);
+    phase += (2 * Math.PI * frequency) / sampleRate;
+    // Two partials plus a third: enough harmonic structure for YIN to lock on
+    // without being a pure sine, which is unrealistically easy.
+    const tone =
+      0.55 * Math.sin(phase) + 0.18 * Math.sin(phase * 2) + 0.07 * Math.sin(phase * 3);
+    samples[index] = gain * (tone + noise() * breath);
+  }
+  return { samples, sampleRate, durationSec: length / sampleRate };
+}
+
+/** A cosine ramp, so a level change has no click in it. */
+export function ramp(value: number, from: number, to: number): number {
+  if (value <= from) return 0;
+  if (value >= to) return 1;
+  return 0.5 - 0.5 * Math.cos((Math.PI * (value - from)) / (to - from));
 }

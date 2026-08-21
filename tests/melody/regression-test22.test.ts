@@ -6,7 +6,7 @@ import {
   maximumPolyphony,
   stabilizeSegmentOctaves,
 } from '@/packages/melody-extraction';
-import { readPcm16Wav } from './helpers';
+import { frameAt, readPcm16Wav } from './helpers';
 
 describe('human melody extraction: test22 regression', () => {
   it('anchors a false-bass phrase around its clear F#4 transition', () => {
@@ -37,13 +37,11 @@ describe('human melody extraction: test22 regression', () => {
   });
 
   it('marks a mostly unvoiced fragment as unclear', () => {
-    const frames = Array.from({ length: 100 }, (_, index) => ({
-      timeSec: index * 0.01,
-      frequencyHz: index < 3 ? 261.63 : null,
-      midiPitch: index < 3 ? 60 : null,
-      confidence: index < 3 ? 0.7 : 0,
-      rms: index < 3 ? 0.05 : 0,
-    }));
+    const frames = Array.from({ length: 100 }, (_, index) =>
+      index < 3
+        ? frameAt(index * 0.01, 60, { confidence: 0.7, rms: 0.05 })
+        : frameAt(index * 0.01, null, { confidence: 0, rms: 0, candidateMidi: null }),
+    );
     const quality = calculateMelodyConfidence(frames, [], null);
 
     expect(quality.clear).toBe(false);

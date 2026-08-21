@@ -1,12 +1,88 @@
-/** Monophonic fundamental-frequency tracking for human voice. */
+/**
+ * Monophonic fundamental-frequency tracking for human voice.
+ *
+ * ## Why a frame keeps its estimate even when it is not voiced
+ *
+ * The first version answered one question per frame — *is this a note?* — and
+ * threw away the answer to a different one: *what pitch did YIN find here?* A
+ * frame that failed the gate had `frequencyHz` and `midiPitch` set to `null`,
+ * and the estimate was gone before smoothing, segmentation or the Judge could
+ * look at it.
+ *
+ * That is what made a real 31.2 s hum come out as 7 s of accepted contour.
+ * The confidence score was `clarity * (0.55 + 0.45 * energy)`, so a sung note
+ * *decaying naturally* lost confidence even though YIN's periodicity reading
+ * never moved. From the real take, one sustained note:
+ *
+ * ```
+ *  t      f0     conf    rms
+ *  5.31  63.16   0.79   0.0711   kept
+ *  5.34  62.92   0.66   0.0566   discarded
+ *  5.40  63.06   0.47   0.0397   discarded
+ *  5.55  63.18   0.71   0.0532   kept
+ *  5.64  63.19   0.63   0.0428   discarded   <- note ended here
+ *  5.79  63.09   0.48   0.0149   discarded
+ * ```
+ *
+ * The pitch is stable to within a sixth of a semitone across the whole span.
+ * Only the loudness changed. The gate read that as the note ending, cut it at
+ * 5.62, and — because only the loud attack frames survived — took its pitch
+ * from the part of the note that had not settled yet, emitting 64 for a
+ * contour sitting at 63.1.
+ *
+ * So this module now separates three things that were previously one number:
+ *
+ *  - **the candidate** — what YIN found, kept unconditionally;
+ *  - **clarity** — YIN's own periodicity measure, which does not depend on
+ *    loudness and is therefore the real evidence that a pitch is present;
+ *  - **energy** — how loud the frame is, which decides whether anything is
+ *    happening at all but says nothing about *what*.
+ *
+ * `confidence` remains the composite of the three, unchanged in meaning, for
+ * the quality scorer and the Judge that already read it.
+ *
+ * ## Why voicing is hysteretic
+ *
+ * Starting a note and continuing one are different claims and need different
+ * evidence. Starting says "a pitch began here", which is a strong claim about a
+ * moment. Continuing says "the pitch that was already sounding is still
+ * sounding", which the surrounding frames already support. Requiring the same
+ * evidence for both is what turns one sustained note into four fragments.
+ */
 
 export interface PitchFrame {
   timeSec: number;
+  /**
+   * The accepted fundamental, or `null` where the frame is not voiced.
+   *
+   * "Accepted" means the voicing decision below let it through. Downstream code
+   * that wants the melody reads this; code that wants to know what was heard in
+   * an uncertain region reads `candidateHz` / `candidateMidi`.
+   */
   frequencyHz: number | null;
   midiPitch: number | null;
+  /**
+   * The fundamental YIN estimated, whatever the voicing decision was.
+   *
+   * `null` only when YIN produced nothing usable at all — no periodicity within
+   * the vocal range. A frame may be unvoiced with a perfectly good candidate,
+   * and that combination is the evidence gap bridging and the Judge need.
+   */
+  candidateHz: number | null;
+  candidateMidi: number | null;
+  /**
+   * YIN's periodicity reading, 0..1. Independent of loudness.
+   *
+   * This is the actual evidence that *a* pitch is present. Voicing keys on it;
+   * `confidence` folds energy in on top for consumers that want one number.
+   */
+  clarity: number;
+  /** Composite of clarity and energy, 0..1. Unchanged in meaning. */
   confidence: number;
   /** Frame energy after preprocessing, used for velocity and quality scoring. */
   rms: number;
+  /** Whether this frame was accepted as part of a sung region. */
+  voiced: boolean;
 }
 
 export interface PitchTrackerOptions {
@@ -16,7 +92,54 @@ export interface PitchTrackerOptions {
   minFrequencyHz: number;
   maxFrequencyHz: number;
   yinThreshold: number;
-  minConfidence: number;
+  /**
+   * Clarity needed to *begin* a voiced region.
+   *
+   * A real claim about a moment, so it is held to a real standard. Calibrated
+   * against the recordings in `tests/fixtures/audio`: below about 0.45 the
+   * tracker starts opening regions inside breath noise.
+   */
+  onsetClarity: number;
+  /**
+   * Clarity needed to *continue* one that is already open.
+   *
+   * Deliberately far lower. Continuation is corroborated by the frames on
+   * either side and by `continuitySemitones` below — a frame only continues a
+   * note if it agrees with the pitch already sounding, which noise cannot do
+   * for more than a frame or two by accident.
+   */
+  sustainClarity: number;
+  /**
+   * How far a frame's candidate may sit from the pitch already sounding and
+   * still count as the same note continuing.
+   *
+   * Wide enough for vibrato and a portamento in progress, narrow enough that a
+   * subharmonic (a whole octave away) cannot masquerade as continuation.
+   */
+  continuitySemitones: number;
+  /** Energy, as a multiple of the adaptive floor, needed to begin a region. */
+  onsetEnergyRatio: number;
+  /** Energy, as a multiple of the adaptive floor, needed to continue one. */
+  sustainEnergyRatio: number;
+  /**
+   * How far back a confirmed onset may reach to recover its own attack.
+   *
+   * A hummed phrase often starts breathy: the first few frames carry the right
+   * pitch at poor clarity, and the note as heard begins before the tracker is
+   * sure. Once a region is open the frames behind it can be re-read with the
+   * continuation standard, which is what recovers a weak attack without
+   * lowering the standard for opening one.
+   */
+  attackLookbackFrames: number;
+  /**
+   * Shortest run of frames that may be called a voiced region.
+   *
+   * One strong frame surrounded by noise is a transient — a click, a plosive,
+   * a chair — not a pitch. Without this a single lucky frame opens a region
+   * that segmentation then has to argue with; on the real take one such frame
+   * at 3.36 s ended up anchoring a two-and-a-half second note over silence.
+   */
+  minVoicedRunFrames: number;
 }
 
 export const DEFAULT_PITCH_TRACKER_OPTIONS: PitchTrackerOptions = {
@@ -26,7 +149,13 @@ export const DEFAULT_PITCH_TRACKER_OPTIONS: PitchTrackerOptions = {
   minFrequencyHz: 70,
   maxFrequencyHz: 1000,
   yinThreshold: 0.16,
-  minConfidence: 0.68,
+  onsetClarity: 0.62,
+  sustainClarity: 0.34,
+  continuitySemitones: 1.6,
+  onsetEnergyRatio: 1.35,
+  sustainEnergyRatio: 0.62,
+  attackLookbackFrames: 8,
+  minVoicedRunFrames: 3,
 };
 
 export interface PreparedAudio {
@@ -68,15 +197,45 @@ export function prepareVoiceAudio(
   return { samples: filtered, sampleRate: targetSampleRate };
 }
 
-/** Runs YIN and marks silence/unreliable frames explicitly with null pitch. */
+/** One frame's raw measurements, before any voicing decision is taken. */
+export interface FrameEvidence {
+  timeSec: number;
+  candidateHz: number | null;
+  candidateMidi: number | null;
+  clarity: number;
+  rms: number;
+  confidence: number;
+}
+
+export interface TrackedAudio {
+  frames: PitchFrame[];
+  /** The adaptive energy floor this take was measured against. */
+  energyGate: number;
+}
+
+/**
+ * Runs YIN and decides voicing with hysteresis, keeping every estimate.
+ *
+ * Returns frames rather than a richer object so the common call site stays a
+ * one-liner; `trackVoiceEvidence` exposes the gate for anything that needs to
+ * reason about the energy floor itself.
+ */
 export function trackFundamentalPitch(
   samples: Float32Array,
   sampleRate: number,
   overrides: Partial<PitchTrackerOptions> = {},
 ): PitchFrame[] {
+  return trackVoiceEvidence(samples, sampleRate, overrides).frames;
+}
+
+export function trackVoiceEvidence(
+  samples: Float32Array,
+  sampleRate: number,
+  overrides: Partial<PitchTrackerOptions> = {},
+): TrackedAudio {
   const options = { ...DEFAULT_PITCH_TRACKER_OPTIONS, ...overrides };
   const prepared = prepareVoiceAudio(samples, sampleRate, options.targetSampleRate);
-  const provisional: Array<{
+  const measured: Array<{
     timeSec: number;
     frequencyHz: number;
     clarity: number;
@@ -91,7 +250,7 @@ export function trackFundamentalPitch(
     const frame = prepared.samples.subarray(start, start + options.frameSize);
     const rms = rootMeanSquare(frame);
     const estimate = yin(frame, prepared.sampleRate, options);
-    provisional.push({
+    measured.push({
       timeSec: start / prepared.sampleRate,
       frequencyHz: estimate.frequencyHz,
       clarity: estimate.clarity,
@@ -99,28 +258,144 @@ export function trackFundamentalPitch(
     });
   }
 
-  const energies = provisional.map((frame) => frame.rms).sort((a, b) => a - b);
+  const energies = measured.map((frame) => frame.rms).sort((a, b) => a - b);
   const noiseFloor = percentile(energies, 0.2);
   const strongLevel = percentile(energies, 0.9);
   const energyGate = Math.max(0.003, Math.min(strongLevel * 0.18, noiseFloor * 2.8 + 0.0015));
   const usefulSpan = Math.max(0.004, strongLevel - energyGate);
 
-  return provisional.map((frame) => {
+  const evidence: FrameEvidence[] = measured.map((frame) => {
+    const inRange =
+      frame.frequencyHz >= options.minFrequencyHz && frame.frequencyHz <= options.maxFrequencyHz;
     const energyConfidence = clamp01((frame.rms - energyGate) / usefulSpan);
-    const confidence = clamp01(frame.clarity * (0.55 + 0.45 * energyConfidence));
-    const voiced =
-      frame.frequencyHz >= options.minFrequencyHz &&
-      frame.frequencyHz <= options.maxFrequencyHz &&
-      frame.rms >= energyGate &&
-      confidence >= options.minConfidence;
     return {
       timeSec: frame.timeSec,
-      frequencyHz: voiced ? frame.frequencyHz : null,
-      midiPitch: voiced ? frequencyToMidi(frame.frequencyHz) : null,
-      confidence,
+      candidateHz: inRange ? frame.frequencyHz : null,
+      candidateMidi: inRange ? frequencyToMidi(frame.frequencyHz) : null,
+      clarity: clamp01(frame.clarity),
       rms: frame.rms,
+      // The composite, unchanged, for consumers that want one number.
+      confidence: clamp01(frame.clarity * (0.55 + 0.45 * energyConfidence)),
     };
   });
+
+  return { frames: decideVoicing(evidence, energyGate, options), energyGate };
+}
+
+/**
+ * Turns per-frame evidence into voiced regions.
+ *
+ * Two standards, and a continuity test that ties them together:
+ *
+ * ```
+ * open  a region  clarity >= onsetClarity   and energy >= gate * onsetEnergyRatio
+ * hold  a region  clarity >= sustainClarity and energy >= gate * sustainEnergyRatio
+ *                 and the candidate is within continuitySemitones of the pitch
+ *                 already sounding
+ * ```
+ *
+ * The continuity test is what makes the low sustain threshold safe. A weak
+ * frame is only accepted if it *agrees with what is already there*, so noise —
+ * which by definition does not — cannot ride a region open. That is the
+ * difference between this and lowering one global threshold, which admits noise
+ * everywhere with no such requirement.
+ *
+ * Exported for testing: the voicing rule is the heart of the fix and deserves
+ * to be checkable without synthesising audio.
+ */
+export function decideVoicing(
+  evidence: readonly FrameEvidence[],
+  energyGate: number,
+  overrides: Partial<PitchTrackerOptions> = {},
+): PitchFrame[] {
+  const options = { ...DEFAULT_PITCH_TRACKER_OPTIONS, ...overrides };
+  const onsetEnergy = energyGate * options.onsetEnergyRatio;
+  const sustainEnergy = energyGate * options.sustainEnergyRatio;
+
+  const voiced = new Array<boolean>(evidence.length).fill(false);
+  // The pitch currently sounding, as a slow follower rather than the last
+  // frame: a single bad frame inside a note must not drag the reference with it
+  // and let the note wander an octave.
+  let sounding: number | null = null;
+
+  for (let index = 0; index < evidence.length; index += 1) {
+    const frame = evidence[index] as FrameEvidence;
+    if (frame.candidateMidi === null) {
+      sounding = null;
+      continue;
+    }
+
+    if (sounding === null) {
+      if (frame.clarity >= options.onsetClarity && frame.rms >= onsetEnergy) {
+        voiced[index] = true;
+        sounding = frame.candidateMidi;
+        // Reach back for the attack. Continuation evidence, not onset evidence:
+        // these frames are corroborated by the confirmed onset ahead of them.
+        for (let back = index - 1; back >= Math.max(0, index - options.attackLookbackFrames); back -= 1) {
+          const earlier = evidence[back] as FrameEvidence;
+          if (
+            earlier.candidateMidi === null ||
+            earlier.clarity < options.sustainClarity ||
+            earlier.rms < sustainEnergy ||
+            Math.abs(earlier.candidateMidi - frame.candidateMidi) > options.continuitySemitones
+          ) {
+            break;
+          }
+          voiced[back] = true;
+        }
+      }
+      continue;
+    }
+
+    const agrees = Math.abs(frame.candidateMidi - sounding) <= options.continuitySemitones;
+    if (frame.clarity >= options.sustainClarity && frame.rms >= sustainEnergy && agrees) {
+      voiced[index] = true;
+      // A gentle follower, so vibrato and portamento move the reference while a
+      // one-frame excursion does not.
+      sounding += (frame.candidateMidi - sounding) * 0.25;
+      continue;
+    }
+
+    // The region has ended as far as this pass is concerned. A frame that is
+    // strong enough on its own immediately opens a new one, which is what a
+    // genuine leap to another note looks like.
+    if (frame.clarity >= options.onsetClarity && frame.rms >= onsetEnergy) {
+      voiced[index] = true;
+      sounding = frame.candidateMidi;
+      continue;
+    }
+    sounding = null;
+  }
+
+  dropIsolatedRuns(voiced, options.minVoicedRunFrames);
+
+  return evidence.map((frame, index) => ({
+    timeSec: frame.timeSec,
+    frequencyHz: voiced[index] ? frame.candidateHz : null,
+    midiPitch: voiced[index] ? frame.candidateMidi : null,
+    candidateHz: frame.candidateHz,
+    candidateMidi: frame.candidateMidi,
+    clarity: frame.clarity,
+    confidence: frame.confidence,
+    rms: frame.rms,
+    voiced: voiced[index] === true,
+  }));
+}
+
+/** Erases voiced runs too short to be a note. See `minVoicedRunFrames`. */
+function dropIsolatedRuns(voiced: boolean[], minRun: number): void {
+  let index = 0;
+  while (index < voiced.length) {
+    if (!voiced[index]) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < voiced.length && voiced[index]) index += 1;
+    if (index - start < minRun) {
+      for (let cursor = start; cursor < index; cursor += 1) voiced[cursor] = false;
+    }
+  }
 }
 
 export function frequencyToMidi(frequencyHz: number): number {

@@ -189,7 +189,9 @@ export function reconstructDurations(
 
   return sorted.map((note, index) => {
     const next = sorted[index + 1];
-    const voicedEnd = voicedEndAfter(features, note.startSec);
+    // The note's own pitch, so the search for where its sound ends cannot walk
+    // into the next note's evidence and swallow it.
+    const voicedEnd = voicedEndAfter(features, note.startSec, note.pitch);
 
     let end = voicedEnd ?? note.endSec;
     if (next !== undefined) end = Math.min(end, next.startSec);

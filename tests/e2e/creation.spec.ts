@@ -31,8 +31,48 @@ async function gotoSupportedCreation(page: Page): Promise<void> {
     !hasRequiredMedia,
     'Browser lacks MediaRecorder/getUserMedia; the fallback is asserted in unsupported-browser.spec.ts.',
   );
-  await expect(page.getByText(/Nothing is uploaded/i).first()).toBeVisible();
+  // The landing copy is the marker that the page rendered its real content.
+  //
+  // This used to assert "Nothing is uploaded". That claim was withdrawn when
+  // the Musician began sending symbolic note data to a server, so asserting it
+  // would now be asserting a falsehood. What replaced it is narrower and still
+  // true: the recording is processed on the device.
+  await expect(page.getByText(/processed on your device/i).first()).toBeVisible();
 }
+
+test.describe('privacy copy', () => {
+  test('the withdrawn local-only claim is gone in both languages', async ({ page }) => {
+    /**
+     * AC-12, asserted rather than assumed.
+     *
+     * "Nothing is uploaded" and "everything is on your device" stopped being
+     * universally true when the Musician started sending note data to a
+     * server. A claim like that reappearing is not a cosmetic regression -- it
+     * is the product telling users something false about their data -- so it
+     * gets a test rather than a code review.
+     */
+    for (const locale of ['en', 'fa'] as const) {
+      await page.goto(`/${locale}`);
+      const body = (await page.locator('body').innerText()).toLowerCase();
+      for (const withdrawn of [
+        'nothing is uploaded',
+        'everything is on your device',
+        'چیزی آپلود نمی‌شود',
+        'همه‌چیز روی دستگاه خودت است',
+      ]) {
+        expect(body).not.toContain(withdrawn.toLowerCase());
+      }
+    }
+  });
+
+  test('what replaced it is specific rather than vague', async ({ page }) => {
+    // Vague privacy copy is worse than none: it cannot be checked. The
+    // replacement has to name what stays and what leaves.
+    await page.goto('/en');
+    const body = await page.locator('body').innerText();
+    expect(body).toMatch(/processed on your device/i);
+  });
+});
 
 test.describe('landing and setup', () => {
   test('a bare URL lands in a locale', async ({ page }) => {
@@ -63,8 +103,11 @@ test.describe('landing and setup', () => {
   test('the first screen explains the product in one line', async ({ page }) => {
     await gotoSupportedCreation(page);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    // The privacy claim is on the first screen, not buried in a policy page.
-    await expect(page.getByText(/Nothing is uploaded/i)).toBeVisible();
+    // The privacy statement is on the first screen, not buried in a policy
+    // page. Its wording changed when the local-only claim was withdrawn; what
+    // matters for this test is that a specific, checkable statement is still
+    // there and still first.
+    await expect(page.getByText(/processed on your device/i)).toBeVisible();
   });
 });
 

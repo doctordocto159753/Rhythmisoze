@@ -1,0 +1,104 @@
+# The AI Musician stack.
+#
+# One product-facing service (musician-api) and two internal workers. Only the
+# API publishes a port; the workers are reachable on the internal network and
+# nowhere else. They load gigabytes of weights, have no authentication, and
+# their request shape is an implementation detail -- exposing them would turn
+# that detail into a compatibility obligation.
+#
+# CPU is the baseline. This file runs unchanged on a VPS with no GPU. For an
+# NVIDIA host, add the override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+name: rhythmisoze-musician
+
+services:
+  musician-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "${MUSICIAN_PORT:-8080}:8080"
+    environment:
+      MUSICIAN_DEVICE: "${MUSICIAN_DEVICE:-auto}"
+      MUSICIAN_ADAPTERS: real
+      MUSICIAN_MELODYT5_URL: http://melodyt5-worker:8081
+      MUSICIAN_RWKV_URL: http://rwkv-worker:8082
+      MUSICIAN_REDIS_URL: redis://redis:6379/0
+      MUSICIAN_LOG_LEVEL: "${MUSICIAN_LOG_LEVEL:-INFO}"
+      MUSICIAN_GENERATION_TIMEOUT_SEC: "${MUSICIAN_GENERATION_TIMEOUT_SEC:-300}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      # started, not healthy: the API must come up and report a red /ready when
+      # a model is missing. Waiting for the workers would turn "weights not
+      # downloaded" into a stack that never starts and never says why.
+      melodyt5-worker:
+        condition: service_started
+      rwkv-worker:
+        condition: service_started
+    networks: [musician]
+    restart: unless-stopped
+
+  melodyt5-worker:
+    build:
+      context: .
+      dockerfile: melodyt5-worker/Dockerfile
+    # No `ports:`. Deliberate -- see the header.
+    expose: ["8081"]
+    environment:
+      MUSICIAN_DEVICE: "${MUSICIAN_DEVICE:-auto}"
+      MUSICIAN_MODELS_DIR: /models
+      MELODYT5_REVISION: "${MELODYT5_REVISION:-5c1594ff1a4c183b5c21635b2df29ebca54392ab}"
+    volumes:
+      # Read-only: a model worker has no business writing to the weight store.
+      - "${MUSICIAN_MODELS_DIR:-../../models}:/models:ro"
+    networks: [musician]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # MelodyT5 is ~1.36 GB of fp32 weights plus activations. Without a
+          # limit one bad request can take the host down with it.
+          memory: "${MELODYT5_MEMORY_LIMIT:-6g}"
+
+  rwkv-worker:
+    build:
+      context: .
+      dockerfile: rwkv-worker/Dockerfile
+    expose: ["8082"]
+    environment:
+      MUSICIAN_DEVICE: "${MUSICIAN_DEVICE:-auto}"
+      MUSICIAN_MODELS_DIR: /models
+      MIDI_RWKV_REVISION: "${MIDI_RWKV_REVISION:-7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530}"
+    volumes:
+      - "${MUSICIAN_MODELS_DIR:-../../models}:/models:ro"
+    networks: [musician]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: "${RWKV_MEMORY_LIMIT:-3g}"
+
+  redis:
+    image: redis:7-alpine
+    # Queued work must survive a restart, which is the whole reason the queue is
+    # not in-process. appendonly makes that true rather than likely.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [musician]
+    restart: unless-stopped
+
+networks:
+  musician:
+    driver: bridge
+
+volumes:
+  redis-data:

@@ -37,7 +37,12 @@ export const en = {
 
   landing: {
     lead: 'Hum an idea. Hear it played back.',
-    body: 'Nothing is uploaded. Everything happens on your device until you choose to publish.',
+    // Was: "Nothing is uploaded. Everything happens on your device until you
+    // choose to publish." That stopped being universally true when the Musician
+    // began sending symbolic note data to a server. The replacement says what
+    // is still true and is specific about the exception rather than hedging --
+    // vague privacy copy is worse than none, because it cannot be checked.
+    body: 'Your recording is processed on your device. Only note data leaves it, and only if you ask the musician for extra versions.',
     start: 'Start a sketch',
     howItWorks: 'How it works',
     steps: {
@@ -125,16 +130,20 @@ export const en = {
 
   versions: {
     title: 'Interpretations',
-    help: 'Same performance, four readings of it. Your original is always the first.',
+    help: 'Same performance, different readings of it. Your original is always the first.',
     names: {
       unprocessed: 'Unprocessed',
       judge: 'What you played',
       teacher: 'Tidied up',
+      'musician-refined': 'Shaped',
+      'musician-developed': 'Taken further',
     },
     hints: {
       unprocessed: 'Straight from the listener, nothing corrected.',
       judge: 'The closest reading of what you actually sang.',
       teacher: 'The same idea, put in time and in key.',
+      'musician-refined': 'Your idea, professionally shaped.',
+      'musician-developed': 'Your idea, taken one step further.',
     },
     judgeRepaired: (count: number) =>
       count === 1 ? '1 correction' : `${count} corrections`,
@@ -149,6 +158,43 @@ export const en = {
       `You tapped ${tapped} BPM and this sounds like ${heard} BPM — likely counted twice as fast or twice as slow.`,
     different: (heard: number, tapped: number) =>
       `You tapped ${tapped} BPM; this sounds like ${heard} BPM.`,
+
+    /**
+     * The Musician area.
+     *
+     * Copy rule for everything below: no implementation words. A person waiting
+     * for their music does not need to know which model is running, and naming
+     * one would be a promise we would have to keep when it changes. Developer
+     * diagnostics carry the real names; this does not.
+     */
+    musician: {
+      title: 'Take it further',
+      intro: 'Hand your tidied version to the musician and get two more readings back.',
+      start: 'Create musician versions',
+      // Present tense, no percentages. A progress bar we cannot honestly fill
+      // is worse than a sentence that says what is happening.
+      queued: 'Waiting its turn…',
+      generatingGlobal: 'Working through the whole melody…',
+      refiningLocal: 'Polishing a few phrases…',
+      cancel: 'Stop',
+      cancelled: 'Stopped. Your other versions are untouched.',
+      // Failure copy names the consequence, not the cause: the useful fact is
+      // that nothing was lost.
+      unavailable: 'The musician is not reachable right now. Everything else still works.',
+      timedOut: 'That took too long, so it was stopped. Everything else still works.',
+      failed: 'The musician could not finish this one. Everything else still works.',
+      retry: 'Try again',
+      tryAnother: 'Try another',
+      tryAnotherHint: 'Generates a fresh pair. Your current versions stay until the new ones arrive.',
+      keepNew: 'Keep the new ones',
+      keepOld: 'Keep the previous ones',
+      compareReady: 'New versions are ready. Which do you want to keep?',
+      // Announced to screen readers when generation finishes.
+      ready: 'Musician versions are ready.',
+      changedSpans: (count: number) =>
+        count === 1 ? '1 phrase reworked' : `${count} phrases reworked`,
+      disabled: 'Musician versions are not available in this build.',
+    },
   },
 
   review: {
@@ -351,6 +397,10 @@ export const en = {
     publish_upload_failed: 'The upload did not finish.',
     publish_rejected: 'That could not be published.',
     publish_rate_limited: 'Too many publishes. Wait a minute and try again.',
+    musician_unavailable: 'The musician is not reachable right now.',
+    musician_timeout: 'The musician took too long, so it was stopped.',
+    musician_failed: 'The musician could not finish that one.',
+    musician_cancelled: 'Generation stopped.',
     network_unavailable: 'No connection.',
     unsupported_browser: 'This browser is missing something the app needs.',
     unknown: 'Something went wrong.',
@@ -406,9 +456,9 @@ export const en = {
   },
 
   privacy: {
-    localTitle: 'Everything is on your device',
+    localTitle: 'Your recording stays on your device',
     localBody:
-      'Your recording is processed in this browser. It is not sent anywhere unless you publish.',
+      'Your audio is processed in this browser and is never uploaded. Asking the musician for extra versions sends note data — not your recording — to our server.',
     uploadTitle: 'This step uploads audio',
     processedBy: (backend: string) => `Processed by: ${backend}`,
     backends: {

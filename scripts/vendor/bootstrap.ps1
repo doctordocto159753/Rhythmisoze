@@ -6,10 +6,17 @@
     Windows counterpart of bootstrap.sh. Same deviation, same reason:
 
     MIDI-RWKV's .gitmodules points at three personal forks over SSH, so a
-    recursive init fails for any anonymous clone. One of them (MIDIMetrics) has
-    no detected licence and is an evaluation dependency this pipeline does not
-    need. We therefore rewrite the SSH URLs to HTTPS, initialise only what
-    inference uses, and skip MIDIMetrics entirely.
+    recursive init fails for any anonymous clone. We therefore take the
+    repository at its pinned SHA and initialise NONE of its submodules.
+
+    This script used to rewrite the SSH URLs to HTTPS and initialise the
+    rwkv.cpp submodule. On a Windows machine with no GitHub SSH key that still
+    failed with "Host key verification failed" -- the documented path did not
+    work on the platform it was written for. It was also redundant: that
+    submodule is a personal fork, upstream RWKV/rwkv.cpp is vendored separately
+    below, and rwkv.cpp is not on the V1 path at all (the verified V1 runtime is
+    the Python `rwkv` package). What inference needs from this repository is one
+    file, train/tokenizer/tokenizer_with_acs.json, which is in the main tree.
 
     Nothing fetched here is committed -- vendor/ is gitignored.
 #>
@@ -26,7 +33,7 @@ if (-not (Test-Path $vendor)) { New-Item -ItemType Directory -Path $vendor -Forc
 
 $repos = @(
     @{ Name = 'melodyt5';  Url = 'https://github.com/sanderwood/melodyt5';        Sha = '9fc0e7dd02ba10a77b46f9d4a669451f17885fbc'; Recurse = 'no' }
-    @{ Name = 'midi-rwkv'; Url = 'https://github.com/christianazinn/MIDI-RWKV';   Sha = '7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530'; Recurse = 'selective' }
+    @{ Name = 'midi-rwkv'; Url = 'https://github.com/christianazinn/MIDI-RWKV';   Sha = '7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530'; Recurse = 'none-by-design' }
     @{ Name = 'rwkv.cpp';  Url = 'https://github.com/RWKV/rwkv.cpp';             Sha = '14663c83b6aba4885a47c1fba91204efc74a49d3'; Recurse = 'yes' }
 )
 
@@ -67,13 +74,15 @@ foreach ($repo in $repos) {
         'yes' {
             git -C $target submodule update --init --recursive --quiet
         }
-        'selective' {
-            git -C $target config --local 'url.https://github.com/.insteadOf' 'git@github.com:'
-            Write-Host '  initialising rwkv.cpp only'
-            git -C $target submodule update --init --quiet -- rwkv.cpp 2>$null
-            # Stated rather than merely omitted, so the exclusion is visible.
+        'none-by-design' {
+            # Every submodule here is an SSH URL to a personal fork, and none is
+            # used. Stated rather than merely omitted, so the exclusion is
+            # visible to whoever reads the output and wonders where they went.
+            Write-Host '  using the tokenizer and training source from the main tree only'
+            Write-Host '  SKIPPED rwkv.cpp (personal fork): upstream RWKV/rwkv.cpp is vendored separately below'
             Write-Host '  SKIPPED MIDIMetrics: no detected licence, and not needed for inference'
             Write-Host '  SKIPPED RWKV-PEFT: training-only'
+            Write-Host '  no SSH access is required by this step'
         }
         default { Write-Host '  no submodules' }
     }

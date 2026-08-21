@@ -37,9 +37,14 @@ pwsh scripts/vendor/bootstrap.ps1    # Windows
 Clones MelodyT5, MIDI-RWKV and rwkv.cpp at their pinned SHAs into `vendor/`.
 Nothing it fetches is committed.
 
-It **announces two deliberate skips**: `MIDIMetrics` (no detected licence, and
-an evaluation dependency inference does not need) and `RWKV-PEFT` (training
-only). If you see those lines, the script is working correctly.
+It **announces three deliberate skips**: MIDI-RWKV's own `rwkv.cpp` (a personal
+fork; upstream `RWKV/rwkv.cpp` is cloned separately in the same run),
+`MIDIMetrics` (no detected licence, and an evaluation dependency inference does
+not need) and `RWKV-PEFT` (training only). If you see those lines, the script is
+working correctly.
+
+**No GitHub SSH key is required.** Every MIDI-RWKV submodule is an SSH URL and
+none is initialised.
 
 ### 2. Weights — about 1.43 GB
 

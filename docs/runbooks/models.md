@@ -58,10 +58,15 @@ scripts/vendor/bootstrap.sh
 ```
 
 Clones MelodyT5, MIDI-RWKV and rwkv.cpp at the SHAs pinned in
-[`third_party/MANIFEST.md`](../../third_party/MANIFEST.md), and **announces two
-deliberate skips**: `MIDIMetrics` (no detected licence, evaluation-only) and
-`RWKV-PEFT` (training-only). Seeing those lines means it is working correctly.
+[`third_party/MANIFEST.md`](../../third_party/MANIFEST.md), and **announces three
+deliberate skips**: MIDI-RWKV's own `rwkv.cpp` (a personal fork -- upstream
+`RWKV/rwkv.cpp` is cloned separately in the same run), `MIDIMetrics` (no detected
+licence, evaluation-only) and `RWKV-PEFT` (training-only). Seeing those lines
+means it is working correctly.
 
-MIDI-RWKV's submodules are SSH URLs to personal forks, so a plain
-`--recurse-submodules` fails for any anonymous clone. The script rewrites them
-to HTTPS and initialises only what inference needs.
+**No SSH key is needed.** MIDI-RWKV's submodules are all SSH URLs to personal
+forks, and the script initialises none of them -- the one file inference reads
+from that repository, `train/tokenizer/tokenizer_with_acs.json`, is in the main
+tree. An earlier version rewrote the URLs to HTTPS and initialised `rwkv.cpp`; on
+Windows without a GitHub SSH key that still failed with `Host key verification
+failed`, and took the upstream rwkv.cpp clone down with it.

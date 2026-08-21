@@ -141,11 +141,22 @@ The stop token is converted too: comparing generated ids against the *base*
 `FillBar_End` would mean the stop is never recognised and every generation runs
 to the token budget.
 
-### Still to verify
+### Settled: the V1 runtime is the `rwkv` pip package
 
-Loading the checkpoint is not running it. An actual context-conditioned infill
-(AC-M05) needs either rwkv.cpp built and the GGML conversion run, or the `rwkv`
-pip runtime installed. That has not been done, and no claim is made about it.
+Loading the checkpoint is not running it, and the two options for running it were
+rwkv.cpp with a GGML conversion, or the `rwkv` pip runtime. **The pip runtime is
+what V1 ships.** It has been run against the real 35.09M-parameter checkpoint and
+produces context-conditioned infills.
+
+rwkv.cpp is a **deferred optimisation**, not a prerequisite. `inference.py`
+prefers it and reaches for it only when a converted GGML weight
+(`midi_rwkv.bin`) exists; `scripts/models/bootstrap` produces none, so the pip
+runtime is the path every supported deployment takes.
+
+Reading that preference as a requirement is what produced a `rwkv-worker` image
+that built rwkv.cpp from a path outside its own Docker context and did not
+install `rwkv`, `torch` or `tokenizers` at all -- an image that could not build,
+and could not have loaded the model if it had.
 
 ---
 
@@ -195,7 +206,7 @@ absence of one, and it is labelled as such so nobody later reads it as settled.
 | RWKV infill touches only its span | **verified** structurally; real-model case is opt-in |
 | Worker stacks are isolated and containerised | **verified** — compose config validates; images not yet built |
 | MelodyT5 real weights load and generate | **NOT verified** — needs the 1.36 GB download |
-| MIDI-RWKV real weights load and infill | **NOT verified** — needs a built rwkv.cpp |
+| MIDI-RWKV real weights load and infill | **verified** — real checkpoint, `rwkv` pip runtime, no rwkv.cpp involved |
 | CPU/GPU inference benchmarks | **NOT measured** |
 
 The unverified rows are unverified because the weights have not been downloaded

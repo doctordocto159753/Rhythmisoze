@@ -68,7 +68,7 @@ budget, identity floor), not by which model was used.
 | Default branch | `main` |
 | Licence | MIT |
 | Role | Selective symbolic infilling of nominated spans, conditioned on material either side. Runs in **both** Refined and Developed. |
-| Integration | **Decided.** Pinned submodule at `vendor/midi-rwkv/`, executed inside the isolated `rwkv-worker` container. CPU inference is the baseline. |
+| Integration | **Decided.** Pinned checkout at `vendor/midi-rwkv/` (no submodules -- see caveat 2), executed inside the isolated `rwkv-worker` container. CPU inference is the baseline, via the Python `rwkv` package. |
 | Model artifact | `midi_rwkv.pth`, 70,224,852 bytes, committed at the repository root |
 | Checksum | *to record on first download* |
 
@@ -84,13 +84,20 @@ This repository is the one most likely to be integrated incorrectly.
    | `MIDIMetrics` | `christianazinn/MIDIMetrics` | `f05e06a367de132d5e8ad612d54918b43f2dce19` | **UNKNOWN — must be resolved before use** |
    | `RWKV-PEFT` | `christianazinn/RWKV-PEFT` | `caa1c02a89d58158a9c82a7babc8e33a07f8196c` | Apache-2.0 |
 
-2. **The submodule URLs are SSH** (`git@github.com:...`). An anonymous or CI
-   clone fails unless they are rewritten:
-   ```
-   git clone --recurse-submodules \
-     -c url."https://github.com/".insteadOf="git@github.com:" \
-     https://github.com/christianazinn/MIDI-RWKV
-   ```
+2. **The submodule URLs are SSH** (`git@github.com:...`), so an anonymous or CI
+   clone cannot initialise any of them.
+
+   **We initialise none.** `scripts/vendor/bootstrap.{sh,ps1}` takes the
+   repository at its pinned SHA and stops there. An earlier version rewrote the
+   URLs to HTTPS and initialised `rwkv.cpp`; on Windows with no GitHub SSH key
+   that still died with `Host key verification failed`, part-way through the
+   loop, leaving the *upstream* `vendor/rwkv.cpp` fetched afterwards missing
+   entirely. The supported path did not work on a supported platform.
+
+   Nothing is lost by skipping them. What inference reads from this repository is
+   one file -- `train/tokenizer/tokenizer_with_acs.json` -- and it is in the main
+   tree. `rwkv.cpp` here is a personal fork of a repository we deliberately
+   vendor from upstream (below), and rwkv.cpp is not on the V1 path at all.
 
 3. **Do not copy individual files.** Cherry-picking sources from this tree
    produces something that appears to work and is not the model. Take the whole
@@ -123,13 +130,30 @@ This repository is the one most likely to be integrated incorrectly.
 | Default branch | `master` |
 | Licence | MIT |
 | Role | Inference runtime for the RWKV model family |
-| Integration | **Not decided.** |
+| Integration | **Decided -- deferred.** Vendored at the pin above and mounted read-only into `rwkv-worker` at `/vendor`. **Not built, and not required for V1.** |
 | Model artifact | None of its own; consumes converted RWKV checkpoints. |
 | Checksum | n/a |
 
-| Integration | **Decided.** Built from source inside `rwkv-worker`. CPU build is the baseline; GPU is an optional build flag. |
+**Decision: not on the V1 path.**
 
-**Decision: upstream, not the fork.**
+The V1 MIDI-RWKV runtime is the Python `rwkv` package, verified against the real
+checkpoint -- see `docs/architecture/musician-runtime-adr.md`. `inference.py`
+prefers rwkv.cpp and reaches for it only when a converted GGML weight
+(`midi_rwkv.bin`) exists; `scripts/models/bootstrap` produces none, so on every
+supported V1 deployment the pip runtime is what runs.
+
+The worker image therefore builds no C++. It used to try, with
+`COPY vendor/rwkv.cpp /opt/rwkv.cpp` -- which could never succeed, because
+compose builds that service with `context: ./services/musician` and `vendor/` is
+at the repository root. Every `docker compose build` failed with
+`"/vendor/rwkv.cpp": not found`. The step was mandatory, dead, and outside its
+own context; `services/musician/tests/test_deployment.py` now fails if it
+returns.
+
+Enabling rwkv.cpp later needs the GGML conversion and the bindings, not a
+rebuild: the vendored source is already mounted at runtime.
+
+**Upstream, not the fork.**
 
 MIDI-RWKV pins its own fork (`christianazinn/rwkv.cpp`). We take
 `RWKV/rwkv.cpp` instead. A personal fork's maintenance is not a dependency worth

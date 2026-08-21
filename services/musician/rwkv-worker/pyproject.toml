@@ -16,10 +16,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# CPU baseline: rwkv.cpp needs no torch at all.
+# rwkv.cpp only. Kept for the deferred GGML path, which needs no torch at all --
+# not what a V1 deployment installs.
 cpu = []
-# Fallback runtime when rwkv.cpp bindings are not built.
-pip = ["rwkv>=0.8", "torch>=2.0", "tokenizers>=0.15"]
+# The V1 runtime. Named `pip` for the package it uses rather than for its status:
+# it is the path every supported deployment takes, because rwkv.cpp engages only
+# when a converted GGML weight exists and `scripts/models/bootstrap` produces
+# none.
+#
+# `tokenizers>=0.21` is a floor, not a preference: 0.19.1 cannot parse
+# MIDI-RWKV's own tokenizer JSON, and the failure is a parse error at load rather
+# than anything that names a version. It is also why this worker cannot share an
+# environment with MelodyT5, which needs <0.20 via transformers 4.40.
+pip = ["rwkv>=0.8", "torch>=2.0", "tokenizers>=0.21"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

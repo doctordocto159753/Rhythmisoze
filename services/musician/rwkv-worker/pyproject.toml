@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rwkv-worker"
+version = "0.1.0"
+description = "Isolated MIDI-RWKV infill worker"
+# MIDI-RWKV's published experiments use 3.11. Pinned separately from the
+# MelodyT5 worker, which is on the old torch line.
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "musician-shared",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+# CPU baseline: rwkv.cpp needs no torch at all.
+cpu = []
+# Fallback runtime when rwkv.cpp bindings are not built.
+pip = ["rwkv>=0.8", "torch>=2.0", "tokenizers>=0.15"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

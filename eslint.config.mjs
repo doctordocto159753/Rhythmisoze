@@ -26,6 +26,11 @@ const config = [
       'test-results/**',
       'reference/**',
       'public/**',
+      // Not JavaScript projects. `vendor/` is pinned upstream source we do not
+      // author, and `services/` is the Python Musician service.
+      'vendor/**',
+      'services/**',
+      'models/**',
     ],
   },
   ...next,

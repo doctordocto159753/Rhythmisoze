@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "musician-api"
+version = "0.1.0"
+description = "Product-facing orchestrator for the Rhythmisoze AI Musician"
+requires-python = ">=3.11"
+dependencies = [
+  "musician-shared",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "pydantic>=2.7,<3",
+  # Deterministic symbolic support: measures, meter hierarchy, key context,
+  # notation validation. Orchestrator only -- never in a model worker, never in
+  # the web app. See third_party/MANIFEST.md.
+  "music21>=9.1,<10",
+]
+
+[project.optional-dependencies]
+# The real path only. Fake-mode installs stay small, and CI never pulls these.
+real = ["httpx>=0.27,<1", "redis>=5.0,<6"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "httpx>=0.27,<1", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

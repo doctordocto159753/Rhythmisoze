@@ -1,0 +1,45 @@
+# NVIDIA override. Optional, never required (AC-14).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# On Windows this expects Docker Desktop with the WSL2 backend and a current
+# NVIDIA driver; on Linux, the NVIDIA Container Toolkit.
+#
+# Nothing here changes the code path. MUSICIAN_DEVICE=auto already prefers CUDA
+# when it exists and falls back to CPU when it does not, so the only difference
+# is that the container can now see a GPU.
+
+services:
+  musician-api:
+    environment:
+      MUSICIAN_DEVICE: auto
+
+  melodyt5-worker:
+    build:
+      args:
+        # CUDA wheels instead of the CPU-only default.
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu121
+    environment:
+      MUSICIAN_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  rwkv-worker:
+    environment:
+      MUSICIAN_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

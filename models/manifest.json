@@ -1,0 +1,79 @@
+{
+  "$comment": [
+    "Operational record of every model artifact the AI Musician needs.",
+    "Weights are NEVER committed to this repository -- see third_party/MANIFEST.md rule 5.",
+    "Fetch with scripts/models/bootstrap.sh or scripts/models/bootstrap.ps1.",
+    "Every sha256 below was computed from the real downloaded artifact on 2026-08-21,",
+    "not copied from an upstream README. Verify on every fetch; a mismatch is fatal."
+  ],
+  "version": 1,
+  "generatedAt": "2026-08-21",
+  "totalBytes": 1427971475,
+  "models": [
+    {
+      "name": "melodyt5",
+      "role": "Global score-to-score melody variation. Runs for both Refined and Developed.",
+      "upstream": {
+        "kind": "huggingface",
+        "repo": "sander-wood/melodyt5",
+        "revision": "5c1594ff1a4c183b5c21635b2df29ebca54392ab",
+        "url": "https://huggingface.co/sander-wood/melodyt5"
+      },
+      "code": {
+        "repo": "https://github.com/sanderwood/melodyt5",
+        "revision": "9fc0e7dd02ba10a77b46f9d4a669451f17885fbc",
+        "license": "MIT"
+      },
+      "artifact": {
+        "filename": "weights.pth",
+        "destination": "melodyt5/weights.pth",
+        "expectedBytes": 1357746623,
+        "sha256": "930d96ecb6a663ef8e504e0885e940a676cb3d4fe36c6513b96f00db233435cd",
+        "downloadUrl": "https://huggingface.co/sander-wood/melodyt5/resolve/5c1594ff1a4c183b5c21635b2df29ebca54392ab/weights.pth"
+      },
+      "license": {
+        "code": "MIT",
+        "weights": "MIT",
+        "$comment": "Verified independently of the code licence, per third_party/MANIFEST.md. The HF model card declares license: mit."
+      },
+      "runtimeAdapterVersion": "melodyt5-worker/0.1.0",
+      "notes": [
+        "~1.36 GB. Not baked into the container image unless benchmarking shows immutable bundling is operationally better.",
+        "Upstream's published environment is an old Python/PyTorch line. Which runtime this actually runs on is decided by the compatibility spike, not assumed. See docs/architecture/musician-runtime-adr.md."
+      ]
+    },
+    {
+      "name": "midi-rwkv",
+      "role": "Selective symbolic infill of nominated spans, conditioned on both sides. Runs for both Refined and Developed.",
+      "upstream": {
+        "kind": "github-raw",
+        "repo": "christianazinn/MIDI-RWKV",
+        "revision": "7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530",
+        "url": "https://github.com/christianazinn/MIDI-RWKV"
+      },
+      "code": {
+        "repo": "https://github.com/christianazinn/MIDI-RWKV",
+        "revision": "7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530",
+        "license": "MIT"
+      },
+      "artifact": {
+        "filename": "midi_rwkv.pth",
+        "destination": "midi_rwkv.pth",
+        "expectedBytes": 70224852,
+        "sha256": "f65c8048dc8f30cde72ea40a5ec45f879c162b8af0244e9ac762963c552bbb44",
+        "gitBlobSha1": "1957b2dd57778be25f97e9794533d3d5af85358b",
+        "downloadUrl": "https://raw.githubusercontent.com/christianazinn/MIDI-RWKV/7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530/midi_rwkv.pth"
+      },
+      "license": {
+        "code": "MIT",
+        "weights": "MIT",
+        "$comment": "The weight is committed inside the MIT-licensed repository at the pinned revision, so it carries that licence."
+      },
+      "runtimeAdapterVersion": "rwkv-worker/0.1.0",
+      "notes": [
+        "Inference runtime is upstream RWKV/rwkv.cpp, NOT the personal fork MIDI-RWKV pins. See third_party/MANIFEST.md.",
+        "MIDIMetrics is excluded: no detected licence, and it is an evaluation dependency the pipeline does not need."
+      ]
+    }
+  ]
+}

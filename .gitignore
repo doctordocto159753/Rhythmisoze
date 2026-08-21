@@ -12,3 +12,23 @@ test-results/
 .DS_Store
 Thumbs.db
 .vercel
+
+# --- AI Musician service ---
+# Model weights are never committed. See third_party/MANIFEST.md rule 5 and
+# models/manifest.json; fetch with scripts/models/bootstrap.{sh,ps1}.
+models/*
+!models/.gitkeep
+!models/manifest.json
+!models/README.md
+
+# Upstream source is fetched at pinned SHAs by scripts/vendor/bootstrap.{sh,ps1}
+vendor/*
+!vendor/.gitkeep
+!vendor/README.md
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.ruff_cache/
+services/**/*.egg-info/

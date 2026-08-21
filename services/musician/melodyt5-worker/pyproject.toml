@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "melodyt5-worker"
+version = "0.1.0"
+description = "Isolated MelodyT5 inference worker"
+# Pinned separately from the API on purpose: this stack is the old one, and
+# forcing it to share an environment with rwkv-worker is what the brief calls a
+# dependency graveyard.
+requires-python = ">=3.10"
+dependencies = [
+  "musician-shared",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "torch>=2.0",
+  "transformers>=4.30",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

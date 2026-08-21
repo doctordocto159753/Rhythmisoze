@@ -10,7 +10,7 @@ function note(pitch: number, start: number): NoteEvent {
 }
 
 function pair(jobId = 'job-1'): MusicianPair {
-  const make = (id: 'musician-refined' | 'musician-developed') => ({
+  const make = (id: 'musician-refined' | 'musician-developed' | 'musician-expanded') => ({
     id,
     notes: [note(60, 0), note(64, 0.5)],
     provenance: {
@@ -29,6 +29,7 @@ function pair(jobId = 'job-1'): MusicianPair {
   return {
     'musician-refined': make('musician-refined'),
     'musician-developed': make('musician-developed'),
+    'musician-expanded': make('musician-expanded'),
   };
 }
 
@@ -42,6 +43,7 @@ describe('persisting Musician output', () => {
     expect(stored).toBeDefined();
     expect(Object.keys(stored!.versions).sort()).toEqual([
       'musician-developed',
+      'musician-expanded',
       'musician-refined',
     ]);
     // Provenance is the reason this is stored rather than derived. A result

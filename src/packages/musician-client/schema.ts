@@ -81,7 +81,7 @@ export const infillSpanSchema = z.object({
 });
 
 export const variantSchema = z.object({
-  kind: z.union([z.literal('refined'), z.literal('developed')]),
+  kind: z.union([z.literal('refined'), z.literal('developed'), z.literal('expanded')]),
   // A variant with no notes is not a variant. Catching it here means the review
   // screen never has to render an empty version it was told exists.
   notes: z.array(noteSchema).min(1),
@@ -122,6 +122,7 @@ export const musicianResultSchema = z.object({
   source_id: z.string(),
   refined: variantSchema,
   developed: variantSchema,
+  expanded: variantSchema,
   provenance: provenanceSchema,
   diagnostics: diagnosticsSchema,
 });

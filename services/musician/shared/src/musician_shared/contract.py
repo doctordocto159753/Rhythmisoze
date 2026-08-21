@@ -203,6 +203,12 @@ class MusicianInput(BaseModel):
 class VariantKind(str, Enum):
     REFINED = "refined"
     DEVELOPED = "developed"
+    #: "I only had this small seed -- show me what it could grow into."
+    #:
+    #: Unlike the other two, growth in duration is the *point* here rather than
+    #: a failure to stay close. The identity guard is reweighted accordingly:
+    #: see `policies.EXPANDED`.
+    EXPANDED = "expanded"
 
 
 class InfillSpan(BaseModel):
@@ -289,5 +295,6 @@ class MusicianOutput(BaseModel):
     source_id: str
     refined: Variant
     developed: Variant
+    expanded: Variant
     provenance: Provenance
     diagnostics: Diagnostics

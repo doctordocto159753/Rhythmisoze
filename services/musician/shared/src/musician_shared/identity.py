@@ -36,12 +36,46 @@ _MAJOR_SCALE = (0, 2, 4, 5, 7, 9, 11)
 _MINOR_SCALE = (0, 2, 3, 5, 7, 8, 10)
 
 
+#: How much each dimension counts toward the aggregate.
+#:
+#: Refined and Developed ask "is this the same piece?". Expanded asks a
+#: different question -- "is this grown from the same seed?" -- and the two are
+#: not the same measurement. A passage that develops a motif through A A' B A''
+#: is *supposed* to be longer, denser and to have more phrases than its source;
+#: scoring it against duration equality would reject exactly the thing it was
+#: asked to do.
+#:
+#: So the weights are per-variant rather than global. What stays high for
+#: Expanded is everything that says the seed survived: motif, contour
+#: relationship, tonal compatibility.
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "contour": 0.34,
+    "motif": 0.26,
+    "phrase": 0.16,
+    "tonal": 0.14,
+    "meter": 0.10,
+}
+
+EXPANDED_WEIGHTS: dict[str, float] = {
+    # Contour still matters, but over a longer passage it is compared by shape
+    # rather than length -- DTW is what makes that meaningful.
+    "contour": 0.30,
+    # The single most important question for a growth variant.
+    "motif": 0.38,
+    # Phrase structure is *expected* to change: A A' B A'' has more phrases
+    # than its seed by construction.
+    "phrase": 0.04,
+    "tonal": 0.18,
+    "meter": 0.10,
+}
+
+
 @dataclass(frozen=True)
 class IdentityThresholds:
     """The guardrail, per policy.
 
-    Refined and Developed differ here, and that difference is a large part of
-    what makes them two products rather than two seeds.
+    The three variants differ here, and that difference is most of what makes
+    them three products rather than three seeds.
     """
 
     aggregate_floor: float
@@ -52,6 +86,12 @@ class IdentityThresholds:
     max_pitch_range_change: float
     max_density_change: float
     require_meter_match: bool
+    #: Which weighting to aggregate with. Defaults to the same-piece weighting.
+    weights: dict[str, float] | None = None
+    #: When true, the duration and density bounds are reported but not enforced.
+    #: Expanded sets this: growing is the point, and a ratio bound would reject
+    #: the successful case.
+    allow_growth: bool = False
 
 
 def intervals_of(notes: Sequence[Note]) -> list[int]:
@@ -250,13 +290,7 @@ def evaluate_identity(
         _note_density(reference, reference_span),
     )
 
-    weights = {
-        "contour": 0.34,
-        "motif": 0.26,
-        "phrase": 0.16,
-        "tonal": 0.14,
-        "meter": 0.10,
-    }
+    weights = thresholds.weights or DEFAULT_WEIGHTS
     scores = {
         "contour": contour,
         "motif": motif,
@@ -277,19 +311,33 @@ def evaluate_identity(
         failures.append(f"contour {contour:.3f} below floor {thresholds.contour_floor:.3f}")
     if motif < thresholds.motif_floor:
         failures.append(f"motif survival {motif:.3f} below floor {thresholds.motif_floor:.3f}")
-    if not thresholds.min_duration_ratio <= duration_ratio <= thresholds.max_duration_ratio:
+    # Growth variants report these and do not fail on them. The numbers stay in
+    # the report because they are useful diagnostics; they simply stop being
+    # rejection criteria for a variant whose purpose is to grow.
+    if not thresholds.allow_growth and not (
+        thresholds.min_duration_ratio <= duration_ratio <= thresholds.max_duration_ratio
+    ):
         failures.append(
             f"duration ratio {duration_ratio:.3f} outside "
             f"{thresholds.min_duration_ratio:.2f}..{thresholds.max_duration_ratio:.2f}"
+        )
+    elif thresholds.allow_growth and duration_ratio > thresholds.max_duration_ratio:
+        # Still bounded -- freer is not unlimited (brief section 9).
+        failures.append(
+            f"duration ratio {duration_ratio:.3f} beyond the growth ceiling "
+            f"{thresholds.max_duration_ratio:.2f}"
         )
     if range_change > thresholds.max_pitch_range_change:
         failures.append(
             f"pitch range grew {range_change:.2f}x, over {thresholds.max_pitch_range_change:.2f}x"
         )
-    if density_change > thresholds.max_density_change or (
+    density_out_of_range = density_change > thresholds.max_density_change or (
         density_change > 0 and density_change < 1.0 / thresholds.max_density_change
-    ):
+    )
+    if density_out_of_range and not thresholds.allow_growth:
         failures.append(f"note density changed {density_change:.2f}x")
+    elif thresholds.allow_growth and density_change > thresholds.max_density_change:
+        failures.append(f"note density {density_change:.2f}x beyond the growth ceiling")
     if thresholds.require_meter_match and not meter_matches:
         failures.append(
             f"meter changed {reference_meter.numerator}/{reference_meter.denominator} -> "

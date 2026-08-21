@@ -34,7 +34,8 @@ export type MusicalVersionId =
   | 'judge'
   | 'teacher'
   | 'musician-refined'
-  | 'musician-developed';
+  | 'musician-developed'
+  | 'musician-expanded';
 
 /** Every version, in the order they are offered. Order is the pipeline order. */
 export const VERSION_ORDER: readonly MusicalVersionId[] = [
@@ -43,15 +44,32 @@ export const VERSION_ORDER: readonly MusicalVersionId[] = [
   'teacher',
   'musician-refined',
   'musician-developed',
+  'musician-expanded',
 ];
 
-export const MUSICIAN_VERSION_IDS: readonly MusicalVersionId[] = [
+/**
+ * The generated versions, typed narrowly.
+ *
+ * Narrower than `MusicalVersionId` on purpose: code that iterates these is
+ * indexing a structure that only has the generated ones, and a wider type there
+ * turns a correct loop into a type error.
+ */
+export type MusicianVersionId =
+  | 'musician-refined'
+  | 'musician-developed'
+  | 'musician-expanded';
+
+export const MUSICIAN_VERSION_IDS: readonly MusicianVersionId[] = [
   'musician-refined',
   'musician-developed',
+  'musician-expanded',
 ];
 
-export function isMusicianVersion(id: MusicalVersionId): boolean {
-  return id === 'musician-refined' || id === 'musician-developed';
+export function isMusicianVersion(id: MusicalVersionId): id is MusicianVersionId {
+  // A type predicate rather than a boolean: callers that check this then index
+  // a generated-only structure, and without the narrowing they would each need
+  // their own cast.
+  return (MUSICIAN_VERSION_IDS as readonly MusicalVersionId[]).includes(id);
 }
 
 /**
@@ -111,6 +129,14 @@ const DESCRIPTORS: Readonly<Record<MusicalVersionId, VersionDescriptor>> = {
   'musician-developed': {
     id: 'musician-developed',
     origin: 'generated',
+    sourceVersionId: 'teacher',
+    alwaysAvailable: false,
+  },
+  'musician-expanded': {
+    id: 'musician-expanded',
+    origin: 'generated',
+    // Teacher, like its siblings. Expanded grows the material; it does not get
+    // a different source for doing so.
     sourceVersionId: 'teacher',
     alwaysAvailable: false,
   },
@@ -196,6 +222,7 @@ export function notesForVersion(
       return sources.teacher;
     case 'musician-refined':
     case 'musician-developed':
+    case 'musician-expanded':
       return sources.generated[id]?.notes ?? null;
   }
 }

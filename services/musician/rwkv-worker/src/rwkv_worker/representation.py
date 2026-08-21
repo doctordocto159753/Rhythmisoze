@@ -241,10 +241,15 @@ def build_infill_prompt(
     the note content from there.
     """
     bar_positions = [index for index, token in enumerate(token_ids) if token == bar_token_id]
-    if first_bar_index < 0 or first_bar_index >= len(bar_positions):
+    if not bar_positions:
         raise RepresentationError(
-            f"bar {first_bar_index} is outside this melody ({len(bar_positions)} bars)"
+            "this melody tokenised to no bars, so there is nothing to mask"
         )
+    # Clamp rather than refuse. The caller derives the bar index from note
+    # timings and the tokenizer derives bars from ticks; the two can disagree by
+    # one at a boundary, and refusing a repair over an off-by-one is worse than
+    # repairing the last bar.
+    first_bar_index = max(0, min(first_bar_index, len(bar_positions) - 1))
 
     end_bar_index = min(first_bar_index + bar_count, len(bar_positions))
     start_token = bar_positions[first_bar_index]

@@ -109,6 +109,7 @@ class HttpMelodyAdapter(_WorkerClient):
                 "sampling": request.sampling.as_dict(),
                 "seed": request.seed,
                 "task": request.task,
+                "maxBars": request.max_bars,
             },
         )
         notes = _notes_from(body.get("notes", []))

@@ -178,6 +178,7 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
 const MUSICIAN_RECIPE_IDS: readonly MusicalVersionId[] = [
   'musician-refined',
   'musician-developed',
+  'musician-expanded',
 ];
 
 /** The version to select when the user has not chosen. */

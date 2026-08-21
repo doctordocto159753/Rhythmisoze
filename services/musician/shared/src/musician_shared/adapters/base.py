@@ -48,6 +48,10 @@ class MelodyRequest:
     #: Free-text task label passed to MelodyT5 ("variation"). Recorded in
     #: provenance so a future task change is visible in old results.
     task: str = "variation"
+    #: Generation ceiling in bars, decided by the variant's policy. The adapter
+    #: stops there even if the model would keep going -- a runaway generation is
+    #: the one failure a growth variant cannot self-diagnose.
+    max_bars: int = 24
 
 
 @dataclass(frozen=True)

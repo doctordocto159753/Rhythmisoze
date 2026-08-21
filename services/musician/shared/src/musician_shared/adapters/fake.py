@@ -77,9 +77,17 @@ class FakeMelodyAdapter:
         # nobody reads.
         drift = max(0.0, (temperature - 0.60) * 1.4)
 
+        # A growth policy asks for more bars than it was given. The fake grows by
+        # restating the source, which is the crudest possible A A' and is enough
+        # for the pipeline and guard to be exercised without a model.
+        source_notes = list(request.notes)
+        if request.max_bars > 8 and drift > 0.5:
+            repeats = min(3, max(1, request.max_bars // 8))
+            source_notes = list(request.notes) * repeats
+
         notes: list[Note] = []
         elapsed = 0.0
-        for index, note in enumerate(request.notes):
+        for index, note in enumerate(source_notes):
             pitch = note.pitch
             if rng.random() < drift * 0.55:
                 # Step, never leap: a fake that jumps octaves would be rejected
@@ -94,8 +102,10 @@ class FakeMelodyAdapter:
 
             gap = 0.0
             if index > 0:
-                previous = request.notes[index - 1]
+                previous = source_notes[index - 1]
                 gap = max(0.0, note.start_sec - previous.end_sec)
+                if gap < 0:
+                    gap = 0.05
 
             start = elapsed + gap
             end = start + max(0.05, duration)

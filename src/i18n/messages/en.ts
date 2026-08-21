@@ -137,6 +137,7 @@ export const en = {
       teacher: 'Tidied up',
       'musician-refined': 'Shaped',
       'musician-developed': 'Taken further',
+      'musician-expanded': 'Grown',
     },
     hints: {
       unprocessed: 'Straight from the listener, nothing corrected.',
@@ -144,6 +145,7 @@ export const en = {
       teacher: 'The same idea, put in time and in key.',
       'musician-refined': 'Your idea, professionally shaped.',
       'musician-developed': 'Your idea, taken one step further.',
+      'musician-expanded': 'Your idea, grown into a longer passage.',
     },
     judgeRepaired: (count: number) =>
       count === 1 ? '1 correction' : `${count} corrections`,
@@ -184,6 +186,13 @@ export const en = {
       timedOut: 'That took too long, so it was stopped. Everything else still works.',
       failed: 'The musician could not finish this one. Everything else still works.',
       retry: 'Try again',
+      // The three AI versions, described by what they do to the *length* and
+      // ambition of the idea rather than by how "good" they are. A user
+      // choosing between them needs to know what will come back, not which one
+      // the app prefers.
+      refinedSummary: 'Same idea, polished.',
+      developedSummary: 'Same idea, developed.',
+      expandedSummary: 'The idea grown into a longer passage.',
       tryAnother: 'Try another',
       tryAnotherHint: 'Generates a fresh pair. Your current versions stay until the new ones arrive.',
       keepNew: 'Keep the new ones',

@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 from conftest import build_input, build_notes
 from musician_shared.contract import Key, Meter, Mode
-from musician_shared.identity import evaluate_identity, intervals_of
-from musician_shared.policies import DEVELOPED, REFINED
+from musician_shared.identity import DEFAULT_WEIGHTS, evaluate_identity, intervals_of
+from musician_shared.policies import DEVELOPED, EXPANDED, REFINED
 
 
 def guard(reference, candidate, *, policy=REFINED, meter=None, motifs=()):
@@ -160,3 +160,78 @@ class TestIntervals:
         falling = build_notes([64, 62, 60])
         assert intervals_of(rising) == [2, 2]
         assert intervals_of(falling) == [-2, -2]
+
+
+class TestExpandedPolicy:
+    """The growth variant asks a different question of the same guard.
+
+    Refined and Developed ask "is this the same piece?". Expanded asks "is this
+    grown from the same seed?" -- and a passage that develops a motif through
+    A A' B A'' is *supposed* to be longer and to have more phrases than its
+    source. Judging it by duration equality would reject exactly the thing it
+    was asked to do.
+    """
+
+    def _grown(self, source, times: int = 3):
+        """The seed restated with variation: the shape a real expansion takes."""
+        pitches = [n.pitch for n in source.notes]
+        grown: list[int] = []
+        for repeat in range(times):
+            # A, then A' a step up, then A again -- a recognisable A A' A''.
+            shift = (0, 2, 0)[repeat % 3]
+            grown.extend(p + shift for p in pitches)
+        return build_notes(grown)
+
+    def test_a_long_passage_built_from_the_motif_is_accepted(self, simple_melody) -> None:
+        """AC-11, the positive half."""
+        report = guard(simple_melody, self._grown(simple_melody), policy=EXPANDED)
+        assert report.passed, report.failures
+        # The growth is real and is reported rather than hidden.
+        assert report.duration_ratio > 2.5
+
+    def test_an_unrelated_long_passage_is_rejected(self, simple_melody) -> None:
+        """AC-11, the half that matters.
+
+        Same length as a successful expansion, valid in every mechanical sense,
+        and not derived from the seed. Length must never be what earns
+        acceptance.
+        """
+        unrelated = build_notes(
+            [72, 55, 80, 48, 77, 51, 84, 45, 79, 50, 71, 60] * 3
+        )
+        report = guard(simple_melody, unrelated, policy=EXPANDED)
+        assert not report.passed
+        assert report.failures
+
+    def test_growth_does_not_disable_the_ceiling(self, simple_melody) -> None:
+        """Freer is not unlimited (brief section 9)."""
+        runaway = build_notes([n.pitch for n in simple_melody.notes] * 12)
+        report = guard(simple_melody, runaway, policy=EXPANDED)
+        assert not report.passed
+        assert any("ceiling" in failure for failure in report.failures)
+
+    def test_the_same_growth_is_rejected_by_refined(self, simple_melody) -> None:
+        """The policies genuinely differ (AC-07).
+
+        The identical candidate that Expanded accepts must be refused by
+        Refined, or the two are one product with two labels.
+        """
+        grown = self._grown(simple_melody)
+        assert guard(simple_melody, grown, policy=EXPANDED).passed
+        assert not guard(simple_melody, grown, policy=REFINED).passed
+
+    def test_expanded_weights_motif_above_phrase_structure(self) -> None:
+        # The reweighting is the mechanism, so it is asserted directly rather
+        # than only through its effects.
+        assert EXPANDED.identity.weights is not None
+        weights = EXPANDED.identity.weights
+        assert weights["motif"] > DEFAULT_WEIGHTS["motif"]
+        assert weights["phrase"] < DEFAULT_WEIGHTS["phrase"]
+        # Motif survival is the single strongest signal for a growth variant.
+        assert weights["motif"] == max(weights.values())
+
+    def test_expanded_demands_more_motif_than_developed(self) -> None:
+        # Counter-intuitive but deliberate: a longer passage has more room to
+        # drift, so the seed has to be more clearly present, not less.
+        assert EXPANDED.identity.motif_floor > DEVELOPED.identity.motif_floor
+        assert EXPANDED.identity.aggregate_floor < DEVELOPED.identity.aggregate_floor

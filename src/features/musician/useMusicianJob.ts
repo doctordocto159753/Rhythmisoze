@@ -35,7 +35,12 @@ import {
   type MusicianResult,
   type MusicianVariant,
 } from '@musician-client';
-import type { GeneratedVersion, MusicalVersionId } from '@versions';
+import {
+  MUSICIAN_VERSION_IDS,
+  type GeneratedVersion,
+  type MusicalVersionId,
+  type MusicianVersionId,
+} from '@versions';
 
 export type MusicianPhase =
   | 'idle'
@@ -46,10 +51,21 @@ export type MusicianPhase =
   | 'failed'
   | 'cancelled';
 
-export interface MusicianPair {
+/**
+ * The set the Musician returns.
+ *
+ * Still named a "pair" nowhere: it is three versions, and the type says so, so
+ * that adding a fourth is a field rather than a rename of everything that
+ * touches it.
+ */
+export interface MusicianSet {
   'musician-refined': GeneratedVersion;
   'musician-developed': GeneratedVersion;
+  'musician-expanded': GeneratedVersion;
 }
+
+/** @deprecated kept so existing imports keep compiling; use `MusicianSet`. */
+export type MusicianPair = MusicianSet;
 
 export interface MusicianJobState {
   phase: MusicianPhase;
@@ -257,6 +273,7 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
     return {
       'musician-refined': state.result['musician-refined'],
       'musician-developed': state.result['musician-developed'],
+      'musician-expanded': state.result['musician-expanded'],
     };
   }, [state.result]);
 
@@ -328,10 +345,11 @@ function toGenerated(
   };
 }
 
-export function toPair(result: MusicianResult, jobId = ''): MusicianPair {
+export function toPair(result: MusicianResult, jobId = ''): MusicianSet {
   return {
     'musician-refined': toGenerated('musician-refined', result.refined, result, jobId),
     'musician-developed': toGenerated('musician-developed', result.developed, result, jobId),
+    'musician-expanded': toGenerated('musician-expanded', result.expanded, result, jobId),
   };
 }
 
@@ -354,7 +372,7 @@ export function toStoredMusician(
 
   const versions: Record<string, StoredMusicianVersion> = {};
   if (result) {
-    for (const id of ['musician-refined', 'musician-developed'] as const) {
+    for (const id of MUSICIAN_VERSION_IDS) {
       const generated = result[id];
       versions[id] = {
         notes: generated.notes,
@@ -380,14 +398,18 @@ export function toStoredMusician(
 /** The inverse, for restoring a saved sketch. */
 export function fromStoredMusician(stored: StoredMusician | undefined): MusicianPair | null {
   if (!stored) return null;
-  const refined = stored.versions['musician-refined'];
-  const developed = stored.versions['musician-developed'];
-  // Both or neither. A half-restored pair would put a version in the picker
-  // whose partner cannot be compared against it, which is the whole point of
-  // having two.
-  if (!refined || !developed) return null;
-  return {
-    'musician-refined': { id: 'musician-refined', ...refined },
-    'musician-developed': { id: 'musician-developed', ...developed },
-  };
+  // All or nothing. A half-restored set would put a version in the picker whose
+  // siblings cannot be compared against it, which is the whole point of having
+  // more than one.
+  //
+  // A workspace saved before Expanded existed has only two, and correctly
+  // restores nothing rather than a broken set -- the user regenerates and gets
+  // all three (AC-16).
+  const restored: Partial<Record<MusicianVersionId, GeneratedVersion>> = {};
+  for (const id of MUSICIAN_VERSION_IDS) {
+    const entry = stored.versions[id];
+    if (!entry) return null;
+    restored[id] = { id, ...entry };
+  }
+  return restored as MusicianSet;
 }

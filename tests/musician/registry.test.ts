@@ -16,7 +16,10 @@ function note(pitch: number, start: number): NoteEvent {
   return { pitch, startSec: start, endSec: start + 0.4, velocity: 90 };
 }
 
-function generated(id: 'musician-refined' | 'musician-developed', jobId = 'job-1'): GeneratedVersion {
+function generated(
+  id: 'musician-refined' | 'musician-developed' | 'musician-expanded',
+  jobId = 'job-1',
+): GeneratedVersion {
   return {
     id,
     notes: [note(72, 0), note(74, 0.5)],
@@ -43,13 +46,14 @@ const sources: VersionNoteSources = {
 };
 
 describe('the version registry', () => {
-  it('offers five versions in pipeline order', () => {
+  it('offers six versions in pipeline order', () => {
     expect(VERSION_ORDER).toEqual([
       'unprocessed',
       'judge',
       'teacher',
       'musician-refined',
       'musician-developed',
+      'musician-expanded',
     ]);
   });
 
@@ -65,12 +69,13 @@ describe('the version registry', () => {
       expect(describeVersion('teacher').sourceVersionId).toBe('judge');
     });
 
-    it('derives both Musician versions from Teacher and nothing else', () => {
+    it('derives every Musician version from Teacher and nothing else', () => {
       // AC-02, as a property of the data rather than a promise in a comment.
       // If either of these ever pointed at `judge` or `unprocessed`, the
       // request builder would send the wrong material and no other test would
       // notice.
-      for (const id of ['musician-refined', 'musician-developed'] as const) {
+      // Expanded grows the material; that does not earn it a different source.
+      for (const id of ['musician-refined', 'musician-developed', 'musician-expanded'] as const) {
         expect(describeVersion(id).sourceVersionId).toBe('teacher');
       }
     });
@@ -106,6 +111,7 @@ describe('the version registry', () => {
       expect(notesForVersion('musician-refined', withResult)?.[0]?.pitch).toBe(72);
       // The other half of the pair is still absent, and stays absent.
       expect(notesForVersion('musician-developed', withResult)).toBeNull();
+      expect(notesForVersion('musician-expanded', withResult)).toBeNull();
     });
   });
 
@@ -129,14 +135,15 @@ describe('the version registry', () => {
     });
 
     it('offers a Musician version once its notes exist', () => {
-      const withBoth: VersionNoteSources = {
+      const withAll: VersionNoteSources = {
         ...sources,
         generated: {
           'musician-refined': generated('musician-refined'),
           'musician-developed': generated('musician-developed'),
+          'musician-expanded': generated('musician-expanded'),
         },
       };
-      expect(availableVersions(withBoth, { musicianEnabled: true })).toHaveLength(5);
+      expect(availableVersions(withAll, { musicianEnabled: true })).toHaveLength(6);
     });
 
     it('hides generated versions when the feature is switched off, even if notes exist', () => {

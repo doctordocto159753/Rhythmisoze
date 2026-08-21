@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -69,6 +70,10 @@ from musician_shared.abc import from_abc, to_abc
 from musician_shared.contract import Key, Meter, Mode, Note
 
 logger = logging.getLogger(__name__)
+
+#: GPT-2 causal-mask buffers, which older transformers saved and newer ones do
+#: not declare. See `_load_locked` for why dropping them is safe.
+_MASK_BUFFER = re.compile(r"\.(attn|crossattention)\.(bias|masked_bias)$")
 
 MODEL_DIR = Path(os.environ.get("MUSICIAN_MODELS_DIR", "/models"))
 VENDOR_DIR = Path(os.environ.get("MUSICIAN_VENDOR_DIR", "/vendor"))
@@ -122,6 +127,40 @@ def _ensure_upstream_importable() -> Path:
         "the MelodyT5 upstream source is not vendored. Run scripts/vendor/bootstrap.sh "
         f"(looked in: {', '.join(str(c) for c in candidates)})"
     )
+
+
+def _patch_samplings_for_modern_numpy() -> None:
+    """Renormalise before `np.random.choice`, which modern numpy requires.
+
+    Upstream samples through the `samplings` package, whose `random_sampling`
+    ends in `np.random.choice(p=probs)`. numpy checks `abs(sum(p) - 1) < ~1e-8`,
+    and after top-p, top-k and temperature have each rescaled a float32 vector
+    the sum lands a few ULPs off -- so generation dies with "probabilities do
+    not sum to 1" on the first bar.
+
+    The distribution is correct; only its float32 sum is not exactly 1. Casting
+    to float64 and dividing by the sum changes no sampling semantics, it is the
+    normalisation the maths already assumes. Patched here rather than by editing
+    the vendored package, so upstream stays pristine and the deviation lives in
+    our source.
+    """
+    import numpy as np  # noqa: PLC0415
+    import samplings  # noqa: PLC0415
+
+    if getattr(samplings, "_rhythmisoze_patched", False):
+        return
+
+    def safe_random_sampling(probs, seed=None):
+        array = np.asarray(probs, dtype=np.float64)
+        total = array.sum()
+        array = np.ones_like(array) / array.size if total <= 0 else array / total
+        if seed is not None:
+            np.random.seed(seed)
+        return int(np.random.choice(array.size, p=array))
+
+    samplings.random_sampling = safe_random_sampling
+    samplings._rhythmisoze_patched = True
+    logger.info("patched samplings.random_sampling for modern numpy strictness")
 
 
 def _ensure_random_model(source_dir: Path) -> None:
@@ -254,6 +293,7 @@ class MelodyT5Runtime:
             raise ModelNotLoaded(self._load_error)
 
         _ensure_random_model(source_dir)
+        _patch_samplings_for_modern_numpy()
 
         import config as upstream_config  # noqa: PLC0415
         from utils import MelodyT5, Patchilizer  # noqa: PLC0415
@@ -291,9 +331,44 @@ class MelodyT5Runtime:
 
         model = MelodyT5(patch_config, char_config)
         checkpoint = torch.load(MELODYT5_WEIGHTS, map_location=self._device, weights_only=False)
+
         # The checkpoint nests the state dict under "model"; loading the raw
         # object would silently mismatch every key.
-        model.load_state_dict(checkpoint["model"])
+        result = model.load_state_dict(checkpoint["model"], strict=False)
+
+        # `strict=False` here is a *narrow* allowance, verified rather than
+        # assumed, and the verification is the point.
+        #
+        # `missing_keys` must be empty: every parameter the model declares has
+        # to exist in the checkpoint. That is what says this is the architecture
+        # these weights were trained for.
+        #
+        # `unexpected_keys` is non-empty for a version reason. GPT-2's
+        # `attn.bias` is the lower-triangular causal mask and `masked_bias` a
+        # -1e4 constant; both were persistent buffers in the transformers 4.18
+        # upstream pins and became non-persistent later, so a checkpoint saved
+        # then carries entries a model built now does not declare. Dropping them
+        # discards no learned value -- the mask is regenerated from config.
+        #
+        # Anything outside that pattern, or anything that is an actual
+        # parameter, is a real mismatch and refuses to load.
+        stray = [key for key in result.unexpected_keys if not _MASK_BUFFER.search(key)]
+        parameter_names = {name for name, _ in model.named_parameters()}
+        learned = [key for key in result.unexpected_keys if key in parameter_names]
+        if result.missing_keys or stray or learned:
+            self._load_error = (
+                f"checkpoint does not match this architecture: "
+                f"{len(result.missing_keys)} missing, {len(stray)} unexpected non-buffer keys, "
+                f"{len(learned)} unexpected learned parameters"
+            )
+            raise ModelNotLoaded(self._load_error)
+        logger.info(
+            "checkpoint matches the architecture",
+            extra={
+                "missing": len(result.missing_keys),
+                "maskBuffersDropped": len(result.unexpected_keys),
+            },
+        )
         model = model.to(self._device)
         model.eval()
 
@@ -364,8 +439,14 @@ class MelodyT5Runtime:
             tokens = None
             current_seed: int | None = seed
 
+            # `max_patch` arrives as a count of *bars of music*, but
+            # `decoder_patches` already holds the header patches (L:, M:, K:).
+            # Comparing against the raw budget would spend most of it on
+            # headers, and a short phrase would get one bar of content.
+            budget = decoder_patches.shape[1] + max_patch
+
             with torch.no_grad():
-                while decoder_patches.shape[1] < max_patch:
+                while decoder_patches.shape[1] < budget:
                     predicted_patch, current_seed = model.generate(
                         patches,
                         decoder_patches,

@@ -32,7 +32,7 @@ const request: MusicianRequest = {
   durationSec: 2,
 };
 
-function variant(kind: 'refined' | 'developed') {
+function variant(kind: 'refined' | 'developed' | 'expanded') {
   return {
     kind,
     notes: [
@@ -65,6 +65,7 @@ const validResult = {
   source_id: 'sketch-1',
   refined: variant('refined'),
   developed: variant('developed'),
+  expanded: variant('expanded'),
   provenance: {
     melody_t5_revision: 'rev-a',
     midi_rwkv_revision: 'rev-b',
@@ -128,6 +129,13 @@ describe('response validation', () => {
 
   it('rejects a result missing a whole variant', () => {
     const { developed: _developed, ...partial } = validResult;
+    expect(musicianResultSchema.safeParse(partial).success).toBe(false);
+  });
+
+  it('rejects a result missing the expanded variant', () => {
+    // A service that has not been updated for the sixth version must be
+    // refused rather than silently producing five.
+    const { expanded: _expanded, ...partial } = validResult;
     expect(musicianResultSchema.safeParse(partial).success).toBe(false);
   });
 

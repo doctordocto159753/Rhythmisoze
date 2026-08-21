@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .contract import VariantKind
-from .identity import IdentityThresholds
+from .identity import EXPANDED_WEIGHTS, IdentityThresholds
 
 
 @dataclass(frozen=True)
@@ -71,9 +71,24 @@ class VariantPolicy:
     #: model rewrites spans for no gain and the result drifts.
     min_local_improvement: float
 
+    #: How far the model may run, as a multiple of the source's own bar count.
+    #:
+    #: Expressed relative to the input rather than as a fixed number because a
+    #: 4-bar seed and a 32-bar phrase do not want the same ceiling. Refined and
+    #: Developed sit near 1; Expanded is allowed to grow, within a bound.
+    max_bar_growth: float = 1.25
+
+    #: Absolute stop, regardless of how short the input was. Guards the case a
+    #: ratio cannot: a 1-bar seed with a 6x budget is still only 6 bars, but a
+    #: model that has lost the plot will happily produce 200.
+    max_generated_bars: int = 24
+
+
     def as_dict(self) -> dict[str, float | int | str]:
         return {
             "candidate_count": self.candidate_count,
+            "max_bar_growth": self.max_bar_growth,
+            "max_generated_bars": self.max_generated_bars,
             "melody_temperature": self.melody_sampling.temperature,
             "melody_top_k": self.melody_sampling.top_k,
             "melody_top_p": self.melody_sampling.top_p,
@@ -92,6 +107,8 @@ REFINED = VariantPolicy(
     infill_sampling=SamplingParameters(temperature=0.65, top_k=20, top_p=0.85),
     max_infill_spans=1,
     infill_candidates=2,
+    max_bar_growth=1.25,
+    max_generated_bars=24,
     identity=IdentityThresholds(
         aggregate_floor=0.78,
         contour_floor=0.72,
@@ -114,6 +131,8 @@ DEVELOPED = VariantPolicy(
     infill_sampling=SamplingParameters(temperature=0.88, top_k=40, top_p=0.92),
     max_infill_spans=3,
     infill_candidates=3,
+    max_bar_growth=1.6,
+    max_generated_bars=28,
     identity=IdentityThresholds(
         # Lower, never absent. Development that abandons the motif is not
         # development, it is a different piece.
@@ -133,9 +152,48 @@ DEVELOPED = VariantPolicy(
     min_local_improvement=0.02,
 )
 
+EXPANDED = VariantPolicy(
+    kind=VariantKind.EXPANDED,
+    # A larger pool, because the acceptance bar is about the seed surviving
+    # rather than about staying close, and more candidates genuinely differ.
+    candidate_count=5,
+    # Freest of the three. MelodyT5's own defaults are top_p=0.8, top_k=8,
+    # temperature=2.6 on *character* probabilities inside a bar; this sits
+    # nearer that end than Refined does.
+    melody_sampling=SamplingParameters(temperature=1.15, top_k=64, top_p=0.95),
+    infill_sampling=SamplingParameters(temperature=0.95, top_k=48, top_p=0.94),
+    # More spans, because a longer passage has more joins that can be awkward.
+    max_infill_spans=4,
+    infill_candidates=3,
+    identity=IdentityThresholds(
+        # Lower than Developed, and still real. A passage that abandons the seed
+        # is not an expansion of it.
+        aggregate_floor=0.52,
+        # Contour is compared by shape via DTW, so a longer passage that keeps
+        # the melodic gesture still scores here.
+        contour_floor=0.42,
+        # The one dimension that goes *up*. If the motif is gone, nothing was
+        # expanded -- something else was written.
+        motif_floor=0.55,
+        min_duration_ratio=0.9,
+        # The growth ceiling. Not a rejection band: `allow_growth` turns the
+        # lower bound off and keeps this as a runaway stop.
+        max_duration_ratio=6.0,
+        max_pitch_range_change=2.2,
+        max_density_change=2.0,
+        require_meter_match=True,
+        weights=EXPANDED_WEIGHTS,
+        allow_growth=True,
+    ),
+    max_bar_growth=6.0,
+    max_generated_bars=32,
+    min_local_improvement=0.02,
+)
+
 POLICIES: dict[VariantKind, VariantPolicy] = {
     VariantKind.REFINED: REFINED,
     VariantKind.DEVELOPED: DEVELOPED,
+    VariantKind.EXPANDED: EXPANDED,
 }
 
 

@@ -101,6 +101,39 @@ def _local_coherence(notes: Sequence[Note]) -> float:
     return 0.62 * smoothness + 0.38 * regularity
 
 
+def _fit_to_policy(
+    notes: tuple[Note, ...], source: MusicianInput, policy: VariantPolicy
+) -> tuple[Note, ...]:
+    """Trim a candidate to the length its variant is allowed to be.
+
+    MelodyT5 writes *tunes*. Given a four-bar phrase it will happily return a
+    complete sixteen-bar melody with repeats, because that is what its training
+    data looks like. For Expanded that is the feature. For Refined and Developed
+    it is not, and rejecting the candidate for it would throw away good material
+    over a length the policy could simply have cut.
+
+    So a non-growth policy takes the opening of what the model wrote, up to its
+    own duration ceiling. The opening rather than a middle slice because that is
+    the part that answers the prompt -- the model starts from our phrase.
+
+    Growth policies are returned untouched: trimming Expanded would defeat it.
+    """
+    if policy.identity.allow_growth or not notes:
+        return notes
+
+    source_span = source.notes[-1].end_sec - source.notes[0].start_sec
+    if source_span <= 0:
+        return notes
+
+    ceiling = source_span * policy.identity.max_duration_ratio
+    origin = notes[0].start_sec
+    kept = tuple(note for note in notes if note.end_sec - origin <= ceiling)
+
+    # Never trim to nothing: a single very long note would leave an empty
+    # candidate, which reads as a generation failure rather than a long note.
+    return kept if len(kept) >= 2 else notes[: max(2, len(source.notes))]
+
+
 def _guard(
     source: MusicianInput,
     notes: Sequence[Note],
@@ -120,10 +153,26 @@ def _guard(
     )
 
 
+def _bar_budget(source: MusicianInput, policy: VariantPolicy) -> int:
+    """How many bars the model may write for this input.
+
+    Scaled from the source rather than fixed, because a 4-bar seed and a 32-bar
+    phrase do not want the same ceiling, and capped absolutely because a ratio
+    alone cannot stop a 1-bar seed from becoming 200 bars when a model loses the
+    thread.
+    """
+    beats = source.meter.beats_per_bar
+    seconds_per_bar = beats * 60.0 / source.tempo.bpm
+    span = max(source.notes[-1].end_sec - source.notes[0].start_sec, seconds_per_bar)
+    source_bars = max(1, round(span / seconds_per_bar))
+    return max(2, min(policy.max_generated_bars, int(source_bars * policy.max_bar_growth) + 1))
+
+
 def _seeds_for(base_seed: int, policy: VariantPolicy) -> list[int]:
     # Derived rather than random, so the provenance record's single base seed
     # reproduces every candidate (AC-08).
-    offset = 1000 if policy.kind is VariantKind.REFINED else 2000
+    offsets = {VariantKind.REFINED: 1000, VariantKind.DEVELOPED: 2000, VariantKind.EXPANDED: 3000}
+    offset = offsets[policy.kind]
     return [base_seed + offset + i for i in range(policy.candidate_count)]
 
 
@@ -300,6 +349,7 @@ def generate_variant(
                     key=f"{source.key.tonic} {source.key.mode.value}" if source.key else None,
                     sampling=policy.melody_sampling,
                     seed=seed,
+                    max_bars=_bar_budget(source, policy),
                 )
             )
         except GenerationError as error:
@@ -314,7 +364,8 @@ def generate_variant(
             )
             continue
 
-        report = _guard(source, response.notes, policy)
+        candidate_notes = _fit_to_policy(response.notes, source, policy)
+        report = _guard(source, candidate_notes, policy)
         outcomes.append(
             CandidateOutcome(
                 stage="melody",
@@ -325,7 +376,7 @@ def generate_variant(
             )
         )
         if report.passed:
-            survivors.append(_Candidate(notes=response.notes, seed=seed, identity=report))
+            survivors.append(_Candidate(notes=candidate_notes, seed=seed, identity=report))
 
     if not survivors:
         # Every candidate left the idea behind. Returning the least-bad one
@@ -376,24 +427,28 @@ def run_musician(
     """Both variants, one call."""
     started = time.perf_counter()
 
-    refined, refined_outcomes = generate_variant(
-        source=source,
-        kind=VariantKind.REFINED,
-        melody=melody,
-        rwkv=rwkv,
-        base_seed=base_seed,
-        should_cancel=should_cancel,
-    )
-    developed, developed_outcomes = generate_variant(
-        source=source,
-        kind=VariantKind.DEVELOPED,
-        melody=melody,
-        rwkv=rwkv,
-        base_seed=base_seed,
-        should_cancel=should_cancel,
-    )
+    variants: dict[VariantKind, Variant] = {}
+    outcomes_by_kind: dict[VariantKind, list[CandidateOutcome]] = {}
 
-    all_outcomes = refined_outcomes + developed_outcomes
+    # The three variants run the same sequence under three policies. Iterating
+    # the enum rather than writing three near-identical blocks is what keeps a
+    # fourth from being a fourth copy.
+    for kind in (VariantKind.REFINED, VariantKind.DEVELOPED, VariantKind.EXPANDED):
+        variant, outcomes = generate_variant(
+            source=source,
+            kind=kind,
+            melody=melody,
+            rwkv=rwkv,
+            base_seed=base_seed,
+            should_cancel=should_cancel,
+        )
+        variants[kind] = variant
+        outcomes_by_kind[kind] = outcomes
+
+    refined = variants[VariantKind.REFINED]
+    developed = variants[VariantKind.DEVELOPED]
+    expanded = variants[VariantKind.EXPANDED]
+    all_outcomes = [o for kind in outcomes_by_kind for o in outcomes_by_kind[kind]]
     rejected = tuple(o for o in all_outcomes if not o.accepted)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
@@ -401,28 +456,27 @@ def run_musician(
         source_id=source.source_id,
         refined=refined,
         developed=developed,
+        expanded=expanded,
         provenance=Provenance(
             melody_t5_revision=melody.revision,
             midi_rwkv_revision=rwkv.revision,
             musician_service_version=SERVICE_VERSION,
             input_fingerprint=source.fingerprint(),
             seeds={"base": base_seed},
-            parameters={
-                "refined": policy_for(VariantKind.REFINED).as_dict(),
-                "developed": policy_for(VariantKind.DEVELOPED).as_dict(),
-            },
+            parameters={kind.value: policy_for(kind).as_dict() for kind in outcomes_by_kind},
             elapsed_ms=elapsed_ms,
         ),
         diagnostics=Diagnostics(
             candidate_counts={
-                "refined": len(refined_outcomes),
-                "developed": len(developed_outcomes),
+                **{kind.value: len(outcomes) for kind, outcomes in outcomes_by_kind.items()},
                 "accepted": sum(1 for o in all_outcomes if o.accepted),
             },
             rejected_candidates=rejected,
             identity_guard_summary={
-                "refined_aggregate": refined.identity.aggregate,
-                "developed_aggregate": developed.identity.aggregate,
+                **{
+                    f"{kind.value}_aggregate": variant.identity.aggregate
+                    for kind, variant in variants.items()
+                },
                 "rejection_rate": (len(rejected) / len(all_outcomes)) if all_outcomes else 0.0,
             },
         ),

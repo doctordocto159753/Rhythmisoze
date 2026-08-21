@@ -38,6 +38,7 @@ class GenerateRequest(BaseModel):
     sampling: Sampling = Sampling()
     seed: int = 0
     task: str = "variation"
+    maxBars: int = 24
 
 
 @app.on_event("startup")
@@ -94,6 +95,7 @@ def generate(request: GenerateRequest) -> dict:
             top_p=request.sampling.top_p,
             seed=request.seed,
             task=request.task,
+            max_patch=request.maxBars,
         )
     except ModelNotLoaded as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

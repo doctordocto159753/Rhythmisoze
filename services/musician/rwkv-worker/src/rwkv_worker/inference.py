@@ -270,6 +270,12 @@ class RwkvRuntime:
             sequences = self._tokenizer.encode(score, concatenate_track_sequences=False)
             if not sequences:
                 raise ModelNotLoaded("the tokenizer produced no sequence for this melody")
+
+            # `encode` returns **BPE** ids. The bar-masking below works in the
+            # base vocabulary, because that is where `Bar_None` and the infill
+            # markers live -- searching BPE ids for base id 9 finds nothing and
+            # the melody appears to have zero bars.
+            self._tokenizer.decode_token_ids(sequences[0])
             ids = list(sequences[0].ids)
 
             bar_id = self._vocab["Bar_None"]
@@ -403,7 +409,11 @@ class RwkvRuntime:
         if not generated:
             return False
         base = from_model_ids(self._tokenizer, generated)
-        return sum(1 for token in base if token == bar_id) > bars_to_infill
+        bars_written = sum(1 for token in base if token == bar_id)
+        # The prompt already supplies the first `Bar_None`, so the model has
+        # written N bars once it emits the N-th one *after* that. The fork counts
+        # the same way: it stops when the count exceeds the bars requested.
+        return bars_written > bars_to_infill
 
     def _sample_cpp(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens, bar_id, bars_to_infill, banned):
         import numpy as np  # noqa: PLC0415
@@ -437,10 +447,24 @@ class RwkvRuntime:
         try:
             from miditok import TokSequence  # noqa: PLC0415
 
-            sequence = TokSequence(ids=list(ids))
-            score = self._tokenizer.decode([sequence])
+            # The model emits BPE ids. `are_ids_encoded=True` is what lets
+            # `decode` convert them back through the base vocabulary; without
+            # it the ids are taken as base ids, fall outside the 663-token
+            # range, and decode to nothing at all.
+            sequence = TokSequence(ids=list(ids), are_ids_encoded=True)
+            # `decode(sequence)`, not `decode([sequence])`. With
+            # `one_token_stream_for_programs=False` this tokenizer treats a list
+            # as one stream per track and reaches for `.ids` on the list itself.
+            score = self._tokenizer.decode(sequence)
         except Exception as error:
             logger.warning("could not decode the generated fill: %s", error)
+            return []
+
+        if not any(track.notes for track in score.tracks):
+            logger.info(
+                "the fill decoded to no notes",
+                extra={"tokens": len(ids)},
+            )
             return []
 
         seconds_per_tick = 60.0 / tempo_bpm / score.ticks_per_quarter

@@ -8,6 +8,7 @@ export {
   fromStoredMusician,
   type MusicianPhase,
   type MusicianPair,
+  type MusicianSet,
   type MusicianJobState,
   type MusicianJobSnapshot,
 } from './useMusicianJob';

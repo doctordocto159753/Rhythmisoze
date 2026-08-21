@@ -54,6 +54,12 @@
       "@audio-core": [
         "./src/packages/audio-core/index.ts"
       ],
+      "@versions": [
+        "./src/packages/versions/index.ts"
+      ],
+      "@musician-client": [
+        "./src/packages/musician-client/index.ts"
+      ],
       "@midi": [
         "./src/packages/midi/index.ts"
       ],

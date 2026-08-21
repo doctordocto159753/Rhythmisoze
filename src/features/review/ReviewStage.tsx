@@ -15,6 +15,7 @@ import { PianoRoll } from './PianoRoll';
 import styles from './ReviewStage.module.css';
 
 import type { PerformanceRhythm, TempoDisagreement, VersionId, VersionRecipe } from '@rhythm-extraction';
+import { MusicianPanel, type MusicianPanelProps } from '@/features/musician';
 import { VersionPicker } from './VersionPicker';
 
 export interface ReviewStageProps {
@@ -25,6 +26,15 @@ export interface ReviewStageProps {
   judge: JudgeVerdict | null;
   lesson: TeacherResult | null;
   onVersionChange(id: VersionId): void;
+  /**
+   * Everything the Musician area needs, passed through rather than reached for.
+   *
+   * The review screen does not own the generation - it outlives this screen -
+   * so it receives a description of it and renders that. Omitted entirely when
+   * the deployment has no Musician, which is why the type allows undefined
+   * rather than requiring a disabled stub.
+   */
+  musician?: MusicianPanelProps;
   refined: RefineResult;
   rawNotes: RefineResult['notes'];
   diagnostics: ProcessingDiagnostics | null;
@@ -56,6 +66,7 @@ export interface ReviewStageProps {
 export function ReviewStage({
   versions,
   activeVersionId,
+  musician,
   rhythm,
   tempoDisagreement,
   judge,
@@ -161,6 +172,10 @@ export function ReviewStage({
         lesson={lesson}
         onSelect={onVersionChange}
       />
+
+      {/* Below the versions, because it is a way of getting two more of them
+          rather than a competing feature. */}
+      {musician ? <MusicianPanel {...musician} /> : null}
 
       <Well as="section" aria-labelledby="cleanup-heading">
         <Stack gap={3}>

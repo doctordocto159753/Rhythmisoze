@@ -61,6 +61,15 @@ import {
   type VersionId,
   type VersionRecipe,
 } from '@rhythm-extraction';
+import {
+  toStoredMusician,
+  useMusicianAvailability,
+  useMusicianJob,
+  type MusicianJobSnapshot,
+  type MusicianPair,
+} from '@/features/musician';
+import { notesForVersion, type MusicalVersionId, type VersionNoteSources } from '@versions';
+import type { MusicianRequest } from '@musician-client';
 import { importMidi } from '@midi';
 import {
   DEFAULT_MASTER,
@@ -441,6 +450,44 @@ export function useCreationFlow(locale: Locale) {
     }
   }, [state.mode, state.judge, state.rawNotes, state.durationSec]);
 
+  const musicianAvailability = useMusicianAvailability();
+
+  /**
+   * Musician state as it will be written to the workspace.
+   *
+   * Held in a ref rather than reducer state on purpose: it changes only when a
+   * generation finishes, it is read only at save time, and putting it in state
+   * would re-render the whole creation screen every time a poll advanced the
+   * phase. The user is listening to music while this happens.
+   */
+  const musicianPersistRef = useRef<{ result: MusicianPair | null; job: MusicianJobSnapshot } | null>(
+    null,
+  );
+  const handleMusicianPersist = useCallback(
+    (next: { result: MusicianPair | null; job: MusicianJobSnapshot }) => {
+      musicianPersistRef.current = next;
+    },
+    [],
+  );
+
+  /**
+   * The Musician, if this deployment has one.
+   *
+   * Deliberately mounted here rather than inside the review screen: the job has
+   * to outlive any one render of that screen, so leaving and returning does not
+   * abandon a generation in flight (§2).
+   *
+   * `restore` is not wired to a saved sketch because the product has no
+   * reopen-for-editing flow -- the workspace lists, renames, exports and
+   * deletes. The hook supports restoration and it is covered by unit test, so
+   * the day that flow is added this becomes one argument rather than a
+   * redesign.
+   */
+  const musician = useMusicianJob({
+    enabled: musicianAvailability.available,
+    onPersist: handleMusicianPersist,
+  });
+
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
     if (rhythm === null || state.bpm === null) return [];
@@ -449,8 +496,11 @@ export function useCreationFlow(locale: Locale) {
       tappedBpm: state.bpm,
       mode: state.mode,
       amount: state.retouchAmount,
+      // Only versions whose notes actually exist are offered, so the picker can
+      // never show something that cannot be played.
+      generated: Object.keys(musician.generated) as MusicalVersionId[],
     });
-  }, [rhythm, state.bpm, state.mode, state.retouchAmount]);
+  }, [rhythm, state.bpm, state.mode, state.retouchAmount, musician.generated]);
 
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {
@@ -470,6 +520,76 @@ export function useCreationFlow(locale: Locale) {
     [rhythm, state.bpm],
   );
 
+  /**
+   * Every version's notes, in one place.
+   *
+   * The three derived versions are computed here because they are cheap and
+   * exact; the Musician's two are looked up because they cannot be recomputed.
+   * `notesForVersion` reads from this and is the only thing that needs to know
+   * the difference.
+   */
+  const versionNoteSources = useMemo<VersionNoteSources>(() => {
+    const judged = state.judge?.notes ?? state.rawNotes;
+    return {
+      unprocessed: state.rawNotes,
+      judge: judged,
+      teacher: lesson?.notes ?? judged,
+      generated: musician.generated,
+    };
+  }, [state.rawNotes, state.judge, lesson, musician.generated]);
+
+  /**
+   * The payload for a Musician request.
+   *
+   * **Teacher material only** (AC-02). The registry records that
+   * `musician-refined` and `musician-developed` both descend from `teacher`,
+   * and this reads the Teacher's notes through the same resolver every other
+   * version goes through -- so the claim is enforced by the same code path
+   * rather than by this function remembering to be careful.
+   *
+   * There is no branch here that could reach `state.audio`, and
+   * `MusicianRequest` has no field that could carry it (AC-03).
+   */
+  /**
+   * The latest retouch result, readable before it is declared.
+   *
+   * `refined` is computed further down and `buildMusicianRequest` needs its
+   * detected key. Reordering the two would mean moving a large memo above the
+   * things it depends on; a ref kept in sync is the smaller change and makes
+   * the direction of the dependency obvious.
+   */
+  const refinedRef = useRef<RefineResult | null>(null);
+
+  const buildMusicianRequest = useCallback((): MusicianRequest | null => {
+    const notes = notesForVersion('teacher', versionNoteSources);
+    if (!notes || notes.length === 0) return null;
+    if (state.bpm === null) return null;
+
+    const analysis = refinedRef.current?.analysis ?? null;
+    return {
+      sourceId: state.sketchId,
+      notes,
+      bpm: rhythm?.reliable ? rhythm.tempo.bpm : state.bpm,
+      tempoConfidence: rhythm?.reliable ? rhythm.tempo.confidence : 0.4,
+      meter: {
+        numerator: state.meter.beatsPerBar,
+        denominator: state.meter.beatUnit,
+        // The service refuses a meter it is not confident about rather than
+        // assuming 4/4, so this has to be the real figure. The app does not
+        // detect meter, it is set by the user, which is a strong signal.
+        confidence: 0.8,
+      },
+      key: analysis
+        ? {
+            tonic: analysis.keyRoot,
+            mode: analysis.keyMode === 'minor' ? 'minor' : 'major',
+            confidence: analysis.keyConfidence,
+          }
+        : null,
+      durationSec: state.durationSec,
+    };
+  }, [versionNoteSources, state.bpm, state.sketchId, state.meter, state.durationSec, rhythm]);
+
   /** The refined result. Pure and cheap, so it is derived rather than stored. */
   const refined = useMemo<RefineResult | null>(() => {
     if (state.bpm === null) return null;
@@ -480,13 +600,14 @@ export function useCreationFlow(locale: Locale) {
       // Unprocessed shows the candidate exactly as it arrived; the Judge and
       // the Teacher both build on the repaired reading, because tidying notes
       // that still contain a harmonic artifact only produces a tidy mistake.
-      const judged = state.judge?.notes ?? state.rawNotes;
+      // The Musician's two readings carry their own notes, which came back from
+      // the service and cannot be recomputed here.
+      //
+      // Resolution goes through the registry rather than another chain of
+      // ternaries, so adding a version later is one entry in one table.
       const sourceNotes =
-        activeVersion === null || activeVersion.id === 'unprocessed'
-          ? state.rawNotes
-          : activeVersion.id === 'teacher' && lesson !== null
-            ? lesson.notes
-            : judged;
+        notesForVersion(activeVersion?.id ?? 'unprocessed', versionNoteSources) ??
+        versionNoteSources.unprocessed;
 
       return refine(
         { notes: sourceNotes, drums: state.rawDrums },
@@ -524,9 +645,29 @@ export function useCreationFlow(locale: Locale) {
     state.instrumentId,
     sourceKind,
     activeVersion,
-    state.judge,
-    lesson,
+    versionNoteSources,
   ]);
+
+  useEffect(() => {
+    refinedRef.current = refined;
+  }, [refined]);
+
+  const versionNotes = useMemo<Record<string, readonly NoteEvent[]>>(() => {
+    const out: Record<string, readonly NoteEvent[]> = {};
+    for (const version of versions) {
+      const notes = notesForVersion(version.id, versionNoteSources);
+      if (notes && notes.length > 0) out[version.id] = notes;
+    }
+    return out;
+  }, [versions, versionNoteSources]);
+
+  const versionProvenance = useMemo<Record<string, unknown>>(() => {
+    const out: Record<string, unknown> = {};
+    for (const [id, generated] of Object.entries(musician.generated)) {
+      if (generated) out[id] = generated.provenance;
+    }
+    return out;
+  }, [musician.generated]);
 
   // --- Tempo -------------------------------------------------------------
 
@@ -978,6 +1119,11 @@ export function useCreationFlow(locale: Locale) {
         updatedAt: Date.now(),
         publishedId: state.publishedId ?? undefined,
         schemaVersion: LOCAL_SCHEMA_VERSION,
+        // Musician output cannot be recomputed -- the same seed on a different
+        // model revision is a different result -- so unlike every other version
+        // it has to be stored rather than derived.
+        musician: toStoredMusician(musicianPersistRef.current),
+        selectedVersionId: state.versionId ?? undefined,
       })
         .then((result) => {
           if (result.audioDropped || result.sourceDropped) {
@@ -1030,6 +1176,34 @@ export function useCreationFlow(locale: Locale) {
     /** The versions on offer; the original performance is always one of them. */
     versions,
     activeVersion,
+    /**
+     * Notes for every version that has them, for the export package.
+     *
+     * Built from the same resolver the player uses, so a MIDI file in the zip
+     * is the same music the user heard rather than a second derivation that
+     * could drift from it.
+     */
+    versionNotes,
+    versionProvenance,
+    /**
+     * The Musician, and the request that would be sent for it.
+     *
+     * `requestMusician` builds the payload at call time from the Teacher's
+     * current notes rather than closing over them, so a user who adjusts
+     * cleanup and *then* presses generate gets what they are looking at.
+     */
+    musician: {
+      ...musician,
+      available: musicianAvailability.available,
+      generate: () => {
+        const request = buildMusicianRequest();
+        if (request) musician.generate(request);
+      },
+      regenerate: () => {
+        const request = buildMusicianRequest();
+        if (request) musician.regenerate(request);
+      },
+    },
     /** What a teacher would suggest, and why. Null outside the voice path. */
     lesson,
     /** Set when the heard tempo and the tapped tempo disagree. */

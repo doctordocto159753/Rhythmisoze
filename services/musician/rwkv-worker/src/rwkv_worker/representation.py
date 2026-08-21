@@ -26,6 +26,23 @@ and `train/tokenizer/tokenizer_with_acs.json`:
   `FillBar_Start`, `FillBar_End`. Stock miditok 3.0.5 does not define these —
   they are part of this project's vocabulary, which is why the tokenizer JSON
   must be loaded rather than a fresh MMM constructed.
+* **Two vocabularies, not one.** The MMM base vocabulary has **663** tokens; the
+  tokenizer then applies **BPE to 16000**. This is not a detail that can be
+  skipped: the published checkpoint's `emb.weight` is `(16000, 384)`, so a
+  sequence of base ids fed straight to the model indexes the wrong embeddings
+  entirely. `_tokenize_score` upstream is explicit about it — it inserts the
+  infill markers as *base* ids and then calls `encode_token_ids` to convert the
+  whole sequence to BPE.
+
+  So the order is fixed and one-way:
+
+  ```text
+  notes → symusic Score → MMM base ids (663) → BPE ids (16000) → model
+                                             ← BPE ids ← model output
+  ```
+
+  :func:`to_model_ids` and :func:`from_model_ids` are that conversion, kept as
+  named functions so the step cannot be forgotten at a call site.
 * **Bar-infilling layout**, from `_tokenize_score`:
 
   ```text
@@ -76,7 +93,10 @@ class RepresentationError(RuntimeError):
 class TokenizerInfo:
     tokenization: str
     miditok_version: str
+    #: MMM base vocabulary, before BPE.
     vocab_size: int
+    #: What the model actually embeds. Must match the checkpoint's emb rows.
+    bpe_vocab_size: int
     path: Path
 
 
@@ -108,10 +128,20 @@ def load_vocabulary(tokenizer_path: Path) -> tuple[dict[str, int], TokenizerInfo
             f"with a vocabulary it was not trained on."
         )
 
+    # The BPE layer lives in `_model`, serialised as a JSON string.
+    bpe_size = 0
+    raw_model = data.get("_model")
+    try:
+        inner = json.loads(raw_model) if isinstance(raw_model, str) else (raw_model or {})
+        bpe_size = len(inner.get("model", {}).get("vocab", {}))
+    except (TypeError, ValueError):
+        bpe_size = 0
+
     info = TokenizerInfo(
         tokenization=data.get("tokenization", "?"),
         miditok_version=data.get("miditok_version", "?"),
         vocab_size=len(vocab),
+        bpe_vocab_size=bpe_size,
         path=tokenizer_path,
     )
     if info.tokenization != "MMM":
@@ -201,6 +231,46 @@ def build_infill_prompt(
     masked = [vocab[INFILL_BAR]] * (end_bar_index - first_bar_index)
 
     return [*before, *masked, *after, vocab[FILL_BAR_START]]
+
+
+def to_model_ids(tokenizer, base_ids: list[int]) -> list[int]:
+    """Base MMM ids -> BPE ids, which is what the model embeds.
+
+    Skipping this is not a performance shortcut; it is an index error that does
+    not raise. The base vocabulary is 663 wide and the embedding is 16000, so
+    every base id lands on some valid-looking row and the model produces fluent
+    nonsense.
+    """
+    from miditok import TokSequence  # noqa: PLC0415
+
+    sequence = TokSequence(ids=list(base_ids))
+    tokenizer.encode_token_ids(sequence)
+    return list(sequence.ids)
+
+
+def from_model_ids(tokenizer, model_ids: list[int]) -> list[int]:
+    """BPE ids -> base MMM ids, for decoding back to a score."""
+    from miditok import TokSequence  # noqa: PLC0415
+
+    sequence = TokSequence(ids=list(model_ids))
+    tokenizer.decode_token_ids(sequence)
+    return list(sequence.ids)
+
+
+def check_vocabulary_matches_model(
+    tokenizer_vocab_size: int, model_embedding_rows: int
+) -> None:
+    """Refuse a tokenizer/checkpoint pair that cannot belong together.
+
+    Cheap, and it catches the exact failure above at load time rather than as
+    unexplained output quality.
+    """
+    if tokenizer_vocab_size != model_embedding_rows:
+        raise RepresentationError(
+            f"tokenizer produces {tokenizer_vocab_size} ids but the checkpoint embeds "
+            f"{model_embedding_rows}. These are not the same vocabulary; the model "
+            f"would index unrelated embeddings and return plausible nonsense."
+        )
 
 
 def describe_layout(vocab: dict[str, int]) -> str:

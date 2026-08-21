@@ -103,6 +103,52 @@ selectively and **announces** the skip rather than quietly omitting it.
 
 ---
 
+## MIDI-RWKV: what the real checkpoint showed
+
+Loaded and inspected directly (`torch.load`, `weights_only=True`), sha256
+verified against `models/manifest.json`:
+
+| | |
+|---|---|
+| Tensors | 402 |
+| Architecture | RWKV — `emb`, `blocks.0..11.{ln1,ln2,att,ffn}`, `ln_out`, `head` |
+| Layers | 12 |
+| `emb.weight` | **(16000, 384)** |
+| Parameters | 35.09 M |
+| dtype | bfloat16 |
+| Load time | 0.04 s (CPU) |
+
+That embedding shape settled a question the code had got wrong twice.
+
+**The tokenizer has two vocabularies, and the model embeds the second.** MMM's
+base vocabulary is 663 tokens; `tokenizer_with_acs.json` then carries a **BPE
+model of exactly 16000** — matching `emb.weight` row for row. Upstream's
+`_tokenize_score` inserts the infill markers as *base* ids and then calls
+`encode_token_ids` to convert the whole sequence.
+
+The first implementation invented a token language entirely. The second used the
+right tokens but stopped at base ids. **Neither would have raised.** A base id is
+a valid index into a 16000-row embedding, so the model would have returned
+fluent nonsense, and the only symptom would have been output quality — the
+hardest kind of bug to attribute.
+
+The worker now converts explicitly through `to_model_ids` / `from_model_ids`,
+and cross-checks the tokenizer's BPE size against the checkpoint's embedding
+rows at load time. A mismatch is a hard error, because the alternative is
+plausible output from a vocabulary the model never learned.
+
+The stop token is converted too: comparing generated ids against the *base*
+`FillBar_End` would mean the stop is never recognised and every generation runs
+to the token budget.
+
+### Still to verify
+
+Loading the checkpoint is not running it. An actual context-conditioned infill
+(AC-M05) needs either rwkv.cpp built and the GGML conversion run, or the `rwkv`
+pip runtime installed. That has not been done, and no claim is made about it.
+
+---
+
 ## Open — can MelodyT5's inference adapter be modernised?
 
 **Not decided. Not guessable. Must be measured.**

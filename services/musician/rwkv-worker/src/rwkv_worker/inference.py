@@ -42,9 +42,12 @@ from .representation import (
     FILL_BAR_END,
     RepresentationError,
     build_infill_prompt,
+    check_vocabulary_matches_model,
     describe_layout,
+    from_model_ids,
     load_vocabulary,
     notes_to_score,
+    to_model_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +131,15 @@ class RwkvRuntime:
             self._load_error = str(error)
             raise ModelNotLoaded(self._load_error) from error
 
+    @property
+    def _stop_id(self) -> int:
+        """`FillBar_End`, in the vocabulary the model actually emits.
+
+        Comparing against the base id would mean the stop token is never
+        recognised and generation always runs to the token budget.
+        """
+        return to_model_ids(self._tokenizer, [self._vocab[FILL_BAR_END]])[-1]
+
     def _load_tokenizer(self) -> None:
         """Load MIDI-RWKV's MMM tokenizer from its saved config."""
         try:
@@ -182,6 +194,21 @@ class RwkvRuntime:
             )
             raise ModelNotLoaded(self._load_error) from error
 
+        # The checkpoint and the tokenizer must describe the same vocabulary.
+        # Checked here because the failure is otherwise invisible: every id
+        # lands on some valid-looking embedding row.
+        try:
+            import torch  # noqa: PLC0415
+
+            rows = int(
+                torch.load(RWKV_WEIGHT, map_location="meta", weights_only=True)["emb.weight"].shape[0]
+            )
+            check_vocabulary_matches_model(self._tokenizer_info.bpe_vocab_size, rows)
+        except RepresentationError:
+            raise
+        except Exception as error:
+            logger.warning("could not cross-check the checkpoint vocabulary: %s", error)
+
         strategy = "cuda fp16" if self._device == "cuda" else "cpu fp32"
         # The `rwkv` package appends `.pth` itself.
         self._model = RWKV(model=str(RWKV_WEIGHT).removesuffix(".pth"), strategy=strategy)
@@ -206,7 +233,7 @@ class RwkvRuntime:
             device=self._device,
             python_version=sys.version.split()[0],
             tokenizer=str(self._tokenizer_info.path) if self._tokenizer_info else "not-loaded",
-            vocab_size=self._tokenizer_info.vocab_size if self._tokenizer_info else 0,
+            vocab_size=self._tokenizer_info.bpe_vocab_size if self._tokenizer_info else 0,
             layout=describe_layout(self._vocab) if self._vocab else "not-loaded",
         )
 
@@ -249,12 +276,16 @@ class RwkvRuntime:
                 left_context=left_context, span=span, meter=meter, tempo_bpm=tempo_bpm
             )
 
-            prompt = build_infill_prompt(
+            base_prompt = build_infill_prompt(
                 ids, bar_id, first_bar_index=first_bar, bar_count=bar_count, vocab=self._vocab
             )
+            # Base ids (663-wide) are not what the model embeds (16000-wide).
+            # Skipping this conversion does not raise -- it silently indexes
+            # unrelated embeddings and returns fluent nonsense.
+            prompt = to_model_ids(self._tokenizer, base_prompt)
             generated = self._sample(
                 prompt,
-                stop_id=self._vocab[FILL_BAR_END],
+                stop_id=self._stop_id,
                 temperature=temperature,
                 top_k=top_k,
                 top_p=top_p,
@@ -262,7 +293,9 @@ class RwkvRuntime:
                 max_new_tokens=max_new_tokens,
             )
 
-        notes = self._decode_fill(generated, tempo_bpm=tempo_bpm, span=span)
+        notes = self._decode_fill(
+            from_model_ids(self._tokenizer, generated), tempo_bpm=tempo_bpm, span=span
+        )
         return self._fit_to_span(notes, span)
 
     def _locate_span_bars(

@@ -183,6 +183,52 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 
 ---
 
+## Engineering baseline
+
+Restored on 2026-08-21 (branch `fix/ci-and-musician-foundation`). Verified by
+reproducing every CI gate in Docker on Linux with the CI's own Node 20 and
+Python 3.12, not on the development machine.
+
+| Gate | State | Evidence |
+|---|---|---|
+| `npm ci` | **green** | Was red: the lockfile was generated on Windows and omitted `@emnapi/core` and `@emnapi/runtime`, which Linux resolves via `@img/sharp-wasm32`. Repaired on Linux; exactly 2 entries added, 0 removed, 0 version changes. |
+| typecheck | green | Linux, Node 20.20.2 |
+| lint | green | Linux, Node 20.20.2 |
+| Vitest + coverage | green | 513 tests, 23 files |
+| production build | green | Linux, Node 20.20.2 |
+| humtool golden regeneration | green | Clean diff under Python 3.12. **Sensitive to the Python minor version** — 3.11 produces a last-bit float difference in `gridError`, because CPython 3.12 changed `sum()` to compensated summation. CI pins 3.12; the generator now documents this. |
+| retouch parity suite | green | 181 assertions, unchanged |
+| Playwright matrix | green | 129 passed, 22 skipped, 0 failed, three consecutive runs under CI settings |
+
+### E2E skips are paired with assertions
+
+22 skips, all capability-gated, and none of them silent. Playwright's Linux
+WebKit does not implement `MediaRecorder` — probed directly it reports
+`undefined`, while Chromium and Firefox report a function — so the app correctly
+renders its unsupported-browser panel and the creation screen never exists.
+
+`tests/e2e/unsupported-browser.spec.ts` asserts the other side of that same
+condition: that the fallback appears, names what is missing, stays navigable and
+is localized. Every browser in the matrix now makes a positive assertion in one
+direction or the other.
+
+### Two real test defects fixed
+
+- **A crashed browser session reported as a failed assertion.** The too-short-take
+  test clicked Stop in the same tick recording started. Stopping a MediaRecorder
+  that has emitted nothing killed the Chromium session (`Protocol error: session
+  closed`) — a state no user can reach. It now takes a 350 ms take: past one
+  recorder timeslice, under half the 750 ms floor.
+- **A locator matching Next's route announcer.** `getByRole('alert')` resolved to
+  both the error panel and `__next-route-announcer__`, tripping strict mode
+  intermittently. The product was correct every time it "failed".
+
+### Concurrency is declared
+
+`playwright.config.ts` pins `workers: 2` under CI. Left to the default,
+Playwright sizes the pool from the host core count, and at 8 workers the
+audio-capture browser sessions die. Every test still runs on every browser.
+
 ## Gates
 
 | Gate | State |
@@ -195,6 +241,14 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | G5 design hardening | **Partial** — system, 3D, motion, RTL done; human audits not run |
 | G6 production hardening | **Fail** — no device verification, no monitoring |
 | G7 release | **Fail** — blocked on G1 and G6 |
+
+## Next phase
+
+[`architecture/musician-foundation.md`](architecture/musician-foundation.md)
+freezes the five-version pipeline (Unprocessed / Judge / Teacher / Musician
+Refined / Musician Developed) and the model foundation.
+[`../third_party/MANIFEST.md`](../third_party/MANIFEST.md) pins the upstream
+revisions and licences. No AI model code or weights are committed.
 
 The product is complete as a working application and is **not** ready for a
 production release. The two things standing between those states are the

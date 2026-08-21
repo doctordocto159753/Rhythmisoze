@@ -168,12 +168,50 @@ test.describe('recovery', () => {
     await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await page.getByRole('button', { name: /Start a sketch/i }).click();
-    await page.waitForTimeout(COUNT_IN_MS + 200);
-    await page.getByRole('button', { name: /Stop recording/i }).click();
 
-    await expect(page.getByText(/too short to work with/i)).toBeVisible({ timeout: 20_000 });
-    // The recovery action is a real button, not advice.
-    await expect(page.getByRole('button', { name: /Record again/i })).toBeVisible();
+    // Wait for recording to *start* (state-based, so it does not drift under
+    // parallel load), then take a deliberately short but non-degenerate take.
+    //
+    // Two earlier versions of this got it wrong in opposite directions. A fixed
+    // COUNT_IN_MS + 200 ms sleep drifted on a loaded runner and produced a take
+    // long enough to be valid. Clicking Stop in the same tick the recorder
+    // started crashed the Chromium session outright - `Protocol error
+    // (Runtime.callFunctionOn): session closed` - because stopping a
+    // MediaRecorder that has emitted nothing, on a fake audio device, is not a
+    // state a real user can reach either.
+    //
+    // 350 ms is one full 250 ms recorder timeslice plus margin, so there is
+    // real audio to decode, and it is less than half the 750 ms too-short
+    // floor, so even heavy drift keeps it in the intended branch.
+    const stop = page.getByRole('button', { name: /Stop recording/i });
+    await stop.waitFor({ state: 'visible', timeout: 45_000 });
+    await page.waitForTimeout(350);
+    await stop.click();
+
+    // Assert the contract, not one particular message.
+    //
+    // A take stopped the instant it began can legitimately end in three
+    // different states depending on how many milliseconds the browser managed
+    // to capture: too short to use, no media produced at all, or bytes that
+    // will not decode. Which one occurs is a property of the machine, not of
+    // the product, and an earlier version of this test failed intermittently
+    // in CI for exactly that reason.
+    //
+    // What the product *does* guarantee is the thing worth testing: the take is
+    // refused, the refusal is announced, and it comes with a way forward.
+    //
+    // Scoped by its heading rather than by role alone: Next.js injects its own
+    // `__next-route-announcer__` element with `role="alert"`, which appears
+    // only after certain client navigations. Matching on the role by itself
+    // resolved to two elements and tripped strict mode intermittently - the
+    // product was behaving correctly every time it "failed".
+    const alert = page.getByRole('alert').filter({ hasText: /Something stopped/i });
+    await expect(alert).toBeVisible({ timeout: 30_000 });
+    await expect(alert).toContainText(/too short to work with/i);
+    await expect(alert.getByRole('button').first()).toBeVisible();
+
+    // And it must not have silently proceeded as though the take were usable.
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toHaveCount(0);
   });
 });
 

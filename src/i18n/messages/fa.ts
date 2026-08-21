@@ -151,6 +151,12 @@ export const fa: Messages = {
       'musician-developed': 'همان ایده، یک قدم پیش‌تر برده‌شده.',
       'musician-expanded': 'همان ایده، بسط‌یافته به یک قطعه‌ی بلندتر.',
     },
+    // همان دو نسخه، برای فایل MIDI واردشده صادقانه توصیف شده: چیزی خوانده نشده
+    // و رونویسی‌ای در کار نبوده که ابهامی داشته باشد.
+    importedHints: {
+      unprocessed: 'فایل دقیقاً همان‌طور که رسید.',
+      judge: 'همان نت‌ها — فایل واردشده نیازی به اصلاح ندارد.',
+    },
     judgeRepaired: (count: number) => `${count} اصلاح`,
     judgeClean: 'چیزی نیاز به اصلاح نداشت.',
     teacherSuggestions: (count: number) => `${count} پیشنهاد`,

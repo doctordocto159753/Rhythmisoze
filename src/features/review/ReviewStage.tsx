@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { JudgeVerdict, MelodyConfidence, Meter, ProcessingDiagnostics } from '@contracts';
+import type {
+  JudgeVerdict,
+  MelodyConfidence,
+  Meter,
+  ProcessingDiagnostics,
+  SourceKind,
+} from '@contracts';
 import type { TeacherResult } from '@music-teacher';
 import { RETOUCH_AMOUNT_MAX, RETOUCH_AMOUNT_MIN, pitchName, retouchLabel, type RefineResult } from '@retouch';
 import { getAudioContext } from '@audio-core';
@@ -52,6 +58,8 @@ export interface ReviewStageProps {
   tappedBpm: number | null;
   /** Which of the two the versions are currently built on. */
   tempoChoice: TempoChoice;
+  /** Where the material came from, so the version copy can stay honest. */
+  sourceKind: SourceKind | undefined;
   onTempoChoiceChange(choice: TempoChoice): void;
   meter: Meter;
   /**
@@ -97,6 +105,7 @@ export function ReviewStage({
   tappedBpm,
   tempoChoice,
   onTempoChoiceChange,
+  sourceKind,
   meter,
   durationSec,
   retouchAmount,
@@ -195,6 +204,7 @@ export function ReviewStage({
         tappedBpm={tappedBpm}
         tempoChoice={tempoChoice}
         onTempoChoiceChange={onTempoChoiceChange}
+        sourceKind={sourceKind}
         judge={judge}
         lesson={lesson}
         onSelect={onVersionChange}

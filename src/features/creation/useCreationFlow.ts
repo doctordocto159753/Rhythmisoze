@@ -81,7 +81,7 @@ import {
   type VersionNoteSources,
 } from '@versions';
 import { buildMusicianRequest as assembleMusicianRequest, type MusicianRequest } from '@musician-client';
-import { importMidi } from '@midi';
+import { importMidi, planMidiImport } from '@midi';
 import {
   DEFAULT_MASTER,
   musicalDurationSec,
@@ -107,348 +107,15 @@ export const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_MIDI_UPLOAD_BYTES = 5 * 1024 * 1024;
 /** PRD R-04: one measure. */
 export const COUNT_IN_BARS = 1;
-export type MelodyInputMode = Exclude<TranscriptionInputMode, 'rhythm'>;
 
-export interface FlowState {
-  machine: MachineContext;
-  sketchId: string;
-  title: string;
-  mode: CreationMode;
-  melodyInputMode: MelodyInputMode;
-  bpm: number | null;
-  meter: Meter;
-  metronomeMuted: boolean;
-  tapHistory: number[];
-  tapCount: number;
-
-  beat: BeatInfo | null;
-  level: LevelSnapshot | null;
-  elapsedSec: number;
-
-  audio: MonoAudio | null;
-  /** Exact source bytes, retained locally for export and never published. */
-  source: LocalSourceAsset | null;
-  /**
-   * How long the *recording* is.
-   *
-   * Source evidence, and only that. It is what the Judge, the Teacher and the
-   * Identity Guard measure the performance against, and it must keep meaning
-   * that even when the version being listened to is four times longer. What is
-   * played back and rendered is `musicalDurationSec`, derived from the notes.
-   */
-  durationSec: number;
-  validation: AudioValidation | null;
-
-  rawNotes: NoteEvent[];
-  /** The Judge's repair of `rawNotes`, and its verdict. Null outside the voice path. */
-  judge: JudgeVerdict | null;
-  referenceNotes: NoteEvent[];
-  rawDrums: RefineResult['drums'];
-  diagnostics: ProcessingDiagnostics | null;
-  melodyQuality: MelodyConfidence | null;
-  progress: TranscriptionProgress | null;
-
-  retouchAmount: number;
-  /** Which performance version the user is listening to; null means the default. */
-  versionId: VersionId | null;
-  /**
-   * Which tempo the user has asked the musical versions to be built on.
-   *
-   * `'performance'` unless they explicitly asked for the metronome value. It is
-   * never set by the app: a confidence score is not a user decision, and letting
-   * one act like one is the whole of the bug this field exists to close.
-   */
-  tempoChoice: TempoChoice;
-  keyOverride: { root: string; mode: 'major' | 'minor' } | null;
-
-  instrumentId: string;
-  master: MasterSettings;
-
-  renderedAudio: Blob | null;
-  /**
-   * What `renderedAudio` is a render *of*.
-   *
-   * The reducer nulls `renderedAudio` on every input it knows about — version,
-   * instrument, cleanup, key, master, a new transcription — and that list is a
-   * list of things somebody remembered. It did not include a Musician result
-   * arriving: press "Try another", keep the new set, and the notes under
-   * `musician-refined` change while the WAV rendered from the *previous* set
-   * stays in state. Playback reads the notes directly and sounds right; export
-   * and publish read this blob and ship the old audio. The two disagree and
-   * nothing says so.
-   *
-   * Recording the key turns "remember to invalidate" into "compare", which
-   * cannot be forgotten by the next feature.
-   */
-  renderedKey: string | null;
-  renderRealtimeRatio: number | null;
-  playing: boolean;
-  playheadOrigin: number | null;
-
-  publishedId: string | null;
-  shareUrl: string | null;
-  manageToken: string | null;
-
-  error: { code: AppError['code']; recovery: AppError['recovery'] } | null;
-  storageWarning: boolean;
-}
-
-type Action =
-  | { type: 'machine'; event: CreationEvent; payload?: { code: AppError['code']; recovery: AppError['recovery'] } }
-  | { type: 'setMode'; mode: CreationMode }
-  | { type: 'setMelodyInputMode'; mode: MelodyInputMode }
-  | { type: 'setBpm'; bpm: number }
-  | { type: 'setMeter'; meter: Meter }
-  | { type: 'tap'; history: number[]; bpm: number | null; tapCount: number }
-  | { type: 'toggleMetronome' }
-  | { type: 'beat'; beat: BeatInfo }
-  | { type: 'level'; level: LevelSnapshot }
-  | { type: 'elapsed'; seconds: number }
-  | {
-      type: 'captured';
-      audio: MonoAudio;
-      validation: AudioValidation;
-      source: LocalSourceAsset;
-    }
-  | { type: 'progress'; progress: TranscriptionProgress }
-  | {
-      type: 'transcribed';
-      judge: JudgeVerdict | null;
-      notes: NoteEvent[];
-      drums: RefineResult['drums'];
-      diagnostics: ProcessingDiagnostics;
-      referenceNotes: NoteEvent[];
-      melodyQuality: MelodyConfidence | null;
-    }
-  | {
-      type: 'midiImported';
-      mode: CreationMode;
-      bpm: number;
-      meter: Meter;
-      notes: NoteEvent[];
-      drums: RefineResult['drums'];
-      durationSec: number;
-      source: LocalSourceAsset;
-      diagnostics: ProcessingDiagnostics;
-    }
-  | { type: 'setRetouch'; amount: number }
-  | { type: 'setVersion'; versionId: VersionId }
-  | { type: 'setTempoChoice'; choice: TempoChoice }
-  | { type: 'setKey'; key: FlowState['keyOverride'] }
-  | { type: 'setInstrument'; id: string }
-  | { type: 'setMaster'; master: Partial<MasterSettings> }
-  | { type: 'setTitle'; title: string }
-  | { type: 'rendered'; blob: Blob; ratio: number; key: string }
-  | { type: 'playing'; playing: boolean; origin: number | null }
-  | { type: 'published'; id: string; shareUrl: string; manageToken: string }
-  | { type: 'unpublished' }
-  | { type: 'error'; error: AppError }
-  | { type: 'clearError' }
-  | { type: 'storageWarning'; low: boolean }
-  | { type: 'reset'; id: string };
-
-function initialState(sketchId: string, mode: CreationMode = 'melody'): FlowState {
-  return {
-    machine: INITIAL_CONTEXT,
-    sketchId,
-    title: '',
-    mode,
-    melodyInputMode: 'voice',
-    bpm: null,
-    meter: DEFAULT_METER,
-    metronomeMuted: false,
-    tapHistory: [],
-    tapCount: 0,
-    beat: null,
-    level: null,
-    elapsedSec: 0,
-    audio: null,
-    source: null,
-    durationSec: 0,
-    validation: null,
-    rawNotes: [],
-    judge: null,
-    referenceNotes: [],
-    rawDrums: [],
-    diagnostics: null,
-    melodyQuality: null,
-    progress: null,
-    retouchAmount: RETOUCH_AMOUNT_DEFAULT,
-    versionId: null,
-    tempoChoice: 'performance',
-    keyOverride: null,
-    instrumentId: resolveInstrument(undefined, mode).id,
-    master: DEFAULT_MASTER,
-    renderedAudio: null,
-    renderedKey: null,
-    renderRealtimeRatio: null,
-    playing: false,
-    playheadOrigin: null,
-    publishedId: null,
-    shareUrl: null,
-    manageToken: null,
-    error: null,
-    storageWarning: false,
-  };
-}
-
-function reducer(state: FlowState, action: Action): FlowState {
-  switch (action.type) {
-    case 'machine': {
-      const result = transition(state.machine, action.event, action.payload);
-      if (!result.accepted) return state;
-      return { ...state, machine: result.context };
-    }
-    case 'setMode':
-      return {
-        ...state,
-        mode: action.mode,
-        // Instruments are mode-specific; carrying a piano into rhythm mode
-        // would leave the gallery showing a selection that cannot be voiced.
-        instrumentId: resolveInstrument(undefined, action.mode).id,
-        rawNotes: [],
-        referenceNotes: [],
-        rawDrums: [],
-        melodyQuality: null,
-        audio: null,
-        source: null,
-        durationSec: 0,
-        renderedAudio: null,
-      };
-    case 'setMelodyInputMode':
-      return {
-        ...state,
-        melodyInputMode: action.mode,
-        rawNotes: [],
-        referenceNotes: [],
-        rawDrums: [],
-        audio: null,
-        source: null,
-        durationSec: 0,
-        diagnostics: null,
-        melodyQuality: null,
-        renderedAudio: null,
-      };
-    case 'setBpm':
-      return { ...state, bpm: action.bpm };
-    case 'setMeter':
-      return { ...state, meter: action.meter };
-    case 'tap':
-      return {
-        ...state,
-        tapHistory: action.history,
-        tapCount: action.tapCount,
-        bpm: action.bpm ?? state.bpm,
-      };
-    case 'toggleMetronome':
-      return { ...state, metronomeMuted: !state.metronomeMuted };
-    case 'beat':
-      return { ...state, beat: action.beat };
-    case 'level':
-      return { ...state, level: action.level };
-    case 'elapsed':
-      return { ...state, elapsedSec: action.seconds };
-    case 'captured':
-      return {
-        ...state,
-        audio: action.audio,
-        source: action.source,
-        durationSec: action.audio.durationSec,
-        validation: action.validation,
-        level: null,
-      };
-    case 'progress':
-      return { ...state, progress: action.progress };
-    case 'transcribed':
-      return {
-        ...state,
-        rawNotes: action.notes,
-        judge: action.judge,
-        referenceNotes: action.referenceNotes,
-        rawDrums: action.drums,
-        diagnostics: action.diagnostics,
-        melodyQuality: action.melodyQuality,
-        progress: null,
-        // A new take has its own tempo and groove, so the previous choice of
-        // version described a performance that no longer exists. The same goes
-        // for a tempo override: it was a judgement about a different take.
-        versionId: null,
-        tempoChoice: 'performance',
-        // A new transcription invalidates any previous render.
-        renderedAudio: null,
-        renderRealtimeRatio: null,
-      };
-    case 'midiImported':
-      return {
-        ...state,
-        mode: action.mode,
-        bpm: action.bpm,
-        // A MIDI file states its own tempo, and a stated tempo is a fact about
-        // the music rather than a click track the performer was free to drift
-        // from. Detection exists for performances; here there is nothing to
-        // detect that the file has not already said. The user can still switch
-        // to the detected pulse from the picker.
-        tempoChoice: 'metronome',
-        meter: action.meter,
-        instrumentId: resolveInstrument(undefined, action.mode).id,
-        audio: null,
-        source: action.source,
-        durationSec: action.durationSec,
-        validation: null,
-        rawNotes: action.notes,
-        referenceNotes: [],
-        rawDrums: action.drums,
-        diagnostics: action.diagnostics,
-        melodyQuality: null,
-        progress: null,
-        renderedAudio: null,
-        renderRealtimeRatio: null,
-      };
-    case 'setRetouch':
-      return { ...state, retouchAmount: action.amount, renderedAudio: null };
-    case 'setVersion':
-      return { ...state, versionId: action.versionId, renderedAudio: null };
-    case 'setTempoChoice':
-      // Changes the grid every version is built on, so the render no longer
-      // matches. The render key would catch this anyway; clearing here keeps it
-      // consistent with every other input that moves the notes.
-      return { ...state, tempoChoice: action.choice, renderedAudio: null };
-    case 'setKey':
-      return { ...state, keyOverride: action.key, renderedAudio: null };
-    case 'setInstrument':
-      return { ...state, instrumentId: action.id, renderedAudio: null };
-    case 'setMaster':
-      return { ...state, master: { ...state.master, ...action.master }, renderedAudio: null };
-    case 'setTitle':
-      return { ...state, title: action.title };
-    case 'rendered':
-      return {
-        ...state,
-        renderedAudio: action.blob,
-        renderedKey: action.key,
-        renderRealtimeRatio: action.ratio,
-      };
-    case 'playing':
-      return { ...state, playing: action.playing, playheadOrigin: action.origin };
-    case 'published':
-      return {
-        ...state,
-        publishedId: action.id,
-        shareUrl: action.shareUrl,
-        manageToken: action.manageToken,
-      };
-    case 'unpublished':
-      return { ...state, publishedId: null, shareUrl: null, manageToken: null };
-    case 'error':
-      return { ...state, error: { code: action.error.code, recovery: action.error.recovery } };
-    case 'clearError':
-      return { ...state, error: null };
-    case 'storageWarning':
-      return { ...state, storageWarning: action.low };
-    case 'reset':
-      return initialState(action.id, state.mode);
-  }
-}
+/**
+ * The state, the reducer and the source-isolation rule all live in `state.ts`.
+ *
+ * Re-exported here because a dozen components import `FlowState` from this
+ * module, and moving the type was not the point of the change that moved it.
+ */
+export type { Action, FlowState, MelodyInputMode } from './state';
+import { initialState, reducer, type FlowState, type MelodyInputMode } from './state';
 
 export function useCreationFlow(locale: Locale) {
   const [state, dispatch] = useReducer(reducer, undefined, () => initialState(newSketchId()));
@@ -547,15 +214,17 @@ export function useCreationFlow(locale: Locale) {
    * would re-render the whole creation screen every time a poll advanced the
    * phase. The user is listening to music while this happens.
    */
-  const musicianPersistRef = useRef<{ result: MusicianPair | null; job: MusicianJobSnapshot } | null>(
-    null,
-  );
+  const musicianPersistRef = useRef<
+    { sourceId: string; result: MusicianPair | null; job: MusicianJobSnapshot } | null
+  >(null);
   const handleMusicianPersist = useCallback(
     (next: { result: MusicianPair | null; job: MusicianJobSnapshot }) => {
-      musicianPersistRef.current = next;
+      musicianPersistRef.current = { sourceId: state.sourceId, ...next };
     },
-    [],
+    [state.sourceId],
   );
+
+
 
   /**
    * The Musician, if this deployment has one.
@@ -572,6 +241,10 @@ export function useCreationFlow(locale: Locale) {
    */
   const musician = useMusicianJob({
     enabled: musicianAvailability.available,
+    // Scoped to the evidence, not to the sketch. Record again or import a file
+    // and the previous source's generations stop existing, rather than being
+    // filtered out later by a digest check that only notices afterwards.
+    sourceId: state.sourceId,
     onPersist: handleMusicianPersist,
   });
 
@@ -721,7 +394,9 @@ export function useCreationFlow(locale: Locale) {
     const tempo = performanceTempo ?? resolveVersionTempo({ rhythm, tappedBpm: state.bpm });
     const analysis = refinedRef.current?.analysis ?? null;
     return assembleMusicianRequest({
-      sourceId: state.sketchId,
+      // The evidence, not the sketch: two takes of one sketch are two different
+      // things to ask the model about, and the seed is derived from this.
+      sourceId: state.sourceId,
       versionNotes: versionNoteSources,
       tempo: { bpm: tempo.bpm, confidence: tempo.confidence },
       meter: { beatsPerBar: state.meter.beatsPerBar, beatUnit: state.meter.beatUnit },
@@ -740,7 +415,7 @@ export function useCreationFlow(locale: Locale) {
   }, [
     versionNoteSources,
     state.bpm,
-    state.sketchId,
+    state.sourceId,
     state.meter,
     state.durationSec,
     rhythm,
@@ -1126,19 +801,16 @@ export function useCreationFlow(locale: Locale) {
         if (result.durationSec > MAX_RECORDING_SEC + 0.25) {
           throw new AppError('audio_too_long', 'retry', `${result.durationSec.toFixed(2)}s MIDI`);
         }
-        const mode: CreationMode =
-          state.mode === 'melody' && result.notes.length === 0
-            ? 'rhythm'
-            : state.mode === 'rhythm' && result.drums.length === 0
-              ? 'melody'
-              : state.mode;
+        // The rule lives in `@midi` where it can be tested. See `planMidiImport`.
+        const plan = planMidiImport(result, state.mode);
+        const { mode, notes, drums } = plan;
         dispatch({
           type: 'midiImported',
           mode,
           bpm: result.bpm,
           meter: result.meter,
-          notes: result.notes,
-          drums: result.drums,
+          notes,
+          drums,
           durationSec: result.durationSec,
           source: {
             kind: 'midi-upload',
@@ -1153,8 +825,17 @@ export function useCreationFlow(locale: Locale) {
             modelLoadMs: 0,
             modelFromCache: true,
             notesBeforeFilter: result.notes.length + result.drums.length,
-            notesAfterFilter: result.notes.length + result.drums.length,
-            warnings: [],
+            notesAfterFilter: notes.length + drums.length,
+            warnings: [
+              // Every interpretation this import made, said out loud. A silent
+              // reading is exactly what produced a melody from a drum pattern.
+              ...(plan.pitchedNotesAsRhythm > 0
+                ? [`midi_pitched_notes_as_rhythm:${plan.pitchedNotesAsRhythm}`]
+                : []),
+              ...(plan.modeChangedBecause !== null
+                ? [`midi_mode_changed:${state.mode}->${mode}:${plan.modeChangedBecause}`]
+                : []),
+            ],
           },
         });
         send('MIDI_IMPORTED');
@@ -1377,7 +1058,20 @@ export function useCreationFlow(locale: Locale) {
         // Musician output cannot be recomputed -- the same seed on a different
         // model revision is a different result -- so unlike every other version
         // it has to be stored rather than derived.
-        musician: toStoredMusician(musicianPersistRef.current),
+        //
+        // Only while it belongs to *this* source. `useMusicianJob` empties its
+        // own state when the source changes; this ref is a separate copy that
+        // does not hear about that, and left unchecked it would pair one
+        // source's notes with another source's generated versions in the saved
+        // record -- the same contamination one layer down, and harder to see
+        // because nothing about it is on screen. Compared here rather than
+        // cleared on change: clearing leaves a render in which the stale value
+        // is still readable, and the thing reading it is this debounced save.
+        musician: toStoredMusician(
+          musicianPersistRef.current?.sourceId === state.sourceId
+            ? musicianPersistRef.current
+            : null,
+        ),
         selectedVersionId: state.versionId ?? undefined,
       })
         .then((result) => {
@@ -1405,6 +1099,7 @@ export function useCreationFlow(locale: Locale) {
     state.instrumentId,
     state.rawNotes,
     state.referenceNotes,
+    state.sourceId,
     renderedAudio,
     state.source,
     state.durationSec,

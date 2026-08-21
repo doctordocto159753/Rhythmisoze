@@ -147,6 +147,18 @@ export const en = {
       'musician-developed': 'Your idea, taken one step further.',
       'musician-expanded': 'Your idea, grown into a longer passage.',
     },
+    /**
+     * The same two versions, described honestly for an imported MIDI file.
+     *
+     * A MIDI file is already symbolic: nobody sang it here, and there was no
+     * transcription to be uncertain about. "The closest reading of what you
+     * actually sang" is a claim about listening to audio, and repeating it over
+     * an imported file would describe work the app did not do.
+     */
+    importedHints: {
+      unprocessed: 'The file exactly as it arrived.',
+      judge: 'The same notes — an imported file needs no correcting.',
+    },
     judgeRepaired: (count: number) =>
       count === 1 ? '1 correction' : `${count} corrections`,
     judgeClean: 'Nothing needed correcting.',

@@ -200,6 +200,36 @@ async function setBpm(page: import('@playwright/test').Page, bpm: number): Promi
   }, bpm);
 }
 
+/**
+ * The real failure, end to end.
+ *
+ * A rhythm exported from another application as pitched notes on channel 1 — no
+ * General MIDI percussion channel anywhere in it. Rhythmisoze used to read the
+ * absence of channel 10 as proof that the user's rhythm was really a melody,
+ * and quietly moved them into Melody mode.
+ */
+test('a pitched rhythmic MIDI imported in Beat mode stays a beat', async ({ page }) => {
+  await page.goto('/en');
+  await page.getByRole('radio', { name: /A beat/i }).check();
+  await expect(page.getByRole('radio', { name: /A beat/i })).toBeChecked();
+
+  await page.getByLabel('Choose a MIDI file to import').setInputFiles({
+    name: 'pitched-rhythm.mid',
+    mimeType: 'audio/midi',
+    buffer: Buffer.from(readFileSync(resolve(__dirname, '../fixtures/midi/pitched-rhythm-export.mid'))),
+  });
+
+  await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible();
+
+  // The review screen counts hits in Beat mode and notes in Tune mode, so this
+  // is the assertion the old behaviour fails: it landed on Tune, and the 145
+  // percussive events were counted as a melody.
+  const hits = page.getByText(/\d+ hits/i).first();
+  await expect(hits).toBeVisible();
+  expect(Number(/(\d+)/.exec((await hits.textContent()) ?? '')?.[1] ?? 0)).toBeGreaterThan(120);
+  await expect(page.getByText(/\d+ notes/i)).toHaveCount(0);
+});
+
 function makeMidiFixture(): Uint8Array {
   const midi = new Midi();
   midi.header.setTempo(126);

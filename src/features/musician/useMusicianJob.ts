@@ -95,6 +95,41 @@ const INITIAL: MusicianJobState = {
   attempt: 0,
 };
 
+/**
+ * What a hook holding `current` should hold once the source becomes `nextSourceId`.
+ *
+ * ## Two rules that look contradictory and are not
+ *
+ * Everything else in this file is built to *avoid* clearing `result`. A
+ * regeneration that fails, one the user rejects, a cancelled run — none of them
+ * may destroy a result the user has already accepted, because that result is
+ * work they asked for and chose to keep.
+ *
+ * That is a rule about one source. Across two it inverts. A variation on a
+ * recording the user has since replaced is not a variation on anything, and
+ * leaving it in place means the picker offers it under the new source's name —
+ * the Teacher's material presented as the Musician's work, which is the exact
+ * substitution the Identity Guard exists to prevent, arriving from behind.
+ *
+ * So results are scoped, and the scope is the evidence rather than the sketch.
+ * Reprocessing the same take keeps them; recording again or importing a file
+ * does not.
+ *
+ * ## Why the attempt counter goes too
+ *
+ * `deriveSeed` is a pure function of the source id and the attempt number.
+ * Carrying a count of four into a new source would start it at its fifth seed
+ * for no reason anyone could reconstruct later, and the provenance would record
+ * an attempt that never happened for this material.
+ */
+export function scopeToSource(
+  current: MusicianJobState,
+  heldForSourceId: string,
+  nextSourceId: string,
+): MusicianJobState {
+  return heldForSourceId === nextSourceId ? current : INITIAL;
+}
+
 export interface MusicianJobSnapshot {
   jobId: string | null;
   phase: MusicianPhase;
@@ -104,13 +139,29 @@ export interface MusicianJobSnapshot {
 export interface UseMusicianJobOptions {
   enabled: boolean;
   client?: MusicianClient;
+  /**
+   * Which source the current results belong to.
+   *
+   * Everything below deliberately refuses to clear `result`: a regeneration
+   * that fails, or one the user rejects, must not destroy a result they had
+   * already accepted. That rule is right *within one source* and wrong across
+   * two. A variation on a recording the user has replaced is not a variation on
+   * anything, and offering it under the new source's name is the substitution
+   * the Identity Guard exists to prevent, arriving from the wrong direction.
+   *
+   * So the results are scoped. When this changes, any run in flight is
+   * abandoned and the state goes back to empty — not filtered later, emptied
+   * now, because a stale-digest check is a second chance to notice something
+   * that should never have survived.
+   */
+  sourceId: string;
   /** Restored from the workspace when a sketch is reopened. */
   restore?: { result: MusicianPair | null; job: MusicianJobSnapshot | null };
   onPersist?(state: { result: MusicianPair | null; job: MusicianJobSnapshot }): void;
 }
 
 export function useMusicianJob(options: UseMusicianJobOptions) {
-  const { enabled, onPersist } = options;
+  const { enabled, onPersist, sourceId } = options;
   const client = useMemo(() => options.client ?? new MusicianClient(), [options.client]);
 
   const [state, setState] = useState<MusicianJobState>(() =>
@@ -143,11 +194,32 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
    */
   const attemptRef = useRef(state.attempt);
 
+
   const abortRef = useRef<AbortController | null>(null);
   // Guards against a resolved promise writing into a component that has moved
   // on -- a stale success arriving after a cancel would otherwise resurrect a
   // generation the user stopped.
   const runIdRef = useRef(0);
+
+  /**
+   * Forget everything the moment the source changes.
+   *
+   * A ref rather than an effect dependency comparison inside one: this has to
+   * happen in the same commit that the new source arrives, before any render
+   * can offer the old results against the new material.
+   */
+  const sourceRef = useRef(sourceId);
+  if (sourceRef.current !== sourceId) {
+    const scoped = scopeToSource(state, sourceRef.current, sourceId);
+    sourceRef.current = sourceId;
+    if (scoped !== state) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      runIdRef.current += 1;
+      attemptRef.current = scoped.attempt;
+      setState(scoped);
+    }
+  }
 
   useEffect(() => {
     return () => {

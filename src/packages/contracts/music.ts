@@ -109,6 +109,15 @@ export interface DrumEvent {
   drum: DrumClass;
   velocity: number;
   confidence: number;
+  /**
+   * The MIDI note this hit was written as, when it came from a file that used
+   * pitched notes rather than the percussion channel.
+   *
+   * Present so that reading a pitched rhythm into `drum` classes stays a
+   * reading: the class is what the app plays, this is what the file said, and
+   * the two can be compared. Absent for detected audio, which never had one.
+   */
+  sourcePitch?: number;
 }
 
 /** A drum hit already snapped to a grid. */

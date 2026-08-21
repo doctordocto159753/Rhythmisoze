@@ -140,3 +140,77 @@ jobs:
             exit 1
           fi
           echo "clean: no model artifacts present"
+
+  containers:
+    name: Container build and compose validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose files are valid
+        # Catches a malformed overlay before it reaches a server, which is the
+        # cheapest possible place to catch it.
+        env:
+          SITE_DOMAIN: ci.example.com
+        run: |
+          docker compose -f compose.yaml config >/dev/null
+          docker compose -f compose.yaml -f compose.production.yaml config >/dev/null
+          docker compose -f compose.yaml -f compose.gpu.yaml config >/dev/null
+          echo "all three compose configurations parse"
+
+      - name: Only the reverse proxy is publicly exposed
+        # The single most important production property, asserted rather than
+        # reviewed. Model workers hold gigabytes of weights and have no
+        # authentication; a stray `ports:` entry would put one on the internet.
+        env:
+          SITE_DOMAIN: ci.example.com
+        run: |
+          python3 - <<'PY'
+          import subprocess, yaml, sys
+          raw = subprocess.run(
+              ["docker","compose","-f","compose.yaml","-f","compose.production.yaml","config"],
+              capture_output=True, text=True, check=True).stdout
+          services = yaml.safe_load(raw)["services"]
+          published = {n for n, s in services.items() if s.get("ports")}
+          if published != {"caddy"}:
+              print(f"::error::expected only caddy to publish ports, found {sorted(published)}")
+              sys.exit(1)
+          print("only caddy publishes ports")
+          PY
+
+      - name: No model weight is tracked
+        # The accident this branch exists to correct, turned into a gate.
+        run: |
+          found=$(git ls-files | grep -E '\.(pth|pt|ckpt|safetensors|gguf|onnx)$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::model weights are tracked: $found"
+            exit 1
+          fi
+          echo "no model weights tracked"
+
+      - name: Build the web image
+        run: docker build -t rhythmisoze-web:ci .
+
+      - name: Build the musician images
+        run: |
+          docker build -t rhythmisoze-api:ci -f services/musician/api/Dockerfile services/musician
+          echo "orchestrator builds; the model workers need vendored upstream source and are built at deploy time"
+
+      - name: Smoke the stack with fake adapters
+        # No weights, no network to a model. Proves the containers talk to each
+        # other, which the unit suites cannot.
+        run: |
+          docker network create rhy-ci
+          docker run -d --name api --network rhy-ci             -e MUSICIAN_ADAPTERS=fake -e MUSICIAN_DEVICE=cpu             rhythmisoze-api:ci
+          for i in $(seq 1 30); do
+            if docker run --rm --network rhy-ci curlimages/curl:latest                  -fsS http://api:8080/ready >/dev/null 2>&1; then
+              echo "musician-api is ready with fake adapters"
+              docker run --rm --network rhy-ci curlimages/curl:latest -fsS http://api:8080/v1/models
+              docker rm -f api >/dev/null; docker network rm rhy-ci >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs api
+          docker rm -f api >/dev/null; docker network rm rhy-ci >/dev/null
+          exit 1

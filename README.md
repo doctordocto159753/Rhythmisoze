@@ -5,8 +5,13 @@
 Hum, sing or beatbox a musical idea, upload an existing recording, or import a
 MIDI sketch. Rhythmisoze turns it into something musically usable, plays it back
 on an instrument, and gives you a complete ZIP (rendered WAV, MIDI and untouched
-source) plus individual downloads — all in your browser, with nothing uploaded
-until you choose to publish.
+source) plus individual downloads.
+
+Your recording is transcribed **on your device** and is never uploaded. Asking
+the AI Musician for its two extra versions sends symbolic note data — not audio
+— to the Musician service, which in this edition is a container you run.
+[`docs/privacy-dataflow.md`](docs/privacy-dataflow.md) records every operation
+and exactly what crosses a network boundary.
 
 The product's value is not raw audio-to-MIDI. It is the **retouch layer** that
 closes the gap between an imperfect vocal gesture and material that feels
@@ -21,6 +26,33 @@ and note cleanup, behind a single Raw→Clean control.
 npm ci
 npm run dev          # http://localhost:3000 → redirects to /fa or /en
 ```
+
+> ## Self-hosted edition
+>
+> You are on `deploy/selfhosted-ai-musician-v1`: the complete product, including
+> the AI Musician, runnable on one machine you own. `main` remains the Vercel
+> prototype.
+>
+> **Windows**
+> ```powershell
+> ./scripts/bootstrap.ps1      # upstream source + ~1.4 GB of weights + secrets
+> ./scripts/start-local.ps1    # -> http://localhost:3000
+> ```
+>
+> **Linux server**
+> ```bash
+> cp .env.production.example .env    # set SITE_DOMAIN
+> ./scripts/bootstrap.sh
+> ./scripts/deploy.sh
+> ```
+>
+> No Python or Conda on your machine: the containers own the model runtimes.
+> CPU is the supported baseline; a GPU is detected and used if present.
+>
+> Start with [`docs/runbooks/local-windows.md`](docs/runbooks/local-windows.md)
+> or [`docs/runbooks/self-host.md`](docs/runbooks/self-host.md).
+> The architecture, and an explicit list of what is and is not verified, is in
+> [`docs/architecture/selfhosted-edition.md`](docs/architecture/selfhosted-edition.md).
 
 No environment variables are needed for the core product. The creation flow — record/import,
 transcribe, retouch, choose an instrument, render, download — works with an
@@ -111,9 +143,16 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
    Persian; the waveform, the piano roll, the cleanup slider and the playhead do
    not. Everything else uses logical CSS properties.
 
-4. **Nothing is uploaded until Publish.** There is no code path that sends
-   unpublished audio anywhere. The landing page says so, and the architecture is
-   what makes it true rather than a policy.
+4. **Audio never leaves the device.** There is no code path that sends
+   unpublished audio anywhere, and the AI Musician did not change that: its
+   request type has no field that can carry a blob, and the proxy refuses any
+   body that is not symbolic JSON under 1 MB. Both are asserted by tests rather
+   than promised.
+
+   The broader claim this project used to make -- *nothing is uploaded* -- was
+   withdrawn when the Musician began sending note data to a server. Replacing a
+   claim that has stopped being true is not a detail; a false statement about
+   someone's data is worse than no statement.
 
 5. **One state machine.** `src/features/state/machine.ts` is a transition table,
    not a set of booleans. An invalid transition is a lookup miss, and 26 tests

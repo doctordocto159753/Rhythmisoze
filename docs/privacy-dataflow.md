@@ -1,6 +1,12 @@
 # Privacy: what data exists, and where it goes
 
-**Status:** current as of the AI Musician integration, 2026-08-21.
+**Status:** current as of the self-hosted edition, 2026-08-21.
+
+**In this edition you run the server.** Everything below still describes what
+crosses a network boundary, but the party on the other side is you rather than a
+third party. That does not make the boundary disappear -- symbolic note data
+still leaves the browser -- and this document does not soften its language on
+that basis.
 
 This document exists because the product used to say *"nothing is uploaded"* and
 that stopped being universally true. It is a per-operation account rather than a
@@ -153,6 +159,7 @@ Musician versions works identically.
 | `MUSICIAN_API_URL` | Where note data goes. **Server-side only** — never exposed to the browser |
 | `MUSICIAN_REQUEST_TIMEOUT_MS` | How long a request may live before it is abandoned |
 | `MUSICIAN_JOB_TTL_SEC` | How long the service keeps a job and its result |
+| `STORAGE_DRIVER` | `local-disk` keeps published audio on your own volume; `vercel-blob` sends it to Vercel |
 
 The service URL is deliberately never sent to the client. The browser talks only
 to the app's own origin; a status endpoint answers "is this available" with a
@@ -166,7 +173,11 @@ boolean and nothing else.
   TTL, an hour by default. That is a real retention window and it is stated.
 - **No claim about the hosting provider.** Whoever runs the service can see the
   traffic reaching it; that is true of any hosted service and is not something
-  this app can promise away.
+  this app can promise away. In the self-hosted edition that party is the
+  operator, which is better for a user who trusts the operator and no different
+  for one who does not.
+- **No claim that self-hosting makes the network operation disappear.** It moves
+  where the data goes, not whether it goes.
 - **No claim of anonymity beyond what is structural.** There are no accounts and
   no identifiers, so there is nothing to link requests to a person — but a
   server can always see an IP address, and this document will not pretend

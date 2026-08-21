@@ -18,12 +18,18 @@ async function gotoSupportedCreation(page: Page): Promise<void> {
     typeof window.OfflineAudioContext !== 'undefined',
   ));
 
-  // Capability measurement replaces the setup screen after hydration in
-  // Playwright's Linux WebKit. Probe the same browser primitives first so the
-  // test cannot race that replacement while locating an interactive control.
+  // Playwright's Linux WebKit does not implement MediaRecorder - probed
+  // directly it reports `undefined`, while Chromium and Firefox report a
+  // function. The app therefore renders its unsupported-browser panel and the
+  // setup screen never exists, so there is no tempo control to drive.
+  //
+  // The skip is paired with `unsupported-browser.spec.ts`, which asserts that
+  // the fallback shown instead is correct, localized and navigable. A skip on
+  // its own would only record that something did not run; together they make a
+  // positive statement about every browser in the matrix.
   test.skip(
     !hasRequiredMedia,
-    'Playwright WebKit does not expose the required recording and Web Audio APIs.',
+    'Browser lacks MediaRecorder/getUserMedia; the fallback is asserted in unsupported-browser.spec.ts.',
   );
   await expect(page.getByText(/Nothing is uploaded/i).first()).toBeVisible();
 }

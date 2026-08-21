@@ -14,6 +14,17 @@ Reproducible from a clean checkout:
 
 The fixtures are committed, so the test suite does not need Python.
 
+IMPORTANT - the Python minor version matters.
+
+`estimate_tempo` sums floats, and CPython 3.12 changed `sum()` to use
+compensated (Neumaier) summation. Regenerating under 3.11 therefore produces a
+last-bit difference in `gridError` - observed as 0.2062499999999999 against the
+committed 0.20624999999999993 - and the CI diff check fails.
+
+CI pins python-version 3.12 for exactly this reason. If that pin ever changes,
+the fixtures must be regenerated in the same commit, and the change reviewed as
+a deliberate one rather than accepted as noise.
+
 Adding a case: append to CASES, regenerate, and commit the diff. A change to any
 existing expected value is a change to the retouch algorithm and needs an ADR.
 """

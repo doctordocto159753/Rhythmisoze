@@ -163,17 +163,151 @@ test.describe('rhythm', () => {
 });
 
 test.describe('recovery', () => {
+  /**
+   * Build a valid WAV of an exact length, in memory.
+   *
+   * The point is the *duration*, which is a property of the header and the
+   * sample count, so it is identical on every machine and every browser.
+   */
+  function wavOfSeconds(seconds: number, sampleRate = 44_100): Buffer {
+    const frames = Math.round(seconds * sampleRate);
+    const data = Buffer.alloc(frames * 2);
+    for (let i = 0; i < frames; i += 1) {
+      // Audible, so the take is rejected for its length and not for silence.
+      const sample = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.3;
+      data.writeInt16LE(Math.round(sample * 32_767), i * 2);
+    }
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + data.length, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(sampleRate * 2, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(data.length, 40);
+    return Buffer.concat([header, data]);
+  }
+
+  /**
+   * A take under the 0.75 s floor is refused, and the refusal is useful.
+   *
+   * ## Why this drives the import path rather than the microphone
+   *
+   * This assertion used to record a real take and stop it quickly. It failed
+   * intermittently for four different reasons across five attempts, and the
+   * product was behaving correctly every time:
+   *
+   *  1. `getByRole('alert')` also matched Next's `__next-route-announcer__`,
+   *     tripping strict mode.
+   *  2. Clicking Stop in the same tick recording began killed the Chromium
+   *     session outright - stopping a MediaRecorder that has emitted nothing
+   *     is not a state a user can reach.
+   *  3. A 350 ms take survived locally but exceeded the floor on a GitHub
+   *     runner once click latency was added, so the take was *accepted* and no
+   *     refusal ever appeared.
+   *  4. Reacting to the on-screen elapsed readout instead read an unrelated
+   *     number from the page.
+   *
+   * The root cause is structural, not a bad selector: the length of a real
+   * recording is decided by scheduler latency in three processes - runner,
+   * browser and page - against a 750 ms window. It is not controllable to the
+   * precision the assertion needs, so any version of this test is a race.
+   *
+   * The refusal itself does not depend on how the audio arrived.
+   * `ingestAudioBlob()` decodes, then calls `validateAudio()`, for a recording
+   * and an upload alike; `too_short` becomes `audio_too_short` in both. Handing
+   * it a 0.4 s WAV therefore exercises the same production code, the same error
+   * code and the same UI, with the duration fixed by the file header instead of
+   * by the clock.
+   *
+   * The recording path keeps its own coverage in the test below, which asserts
+   * what *is* deterministic about it.
+   */
   test('a take too short to use is refused with a way forward', async ({ page }) => {
     await page.goto('/en');
     await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
-    await page.getByRole('button', { name: /Start a sketch/i }).click();
-    await page.waitForTimeout(COUNT_IN_MS + 200);
-    await page.getByRole('button', { name: /Stop recording/i }).click();
 
-    await expect(page.getByText(/too short to work with/i)).toBeVisible({ timeout: 20_000 });
-    // The recovery action is a real button, not advice.
-    await expect(page.getByRole('button', { name: /Record again/i })).toBeVisible();
+    await page.getByLabel('Choose a recording to upload').setInputFiles({
+      name: 'far-too-short.wav',
+      mimeType: 'audio/wav',
+      // Comfortably under the 0.75 s floor, and not degenerate: real samples,
+      // a real header, and long enough to decode on every browser.
+      buffer: wavOfSeconds(0.4),
+    });
+
+    // Scoped by its heading rather than by role alone, per (1) above.
+    const alert = page.getByRole('alert').filter({ hasText: /Something stopped/i });
+    await expect(alert).toBeVisible({ timeout: 30_000 });
+    await expect(alert).toContainText(/too short to work with/i);
+
+    // The refusal has to say what to do about it, not just that it failed.
+    await expect(alert.getByRole('button').first()).toBeVisible();
+
+    // And it must not have silently proceeded as though the take were usable.
+    await expect(page.getByRole('heading', { name: /Your sketch/i })).toHaveCount(0);
+  });
+
+  test('a take just over the floor is accepted, so the floor is a floor', async ({ page }) => {
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+
+    // The negative case above only proves something was rejected. This proves
+    // the boundary is where it is claimed to be, and that the rejection is not
+    // simply "short uploads never work".
+    await page.getByLabel('Choose a recording to upload').setInputFiles({
+      name: 'just-long-enough.wav',
+      mimeType: 'audio/wav',
+      buffer: wavOfSeconds(1.2),
+    });
+
+    await expect(
+      page.getByRole('alert').filter({ hasText: /too short to work with/i }),
+    ).toHaveCount(0);
+  });
+
+  test('a recording stopped early always reaches a coherent state', async ({ page }) => {
+    await page.goto('/en');
+    await page.getByRole('radio', { name: /A tune/i }).check();
+    await setBpm(page, 120);
+    await page.getByRole('button', { name: /Start a sketch/i }).click();
+
+    const stop = page.getByRole('button', { name: /Stop recording/i });
+    await stop.waitFor({ state: 'visible', timeout: 45_000 });
+    await page.waitForTimeout(400);
+    await stop.click();
+
+    /**
+     * How long that take turned out to be is a property of the machine, so this
+     * deliberately does not assert which outcome follows. What it asserts is
+     * the part that is genuinely deterministic and that actually regressed
+     * twice: the app reaches *some* terminal state and stays usable.
+     *
+     * A short take may legitimately be refused (too short, no media, or bytes
+     * that will not decode) or accepted and transcribed. Both are correct. The
+     * failures this catches are the ones that are never correct - the browser
+     * session dying on `stop()`, the spinner never resolving, and the flow
+     * silently doing nothing at all.
+     */
+    const refused = page.getByRole('alert').filter({ hasText: /Something stopped/i });
+    const accepted = page.getByRole('heading', { name: /Your sketch/i });
+
+    await expect
+      .poll(async () => (await refused.count()) + (await accepted.count()), {
+        timeout: 90_000,
+        message: 'stopping a recording early left the app in neither a refusal nor a result',
+      })
+      .toBeGreaterThan(0);
+
+    // Whichever branch it took, the page is still alive and driveable.
+    await expect(page.getByRole('link', { name: /Rhythmisoze/i }).first()).toBeVisible();
   });
 });
 

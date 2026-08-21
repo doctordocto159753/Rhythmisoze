@@ -43,6 +43,22 @@ const FAKE_MEDIA_ARGS = [
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+
+  /**
+   * Concurrency is declared, not inherited from the machine.
+   *
+   * The capture project drives real Chromium instances with a fake audio
+   * device and a MediaRecorder, alongside the Next server. Left to its default,
+   * Playwright sizes the pool from the host's core count, so the same suite runs
+   * 2 workers on one machine and 8 on another — and at 8 the browser sessions
+   * start dying with `Protocol error: session closed`, which surfaces as a test
+   * failure that has nothing to do with the code under test.
+   *
+   * Two workers is what the audio suite is validated at. It is not a way of
+   * hiding a failure: every test still runs, on every browser, and the wall
+   * clock cost is roughly ninety seconds.
+   */
+  workers: process.env.CI ? 2 : undefined,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],

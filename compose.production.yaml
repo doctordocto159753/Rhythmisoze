@@ -1,0 +1,54 @@
+# Production overlay: put a reverse proxy in front and take the app off the host.
+#
+#   docker compose -f compose.yaml -f compose.production.yaml up -d --build
+#
+# The single most important line in this file is the removal of `web`'s
+# published port. In the base stack the app is on localhost:3000 for
+# convenience; in production only Caddy is reachable, and Caddy is the only
+# thing that terminates TLS.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # Caddy obtains and renews a certificate for this name automatically.
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN in .env, e.g. rhythmisoze.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    depends_on:
+      - web
+    networks: [edge]
+    restart: unless-stopped
+
+  web:
+    # Replaces, rather than adds to, the base ports list: `!reset` is what makes
+    # the app unreachable except through Caddy. Without it Compose merges the
+    # lists and 3000 stays open on the host.
+    ports: !reset []
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_SITE_URL: https://${SITE_DOMAIN}
+    networks: [edge, internal]
+
+  musician-api:
+    environment:
+      MUSICIAN_LOG_LEVEL: INFO
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  postgres:
+    # Never publish the database. Backups run through `docker compose exec`.
+    ports: !reset []
+
+volumes:
+  caddy-data:
+  caddy-config:

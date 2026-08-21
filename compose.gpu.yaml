@@ -1,0 +1,38 @@
+# NVIDIA overlay. Optional, never required.
+#
+#   docker compose -f compose.yaml -f compose.gpu.yaml up --build
+#
+# Nothing here changes a code path: MUSICIAN_DEVICE=auto already prefers CUDA
+# when it exists and falls back to CPU when it does not. The overlay only lets
+# the containers see the GPU and swaps the CPU torch wheels for CUDA ones.
+#
+# Requires the NVIDIA Container Toolkit on Linux, or Docker Desktop with the
+# WSL2 backend and a current driver on Windows.
+
+services:
+  melodyt5-worker:
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu121
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  rwkv-worker:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

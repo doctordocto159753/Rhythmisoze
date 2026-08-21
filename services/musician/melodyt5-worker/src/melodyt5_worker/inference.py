@@ -1,38 +1,66 @@
-"""MelodyT5 inference, behind the canonical contract.
+"""MelodyT5 inference, using the real upstream architecture.
 
-## What this worker is responsible for
+## The mistake this file exists to correct
 
-Turning canonical notes into the ABC that MelodyT5 reads, running the model, and
-turning its ABC back into canonical notes. Nothing else. The orchestrator does
-not know this model uses ABC, and must not: that is what makes modernising or
-replacing this worker a change confined to this directory.
+An earlier version of this worker loaded the checkpoint with
+``AutoTokenizer`` + ``T5ForConditionalGeneration.from_pretrained()``. That is
+wrong, and not subtly: **MelodyT5 is not a HuggingFace T5.** Despite the name it
+is a bespoke *bar-patching* hierarchical model, and the published `weights.pth`
+is a raw ``torch.save`` checkpoint, not a `from_pretrained` directory. The old
+path could not have loaded the weights at all, and if it somehow had, it would
+have been a different model.
 
-## The runtime question, stated honestly
+The real architecture, from `sanderwood/melodyt5` at the pinned revision:
 
-MelodyT5's published environment is an old Python/PyTorch line. Two options
-exist, and which one is correct is an empirical question, not a preference:
+* **Patchilizer** — splits an ABC body on barline delimiters, and encodes each
+  bar as a fixed 64-byte *patch* of raw character codepoints, bracketed by
+  BOS/EOS. Headers (`L:`, `M:`, `K:`, `%%…`) each become their own patch.
+* **PatchLevelEnDecoder** — a GPT-2 encoder/decoder over patch embeddings
+  (`Linear(PATCH_SIZE * 128, n_embd)` over one-hot bytes), 9 layers, weights
+  tied between encoder and decoder.
+* **CharLevelDecoder** — a 3-layer GPT-2 that generates the characters *inside*
+  one bar, conditioned on the last encoded patch.
+* Generation is therefore **two-level and iterative**: one model call produces
+  one bar, which is appended to the decoder patches, and the loop repeats.
 
-1. run the inference adapter on a maintained runtime, keeping the architecture
-   and weights untouched;
-2. pin the legacy runtime inside this container.
+None of that is reachable through the generic T5 API, which is why this module
+imports the upstream classes rather than reimplementing them. Reimplementation
+would be a second definition of a model we do not own, and the first time
+upstream changed a detail we would be running something subtly different while
+believing otherwise.
 
-``scripts/spike/melodyt5_compat.py`` decides it by generating fixed-seed
-reference fixtures and comparing. Until that spike has been run against real
-weights, this module makes no claim about which runtime it is on -- it reports
-the versions it actually loaded, and ``docs/architecture/musician-runtime-adr.md``
-records the outcome.
+## The task prompt is a real format, not a convention
 
-## Determinism
+Upstream reads a file shaped like::
 
-The seed is set on every generate call, not once at startup. A worker that seeds
-once produces a different result for the same request depending on how many
-requests preceded it, which makes the provenance record a lie.
+    %%input
+    %%variation
+    L:1/8
+    M:6/8
+    K:D
+    |: AFD DFA | ... :|
+    %%output
+    <optional seed for the decoder>
+
+and derives the task from ``input_abc.split("\\n")[0][2:]`` — the first line of
+the input section, minus the leading ``%%``. So the literal string
+``%%variation`` is load-bearing: drop it and ``task`` becomes whatever the first
+header happens to be.
+
+## Sampling
+
+Upstream defaults are ``top_p=0.8``, ``top_k=8``, ``temperature=2.6``. That
+temperature looks extreme only if you assume it scales token logits of a normal
+LM — here it is applied to *character* probabilities inside a bar, after top-p
+and top-k have already cut the tail. Our policy temperatures are expressed on
+this model's own scale for that reason, and are documented where they are set.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,7 +71,19 @@ from musician_shared.contract import Key, Meter, Mode, Note
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(os.environ.get("MUSICIAN_MODELS_DIR", "/models"))
-MELODYT5_NAME = "melodyt5"
+VENDOR_DIR = Path(os.environ.get("MUSICIAN_VENDOR_DIR", "/vendor"))
+MELODYT5_WEIGHTS = MODEL_DIR / "melodyt5" / "weights.pth"
+
+#: Upstream's own defaults, from `inference.py`. Kept as the neutral centre that
+#: the Refined and Developed policies move away from.
+DEFAULT_TOP_P = 0.8
+DEFAULT_TOP_K = 8
+DEFAULT_TEMPERATURE = 2.6
+
+#: Generation stops at this many bars. Upstream's default is 128 patches for a
+#: whole tune; our inputs are short phrases, and letting a variation run to 128
+#: bars would produce something no identity guard could relate to the original.
+DEFAULT_MAX_PATCH = 64
 
 
 class ModelNotLoaded(RuntimeError):
@@ -54,36 +94,120 @@ class ModelNotLoaded(RuntimeError):
 class RuntimeInfo:
     revision: str
     torch_version: str
+    transformers_version: str
     device: str
     python_version: str
+    architecture: str
+
+
+def _ensure_upstream_importable() -> Path:
+    """Put the vendored upstream tree on `sys.path`.
+
+    The upstream modules do `from config import *` and `from utils import *`,
+    i.e. flat top-level imports. They therefore have to be imported with their
+    own directory *on* the path rather than as a package, which is why this is a
+    path manipulation and not an ordinary import.
+    """
+    candidates = [
+        VENDOR_DIR / "melodyt5",
+        Path(__file__).resolve().parents[4] / "vendor" / "melodyt5",
+        Path.cwd() / "vendor" / "melodyt5",
+    ]
+    for candidate in candidates:
+        if (candidate / "utils.py").exists() and (candidate / "config.py").exists():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            return candidate
+    raise ModelNotLoaded(
+        "the MelodyT5 upstream source is not vendored. Run scripts/vendor/bootstrap.sh "
+        f"(looked in: {', '.join(str(c) for c in candidates)})"
+    )
+
+
+def _ensure_random_model(source_dir: Path) -> None:
+    """Create the `random_model` directory upstream expects.
+
+    `PatchLevelEnDecoder` builds its base with
+    ``EncoderDecoderModel.from_encoder_decoder_pretrained("random_model", ...)``,
+    which needs a randomly-initialised GPT-2 on disk *relative to the working
+    directory*. Upstream ships `random_model.py` to create it and raises a
+    readable error if you forget.
+
+    The weights it contains are overwritten wholesale by the checkpoint a moment
+    later, so this is scaffolding for the constructor rather than anything that
+    influences output.
+    """
+    target = source_dir / "random_model"
+    if (target / "config.json").exists():
+        return
+
+    from transformers import GPT2Config, GPT2Model  # noqa: PLC0415
+
+    import config as upstream_config  # noqa: PLC0415
+
+    logger.info("creating the random_model scaffold upstream requires")
+    patch_config = GPT2Config(
+        num_hidden_layers=upstream_config.PATCH_NUM_LAYERS,
+        max_length=upstream_config.PATCH_LENGTH,
+        max_position_embeddings=upstream_config.PATCH_LENGTH,
+        vocab_size=1,
+    )
+    GPT2Model(patch_config).save_pretrained(str(target))
+
+
+def build_prompt(
+    notes: tuple[Note, ...],
+    *,
+    meter: Meter,
+    tempo_bpm: float,
+    key: Key | None,
+    task: str = "variation",
+) -> tuple[str, str]:
+    """Build the upstream `%%input` / `%%output` prompt.
+
+    Returns ``(input_abc, decoder_prompt)``. The decoder prompt carries the
+    headers only: giving the model the metre and key it must write in, and
+    letting it choose every note, is what "variation" means. Seeding it with
+    notes would make it a continuation of our own material instead.
+    """
+    document = to_abc(notes, meter=meter, tempo_bpm=tempo_bpm, key=key)
+    header_lines = [
+        line
+        for line in document.text.splitlines()
+        # X: and T: are catalogue metadata, not musical information, and upstream
+        # prompts do not carry them into the input section.
+        if line[:2] in ("L:", "M:", "K:")
+    ]
+    body = document.text.splitlines()[-1]
+
+    input_abc = "\n".join([f"%%{task}", *header_lines, body]) + "\n"
+    decoder_prompt = "\n".join(header_lines) + "\n"
+    return input_abc, decoder_prompt
 
 
 class MelodyT5Runtime:
-    """Loads the weights once and keeps them warm.
+    """Loads the real checkpoint once and keeps it warm.
 
-    Guarded by a lock rather than assumed single-threaded: uvicorn will happily
-    run two requests concurrently, and a transformer's generate call is not
-    reentrant with a shared seeded generator.
+    Guarded by a lock rather than assumed single-threaded: uvicorn will run two
+    requests concurrently, and the upstream generate loop seeds a module-level
+    `random` and mutates its own token state.
     """
 
     def __init__(self, *, device_preference: str = "auto") -> None:
         self._lock = threading.Lock()
         self._model = None
-        self._tokenizer = None
+        self._patchilizer = None
         self._device = "cpu"
         self._device_preference = device_preference
         self._revision = os.environ.get("MELODYT5_REVISION", "unknown")
         self._torch_version = "not-loaded"
+        self._transformers_version = "not-loaded"
         self._load_error: str | None = None
 
-    # -- lifecycle -----------------------------------------------------
-
     def resolve_device(self) -> str:
-        """Never crash because CUDA is absent (AC-14).
+        """Never fail because CUDA is absent (AC-M09).
 
-        ``auto`` means "use the GPU if there is one", not "require one". A
-        service that fails to start on a CPU VPS because it was configured for
-        auto has misunderstood the word.
+        `auto` means "use a GPU if there is one", not "require one".
         """
         if self._device_preference == "cpu":
             return "cpu"
@@ -94,57 +218,106 @@ class MelodyT5Runtime:
                 return "cuda"
         except Exception as error:
             logger.info("no CUDA available, using CPU: %s", error)
-
         if self._device_preference == "cuda":
-            logger.warning("MUSICIAN_DEVICE=cuda was requested but no GPU is available; using CPU")
+            logger.warning("MUSICIAN_DEVICE=cuda requested but no GPU is available; using CPU")
         return "cpu"
 
     def load(self) -> None:
         with self._lock:
             if self._model is not None:
                 return
+
+            source_dir = _ensure_upstream_importable()
+            previous_cwd = Path.cwd()
             try:
-                import torch  # noqa: PLC0415
-                from transformers import AutoTokenizer, T5ForConditionalGeneration  # noqa: PLC0415
-            except ImportError as error:
-                self._load_error = f"inference dependencies missing: {error}"
-                raise ModelNotLoaded(self._load_error) from error
+                # Upstream resolves `random_model` relative to the working
+                # directory, so the load happens from inside its own tree.
+                os.chdir(source_dir)
+                self._load_locked(source_dir)
+            finally:
+                os.chdir(previous_cwd)
 
-            weights = MODEL_DIR / MELODYT5_NAME
-            if not weights.exists():
-                self._load_error = (
-                    f"{weights} does not exist. Weights are never committed; run "
-                    f"scripts/models/bootstrap.sh (or .ps1) to fetch them."
-                )
-                raise ModelNotLoaded(self._load_error)
+    def _load_locked(self, source_dir: Path) -> None:
+        try:
+            import torch  # noqa: PLC0415
+            import transformers  # noqa: PLC0415
+            from transformers import GPT2Config  # noqa: PLC0415
+        except ImportError as error:
+            self._load_error = f"inference dependencies missing: {error}"
+            raise ModelNotLoaded(self._load_error) from error
 
-            self._device = self.resolve_device()
-            self._torch_version = torch.__version__
-            logger.info(
-                "loading MelodyT5",
-                extra={"path": str(weights), "device": self._device, "torch": self._torch_version},
+        if not MELODYT5_WEIGHTS.exists():
+            self._load_error = (
+                f"{MELODYT5_WEIGHTS} does not exist. Weights are never committed; "
+                f"run scripts/models/bootstrap.sh (or .ps1) to fetch them."
             )
-            self._tokenizer = AutoTokenizer.from_pretrained(str(weights))
-            self._model = T5ForConditionalGeneration.from_pretrained(str(weights))
-            self._model.to(self._device)
-            self._model.eval()
-            self._load_error = None
+            raise ModelNotLoaded(self._load_error)
+
+        _ensure_random_model(source_dir)
+
+        import config as upstream_config  # noqa: PLC0415
+        from utils import MelodyT5, Patchilizer  # noqa: PLC0415
+
+        self._device = self.resolve_device()
+        self._torch_version = torch.__version__
+        self._transformers_version = transformers.__version__
+
+        # Exactly upstream's `inference.py`. The vocab sizes are not arbitrary:
+        # the patch level has vocab_size=1 because it never embeds tokens (it
+        # embeds one-hot *bytes* through a Linear), and the char level has 128
+        # because it generates raw ASCII codepoints.
+        patch_config = GPT2Config(
+            num_hidden_layers=upstream_config.PATCH_NUM_LAYERS,
+            max_length=upstream_config.PATCH_LENGTH,
+            max_position_embeddings=upstream_config.PATCH_LENGTH,
+            vocab_size=1,
+        )
+        char_config = GPT2Config(
+            num_hidden_layers=upstream_config.CHAR_NUM_LAYERS,
+            max_length=upstream_config.PATCH_SIZE,
+            max_position_embeddings=upstream_config.PATCH_SIZE,
+            vocab_size=128,
+        )
+
+        logger.info(
+            "loading MelodyT5",
+            extra={
+                "weights": str(MELODYT5_WEIGHTS),
+                "device": self._device,
+                "torch": self._torch_version,
+                "transformers": self._transformers_version,
+            },
+        )
+
+        model = MelodyT5(patch_config, char_config)
+        checkpoint = torch.load(MELODYT5_WEIGHTS, map_location=self._device, weights_only=False)
+        # The checkpoint nests the state dict under "model"; loading the raw
+        # object would silently mismatch every key.
+        model.load_state_dict(checkpoint["model"])
+        model = model.to(self._device)
+        model.eval()
+
+        self._model = model
+        self._patchilizer = Patchilizer()
+        self._load_error = None
+        logger.info(
+            "MelodyT5 ready",
+            extra={"parameters": sum(p.numel() for p in model.parameters())},
+        )
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
     def info(self) -> RuntimeInfo:
-        import sys
-
         return RuntimeInfo(
             revision=self._revision,
             torch_version=self._torch_version,
+            transformers_version=self._transformers_version,
             device=self._device,
             python_version=sys.version.split()[0],
+            architecture="melodyt5-bar-patching",
         )
-
-    # -- generation ----------------------------------------------------
 
     def generate(
         self,
@@ -153,47 +326,76 @@ class MelodyT5Runtime:
         meter: Meter,
         tempo_bpm: float,
         key: Key | None,
-        temperature: float,
-        top_k: int,
-        top_p: float,
-        seed: int,
+        temperature: float = DEFAULT_TEMPERATURE,
+        top_k: int = DEFAULT_TOP_K,
+        top_p: float = DEFAULT_TOP_P,
+        seed: int = 0,
         task: str = "variation",
+        max_patch: int = DEFAULT_MAX_PATCH,
     ) -> tuple[tuple[Note, ...], str]:
-        if self._model is None:
+        """One variation, generated bar by bar.
+
+        Mirrors upstream's loop: encode the input once, then repeatedly ask for
+        the next bar and append it to the decoder patches until the model emits
+        EOS or the bar budget runs out.
+        """
+        if self._model is None or self._patchilizer is None:
             raise ModelNotLoaded(self._load_error or "model not loaded")
 
         import torch  # noqa: PLC0415
 
-        document = to_abc(notes, meter=meter, tempo_bpm=tempo_bpm, key=key)
-        prompt = f"{task}: {document.text}"
+        input_abc, decoder_prompt = build_prompt(
+            notes, meter=meter, tempo_bpm=tempo_bpm, key=key, task=task
+        )
 
         with self._lock:
-            torch.manual_seed(seed)
-            if self._device == "cuda":
-                torch.cuda.manual_seed_all(seed)
+            patchilizer = self._patchilizer
+            model = self._model
 
-            encoded = self._tokenizer(
-                prompt, return_tensors="pt", truncation=True, max_length=1024
-            ).to(self._device)
+            patches = torch.tensor(
+                [patchilizer.encode(input_abc, add_special_patches=True)], device=self._device
+            )
+            decoder_patches = torch.tensor(
+                [patchilizer.encode(decoder_prompt, add_special_patches=True)[:-1]],
+                device=self._device,
+            )
+
+            generated = decoder_prompt
+            tokens = None
+            current_seed: int | None = seed
 
             with torch.no_grad():
-                generated = self._model.generate(
-                    **encoded,
-                    do_sample=True,
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    max_new_tokens=1024,
-                    num_return_sequences=1,
-                )
+                while decoder_patches.shape[1] < max_patch:
+                    predicted_patch, current_seed = model.generate(
+                        patches,
+                        decoder_patches,
+                        tokens,
+                        task=task,
+                        top_p=top_p,
+                        top_k=top_k,
+                        temperature=temperature,
+                        seed=current_seed,
+                    )
+                    tokens = None
+                    if predicted_patch[0] == patchilizer.eos_token_id:
+                        break
 
-        raw_abc = self._tokenizer.decode(generated[0], skip_special_tokens=True)
+                    next_bar = patchilizer.decode([predicted_patch])
+                    if next_bar == "":
+                        break
+                    generated += next_bar
 
-        # A model returning notation we cannot parse is an ordinary outcome:
-        # the orchestrator rejects the candidate and tries the next seed. It is
-        # not a reason to fail the request.
-        parsed = from_abc(raw_abc, tempo_bpm=tempo_bpm, start_sec=notes[0].start_sec)
-        return parsed, raw_abc
+                    predicted_tensor = torch.tensor(
+                        patchilizer.bar2patch(next_bar), device=self._device
+                    ).unsqueeze(0)
+                    decoder_patches = torch.cat(
+                        [decoder_patches, predicted_tensor.unsqueeze(0)], dim=1
+                    )
+
+        # Unparseable output is an ordinary outcome, not a server fault: the
+        # orchestrator rejects the candidate and tries the next seed.
+        parsed = from_abc(generated, tempo_bpm=tempo_bpm, start_sec=notes[0].start_sec)
+        return parsed, generated
 
 
 def key_from_payload(payload: str | None) -> Key | None:
@@ -202,6 +404,5 @@ def key_from_payload(payload: str | None) -> Key | None:
     parts = payload.split()
     if not parts:
         return None
-    tonic = parts[0]
     mode = Mode.MINOR if len(parts) > 1 and parts[1].lower().startswith("min") else Mode.MAJOR
-    return Key(tonic=tonic, mode=mode, confidence=1.0)
+    return Key(tonic=parts[0], mode=mode, confidence=1.0)

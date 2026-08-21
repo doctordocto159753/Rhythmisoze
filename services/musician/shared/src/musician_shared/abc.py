@@ -124,17 +124,49 @@ def to_abc(
     body: list[str] = []
     cursor = notes[0].start_sec
 
+    # Barlines are not cosmetic here.
+    #
+    # MelodyT5 is a *bar-patching* model: its Patchilizer splits the body on
+    # barline delimiters and encodes one bar per patch. ABC with no `|` in it
+    # collapses to a single patch, which is nothing like the training
+    # distribution and produces correspondingly poor output. Emitting real bars
+    # is what makes the input look like music the model has seen.
+    units_per_bar = round(meter.beats_per_bar * UNITS_PER_QUARTER)
+    units_in_bar = 0
+
+    def close_bar() -> None:
+        nonlocal units_in_bar
+        body.append("|")
+        units_in_bar = 0
+
     for note in notes:
         gap = note.start_sec - cursor
         if gap > seconds_per_unit * 0.5:
             rest_units = max(1, round(gap / seconds_per_unit))
             residual += abs(gap - rest_units * seconds_per_unit)
             body.append(f"z{rest_units}")
+            units_in_bar += rest_units
+            while units_per_bar > 0 and units_in_bar >= units_per_bar:
+                units_in_bar -= units_per_bar
+                close_bar() if units_in_bar == 0 else body.append("|")
+                if units_in_bar != 0:
+                    units_in_bar = units_in_bar % units_per_bar
 
         units = max(1, round(note.duration_sec / seconds_per_unit))
         residual += abs(note.duration_sec - units * seconds_per_unit)
         body.append(f"{_abc_pitch(note.pitch)}{units}")
+        units_in_bar += units
         cursor = note.start_sec + note.duration_sec
+
+        # A note that fills or overruns the bar closes it. Overrun is left
+        # rather than split with a tie: splitting would change the note count,
+        # and the note count is what the Identity Guard measures.
+        if units_per_bar > 0 and units_in_bar >= units_per_bar:
+            units_in_bar = 0
+            body.append("|")
+
+    if body and body[-1] != "|":
+        body.append("|")
 
     key_field = "C" if key is None else f"{key.tonic}{'m' if key.mode.value == 'minor' else ''}"
 

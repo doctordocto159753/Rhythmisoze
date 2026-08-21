@@ -27,6 +27,11 @@ Thumbs.db
 *.gguf
 *.onnx
 
+# Exception: Basic Pitch's shard is a browser asset, not a server-side model
+# weight. It is small, it is served from public/, and the whole point of it is
+# that transcription runs on the device. It predates these rules and stays.
+!public/models/**
+
 # --- AI Musician service ---
 # Model weights are never committed. See third_party/MANIFEST.md rule 5 and
 # models/manifest.json; fetch with scripts/models/bootstrap.{sh,ps1}.

@@ -1,0 +1,35 @@
+# The only publicly reachable service.
+#
+# Caddy handles TLS certificates automatically, which is most of why it is here
+# rather than nginx: a single-server deployment run by someone who is not an
+# infrastructure specialist should not involve certbot cron jobs.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	# Published audio is immutable and small; let the proxy serve it from cache
+	# rather than waking the app for every play.
+	@objects path /api/objects/*
+	header @objects Cache-Control "public, max-age=31536000, immutable"
+
+	# Generation is long-running by design. The default 30s would sever a
+	# Musician poll mid-flight and surface as a spurious failure.
+	reverse_proxy web:3000 {
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	# A published sketch is the only thing an anonymous visitor posts, and the
+	# upload route is the expensive one. This is a coarse guard against a single
+	# client filling the volume; it is not a substitute for the per-route limits
+	# the app already enforces.
+	request_body {
+		max_size 24MB
+	}
+}

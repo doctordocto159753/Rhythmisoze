@@ -1,0 +1,160 @@
+# Rhythmisoze — self-hosted edition, base stack.
+#
+# One command brings up everything: the web app, the Musician orchestrator, both
+# model workers, the queue and the database. CPU-only by default, so this file
+# runs unchanged on a machine with no GPU.
+#
+#   local development   docker compose up --build
+#   production          docker compose -f compose.yaml -f compose.production.yaml up -d --build
+#   with an NVIDIA GPU  add -f compose.gpu.yaml
+#
+# Only `web` is reachable from outside, and in production not even that -- the
+# reverse proxy in compose.production.yaml takes the public port and `web` moves
+# to the internal network. Model workers are never published in any profile:
+# they hold gigabytes of weights, have no authentication, and their request
+# shape is an implementation detail.
+
+name: rhythmisoze
+
+x-musician-env: &musician-env
+  MUSICIAN_DEVICE: ${MUSICIAN_DEVICE:-auto}
+  MUSICIAN_MODELS_DIR: /models
+  MUSICIAN_VENDOR_DIR: /vendor
+  MUSICIAN_LOG_LEVEL: ${MUSICIAN_LOG_LEVEL:-INFO}
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3000}
+    environment:
+      NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://rhythmisoze:${POSTGRES_PASSWORD:-rhythmisoze}@postgres:5432/rhythmisoze
+      # Local volume storage: no cloud account, no egress bill.
+      STORAGE_DRIVER: local-disk
+      STORAGE_LOCAL_PATH: /data/objects
+      MUSICIAN_ENABLED: ${MUSICIAN_ENABLED:-true}
+      # Server-side only. Never reaches the browser -- the client talks to
+      # /api/musician/*, which proxies here.
+      MUSICIAN_API_URL: http://musician-api:8080
+      MUSICIAN_REQUEST_TIMEOUT_MS: ${MUSICIAN_REQUEST_TIMEOUT_MS:-180000}
+      PUBLISH_SECRET: ${PUBLISH_SECRET:-}
+      MAINTENANCE_TOKEN: ${MAINTENANCE_TOKEN:-}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - objects:/data/objects
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # started, not healthy. The app must come up and report the Musician as
+      # unavailable when a model is missing; waiting for the workers would turn
+      # "weights not downloaded" into a stack that never starts and never says
+      # why.
+      musician-api:
+        condition: service_started
+    networks: [edge, internal]
+    restart: unless-stopped
+
+  musician-api:
+    build:
+      context: ./services/musician
+      dockerfile: api/Dockerfile
+    environment:
+      <<: *musician-env
+      MUSICIAN_ADAPTERS: ${MUSICIAN_ADAPTERS:-real}
+      MUSICIAN_MELODYT5_URL: http://melodyt5-worker:8081
+      MUSICIAN_RWKV_URL: http://rwkv-worker:8082
+      MUSICIAN_REDIS_URL: redis://redis:6379/0
+      MUSICIAN_GENERATION_TIMEOUT_SEC: ${MUSICIAN_GENERATION_TIMEOUT_SEC:-300}
+      MUSICIAN_MELODY_CONCURRENCY: ${MUSICIAN_MELODY_CONCURRENCY:-1}
+      MUSICIAN_RWKV_CONCURRENCY: ${MUSICIAN_RWKV_CONCURRENCY:-1}
+    expose: ["8080"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+
+  melodyt5-worker:
+    build:
+      context: ./services/musician
+      dockerfile: melodyt5-worker/Dockerfile
+    environment:
+      <<: *musician-env
+      MELODYT5_REVISION: ${MELODYT5_REVISION:-9fc0e7dd02ba10a77b46f9d4a669451f17885fbc}
+    expose: ["8081"]
+    volumes:
+      # Read-only: a model worker has no business writing to the weight store.
+      - ./models:/models:ro
+      - ./vendor:/vendor:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # ~1.36 GB of fp32 weights plus activations. Without a limit, one bad
+          # request can take the host down with it.
+          memory: ${MELODYT5_MEMORY_LIMIT:-8g}
+
+  rwkv-worker:
+    build:
+      context: ./services/musician
+      dockerfile: rwkv-worker/Dockerfile
+    environment:
+      <<: *musician-env
+      MIDI_RWKV_REVISION: ${MIDI_RWKV_REVISION:-7c94e9e2980d1f3cdb0d3a9ca2780ef0a5af6530}
+    expose: ["8082"]
+    volumes:
+      - ./models:/models:ro
+      - ./vendor:/vendor:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${RWKV_MEMORY_LIMIT:-4g}
+
+  redis:
+    image: redis:7-alpine
+    # Queued work must survive a restart, which is the whole reason the queue is
+    # not in-process. appendonly makes that true rather than likely.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rhythmisoze
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rhythmisoze}
+      POSTGRES_DB: rhythmisoze
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rhythmisoze -d rhythmisoze"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+    restart: unless-stopped
+
+networks:
+  # Only services on `edge` can be published to the host.
+  edge:
+  internal:
+    internal: false
+
+volumes:
+  postgres:
+  redis:
+  objects:

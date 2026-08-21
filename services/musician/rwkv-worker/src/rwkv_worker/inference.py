@@ -1,46 +1,70 @@
-"""MIDI-RWKV infill, behind the canonical contract.
+"""MIDI-RWKV infill, over the real MMM representation.
 
-## Infilling is not continuation
+The token layout lives in :mod:`rwkv_worker.representation`, which explains what
+the trained model expects and why the previous invented token language was
+wrong. This module is the part that needs a checkpoint: loading it, sampling
+from it, and turning the result back into canonical notes.
 
-The model is given material on **both** sides of the gap and must arrive at the
-right-hand context, not merely leave the left-hand one plausibly. That is the
-whole reason MIDI-RWKV is here rather than a generic sequence model: a
-continuation model asked to repair bar 5 will happily write a bar 5 that makes
-bar 6 nonsense.
+## Two runtimes, one adapter
 
-So the prompt is built as ``left | <mask> | right``, and the response is
-validated against the span it was given.
+* **rwkv.cpp** (upstream `RWKV/rwkv.cpp`) is the production baseline: CPU-first,
+  quantisable, no torch. It needs the checkpoint converted to GGML by upstream's
+  own `convert_model_to_cpp.sh`.
+* **the `rwkv` pip package** loads the published `.pth` directly. Slower and
+  heavier, but it needs no build step, which makes it the honest fallback when
+  the C++ toolchain is not available.
 
-## The span is enforced, not requested
+Both are exercised through the same `_sample` seam so the representation is
+identical either way, and `/info` reports which one is live rather than leaving
+it to be inferred.
 
-:meth:`RwkvRuntime.infill` truncates and re-times whatever the model returns so
-it occupies exactly the span it was asked about. AC-06 says RWKV changes only
-selected local spans; a model is not a contract, so the boundary is imposed on
-this side of it. The orchestrator's HTTP adapter checks it a second time --
-belt and braces, because the failure mode is silent corruption of the user's
-melody rather than an error.
+## The span boundary is imposed, not requested
 
-## Which rwkv.cpp
-
-Upstream ``RWKV/rwkv.cpp``, not MIDI-RWKV's personal fork. That decision and its
-cost are recorded in ``third_party/MANIFEST.md``. CPU is the baseline; GPU is a
-build flag, never a requirement.
+`_fit_to_span` re-times whatever comes back so it occupies exactly the bars it
+was asked about. A model is not a contract: a generation that ran long would
+push every later note out of place and corrupt the melody it was asked to
+repair, and nothing downstream would notice because the result is still valid
+notation.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from musician_shared.contract import Meter, Note
 
+from .representation import (
+    FILL_BAR_END,
+    RepresentationError,
+    build_infill_prompt,
+    describe_layout,
+    load_vocabulary,
+    notes_to_score,
+)
+
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(os.environ.get("MUSICIAN_MODELS_DIR", "/models"))
-RWKV_WEIGHT = os.environ.get("MIDI_RWKV_WEIGHT", "midi_rwkv.pth")
+VENDOR_DIR = Path(os.environ.get("MUSICIAN_VENDOR_DIR", "/vendor"))
+RWKV_WEIGHT = MODEL_DIR / os.environ.get("MIDI_RWKV_WEIGHT", "midi_rwkv.pth")
+RWKV_GGML = MODEL_DIR / os.environ.get("MIDI_RWKV_GGML", "midi_rwkv.bin")
+
+
+def _tokenizer_path() -> Path:
+    """MIDI-RWKV's own tokenizer, not a freshly-built MMM.
+
+    Stock miditok does not define the four infill tokens, so a default MMM would
+    prompt the model with a vocabulary it was never trained on.
+    """
+    override = os.environ.get("MIDI_RWKV_TOKENIZER")
+    if override:
+        return Path(override)
+    return VENDOR_DIR / "midi-rwkv" / "train" / "tokenizer" / "tokenizer_with_acs.json"
 
 
 class ModelNotLoaded(RuntimeError):
@@ -53,67 +77,19 @@ class RuntimeInfo:
     backend: str
     device: str
     python_version: str
-
-
-def notes_to_tokens(notes: tuple[Note, ...], *, tempo_bpm: float) -> list[str]:
-    """Canonical notes to the worker's textual token form.
-
-    Durations are expressed in sixteenths at the detected tempo rather than in
-    seconds, because the model reasons about note *values*, not wall-clock
-    length. The same conversion is used in both directions so the round trip is
-    stable.
-    """
-    seconds_per_unit = 60.0 / tempo_bpm / 4.0
-    tokens: list[str] = []
-    previous_end: float | None = None
-    for note in notes:
-        if previous_end is not None:
-            gap = note.start_sec - previous_end
-            units = round(gap / seconds_per_unit)
-            if units >= 1:
-                tokens.append(f"r{units}")
-        length = max(1, round(note.duration_sec / seconds_per_unit))
-        tokens.append(f"n{note.pitch}:{length}")
-        previous_end = note.end_sec
-    return tokens
-
-
-def tokens_to_notes(
-    tokens: list[str], *, tempo_bpm: float, start_sec: float
-) -> list[tuple[int, float, float]]:
-    seconds_per_unit = 60.0 / tempo_bpm / 4.0
-    cursor = start_sec
-    out: list[tuple[int, float, float]] = []
-    for token in tokens:
-        token = token.strip()
-        if not token:
-            continue
-        if token.startswith("r"):
-            try:
-                cursor += int(token[1:]) * seconds_per_unit
-            except ValueError:
-                continue
-            continue
-        if not token.startswith("n") or ":" not in token:
-            continue
-        try:
-            pitch_text, length_text = token[1:].split(":", 1)
-            pitch = int(pitch_text)
-            length = max(1, int(length_text)) * seconds_per_unit
-        except ValueError:
-            continue
-        if not 0 <= pitch <= 127:
-            continue
-        out.append((pitch, cursor, cursor + length))
-        cursor += length
-    return out
+    tokenizer: str
+    vocab_size: int
+    layout: str
 
 
 class RwkvRuntime:
     def __init__(self, *, device_preference: str = "auto") -> None:
         self._lock = threading.Lock()
         self._model = None
+        self._pipeline = None
+        self._vocab: dict[str, int] = {}
         self._tokenizer = None
+        self._tokenizer_info = None
         self._device = "cpu"
         self._backend = "not-loaded"
         self._device_preference = device_preference
@@ -121,7 +97,7 @@ class RwkvRuntime:
         self._load_error: str | None = None
 
     def resolve_device(self) -> str:
-        """CPU baseline. GPU when it exists and was asked for (AC-13, AC-14)."""
+        """CPU baseline; GPU when present and wanted (AC-M08, AC-M09)."""
         if self._device_preference == "cpu":
             return "cpu"
         try:
@@ -135,58 +111,106 @@ class RwkvRuntime:
             logger.warning("MUSICIAN_DEVICE=cuda requested but unavailable; using CPU")
         return "cpu"
 
+    # -- loading -------------------------------------------------------
+
     def load(self) -> None:
         with self._lock:
             if self._model is not None:
                 return
+            self._load_vocabulary()
+            self._load_tokenizer()
+            self._load_model()
 
-            weight = MODEL_DIR / RWKV_WEIGHT
-            if not weight.exists():
-                self._load_error = (
-                    f"{weight} does not exist. Weights are never committed; run "
-                    f"scripts/models/bootstrap.sh (or .ps1) to fetch them."
-                )
-                raise ModelNotLoaded(self._load_error)
+    def _load_vocabulary(self) -> None:
+        try:
+            self._vocab, self._tokenizer_info = load_vocabulary(_tokenizer_path())
+        except RepresentationError as error:
+            self._load_error = str(error)
+            raise ModelNotLoaded(self._load_error) from error
 
-            self._device = self.resolve_device()
+    def _load_tokenizer(self) -> None:
+        """Load MIDI-RWKV's MMM tokenizer from its saved config."""
+        try:
+            from miditok import MMM  # noqa: PLC0415
+        except ImportError as error:
+            self._load_error = f"miditok is required for the MMM representation: {error}"
+            raise ModelNotLoaded(self._load_error) from error
+
+        try:
+            self._tokenizer = MMM(params=str(_tokenizer_path()))
+        except Exception as error:
+            # A tokenizer that will not load is a hard stop rather than
+            # something to substitute around: the alternative is prompting the
+            # model with tokens it has never seen.
+            self._load_error = f"could not load the MMM tokenizer: {error}"
+            raise ModelNotLoaded(self._load_error) from error
+
+    def _load_model(self) -> None:
+        self._device = self.resolve_device()
+
+        # rwkv.cpp first: it is the CPU baseline and needs no torch.
+        if RWKV_GGML.exists():
             try:
-                # rwkv.cpp first: it is the CPU baseline and needs no torch.
                 import rwkv_cpp_model  # noqa: PLC0415
                 import rwkv_cpp_shared_library  # noqa: PLC0415
 
                 library = rwkv_cpp_shared_library.load_rwkv_shared_library()
-                self._model = rwkv_cpp_model.RWKVModel(library, str(weight))
+                self._model = rwkv_cpp_model.RWKVModel(library, str(RWKV_GGML))
                 self._backend = "rwkv.cpp"
-            except ImportError:
-                try:
-                    from rwkv.model import RWKV  # noqa: PLC0415
+                logger.info("loaded MIDI-RWKV via rwkv.cpp", extra={"weight": str(RWKV_GGML)})
+                self._load_error = None
+                return
+            except ImportError as error:
+                logger.info("rwkv.cpp bindings unavailable (%s); trying the pip runtime", error)
+            except Exception as error:
+                logger.warning("rwkv.cpp failed to load the GGML weight: %s", error)
 
-                    strategy = "cuda fp16" if self._device == "cuda" else "cpu fp32"
-                    self._model = RWKV(model=str(weight).removesuffix(".pth"), strategy=strategy)
-                    self._backend = "rwkv-pip"
-                except ImportError as error:
-                    self._load_error = f"no RWKV runtime available: {error}"
-                    raise ModelNotLoaded(self._load_error) from error
-
-            logger.info(
-                "loaded MIDI-RWKV",
-                extra={"backend": self._backend, "device": self._device, "weight": str(weight)},
+        if not RWKV_WEIGHT.exists():
+            self._load_error = (
+                f"neither {RWKV_GGML} nor {RWKV_WEIGHT} exists. Weights are never "
+                f"committed; run scripts/models/bootstrap.sh (or .ps1)."
             )
-            self._load_error = None
+            raise ModelNotLoaded(self._load_error)
+
+        try:
+            from rwkv.model import RWKV  # noqa: PLC0415
+            from rwkv.utils import PIPELINE  # noqa: PLC0415
+        except ImportError as error:
+            self._load_error = (
+                f"no RWKV runtime available ({error}). Either build rwkv.cpp and convert "
+                f"the checkpoint with the upstream script, or install the `rwkv` package."
+            )
+            raise ModelNotLoaded(self._load_error) from error
+
+        strategy = "cuda fp16" if self._device == "cuda" else "cpu fp32"
+        # The `rwkv` package appends `.pth` itself.
+        self._model = RWKV(model=str(RWKV_WEIGHT).removesuffix(".pth"), strategy=strategy)
+        # No text tokenizer: this model's vocabulary is MMM ids, so sampling is
+        # driven directly rather than through PIPELINE's string interface.
+        self._pipeline = PIPELINE(self._model, "rwkv_vocab_v20230424")
+        self._backend = "rwkv-pip"
+        logger.info(
+            "loaded MIDI-RWKV via the pip runtime",
+            extra={"weight": str(RWKV_WEIGHT), "strategy": strategy},
+        )
+        self._load_error = None
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
     def info(self) -> RuntimeInfo:
-        import sys
-
         return RuntimeInfo(
             revision=self._revision,
             backend=self._backend,
             device=self._device,
             python_version=sys.version.split()[0],
+            tokenizer=str(self._tokenizer_info.path) if self._tokenizer_info else "not-loaded",
+            vocab_size=self._tokenizer_info.vocab_size if self._tokenizer_info else 0,
+            layout=describe_layout(self._vocab) if self._vocab else "not-loaded",
         )
+
+    # -- generation ----------------------------------------------------
 
     def infill(
         self,
@@ -200,31 +224,172 @@ class RwkvRuntime:
         top_k: int,
         top_p: float,
         seed: int,
+        max_new_tokens: int = 512,
     ) -> list[Note]:
-        if self._model is None:
+        if self._model is None or self._tokenizer is None:
             raise ModelNotLoaded(self._load_error or "model not loaded")
         if not span:
             return []
 
-        left = " ".join(notes_to_tokens(left_context, tempo_bpm=tempo_bpm))
-        right = " ".join(notes_to_tokens(right_context, tempo_bpm=tempo_bpm))
-        prompt = (
-            f"<meter>{meter.numerator}/{meter.denominator}</meter> "
-            f"<left>{left}</left> <mask>{len(span)}</mask> <right>{right}</right> <fill>"
-        )
+        # The model reasons over whole bars, so the whole phrase is tokenised
+        # and the span is located within it. Tokenising the span alone would
+        # discard exactly the surrounding context that makes this infilling
+        # rather than continuation.
+        whole = (*left_context, *span, *right_context)
+        score = notes_to_score(whole, meter=meter, tempo_bpm=tempo_bpm)
 
         with self._lock:
-            raw = self._sample(prompt, temperature=temperature, top_k=top_k, top_p=top_p, seed=seed)
+            sequences = self._tokenizer.encode(score, concatenate_track_sequences=False)
+            if not sequences:
+                raise ModelNotLoaded("the tokenizer produced no sequence for this melody")
+            ids = list(sequences[0].ids)
 
-        span_start = span[0].start_sec
-        parsed = tokens_to_notes(raw.split(), tempo_bpm=tempo_bpm, start_sec=span_start)
-        if not parsed:
+            bar_id = self._vocab["Bar_None"]
+            first_bar, bar_count = self._locate_span_bars(
+                left_context=left_context, span=span, meter=meter, tempo_bpm=tempo_bpm
+            )
+
+            prompt = build_infill_prompt(
+                ids, bar_id, first_bar_index=first_bar, bar_count=bar_count, vocab=self._vocab
+            )
+            generated = self._sample(
+                prompt,
+                stop_id=self._vocab[FILL_BAR_END],
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                seed=seed,
+                max_new_tokens=max_new_tokens,
+            )
+
+        notes = self._decode_fill(generated, tempo_bpm=tempo_bpm, span=span)
+        return self._fit_to_span(notes, span)
+
+    def _locate_span_bars(
+        self,
+        *,
+        left_context: tuple[Note, ...],
+        span: tuple[Note, ...],
+        meter: Meter,
+        tempo_bpm: float,
+    ) -> tuple[int, int]:
+        """Which bar the span starts in, and how many bars it covers."""
+        seconds_per_bar = meter.beats_per_bar * 60.0 / tempo_bpm
+        origin = (left_context[0].start_sec if left_context else span[0].start_sec)
+        first_bar = int((span[0].start_sec - origin) / seconds_per_bar)
+        last_bar = int((span[-1].end_sec - origin - 1e-6) / seconds_per_bar)
+        return max(0, first_bar), max(1, last_bar - first_bar + 1)
+
+    def _sample(
+        self,
+        prompt: list[int],
+        *,
+        stop_id: int,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+        seed: int,
+        max_new_tokens: int,
+    ) -> list[int]:
+        """Backend-specific sampling over MMM ids.
+
+        Split out so the two runtimes differ in exactly one place, and so the
+        compatibility spike can drive it without an HTTP hop.
+        """
+        if self._backend == "rwkv-pip":
+            return self._sample_pip(
+                prompt,
+                stop_id=stop_id,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                seed=seed,
+                max_new_tokens=max_new_tokens,
+            )
+        if self._backend == "rwkv.cpp":
+            return self._sample_cpp(
+                prompt,
+                stop_id=stop_id,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                seed=seed,
+                max_new_tokens=max_new_tokens,
+            )
+        raise ModelNotLoaded(f"no sampling path for backend {self._backend!r}")
+
+    def _sample_pip(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens):
+        import torch  # noqa: PLC0415
+
+        torch.manual_seed(seed)
+        state = None
+        logits = None
+        for token in prompt:
+            logits, state = self._model.forward([token], state)
+
+        out: list[int] = []
+        for _ in range(max_new_tokens):
+            token = _sample_logits(logits, temperature=temperature, top_k=top_k, top_p=top_p)
+            if token == stop_id:
+                break
+            out.append(token)
+            logits, state = self._model.forward([token], state)
+        return out
+
+    def _sample_cpp(self, prompt, *, stop_id, temperature, top_k, top_p, seed, max_new_tokens):
+        import numpy as np  # noqa: PLC0415
+
+        rng = np.random.default_rng(seed)
+        state = None
+        logits = None
+        for token in prompt:
+            logits, state = self._model.eval(token, state, state, logits)
+
+        out: list[int] = []
+        for _ in range(max_new_tokens):
+            token = _sample_logits(
+                logits, temperature=temperature, top_k=top_k, top_p=top_p, rng=rng
+            )
+            if token == stop_id:
+                break
+            out.append(token)
+            logits, state = self._model.eval(token, state, state, logits)
+        return out
+
+    def _decode_fill(self, ids: list[int], *, tempo_bpm: float, span: tuple[Note, ...]) -> list[Note]:
+        """Turn generated MMM ids back into notes."""
+        if not ids:
+            return []
+        try:
+            from miditok import TokSequence  # noqa: PLC0415
+
+            sequence = TokSequence(ids=list(ids))
+            score = self._tokenizer.decode([sequence])
+        except Exception as error:
+            logger.warning("could not decode the generated fill: %s", error)
             return []
 
-        return self._fit_to_span(parsed, span)
+        seconds_per_tick = 60.0 / tempo_bpm / score.ticks_per_quarter
+        origin = span[0].start_sec
+        notes: list[Note] = []
+        for track in score.tracks:
+            for note in track.notes:
+                start = origin + note.time * seconds_per_tick
+                end = start + max(note.duration, 1) * seconds_per_tick
+                if 0 <= note.pitch <= 127:
+                    notes.append(
+                        Note(
+                            pitch=note.pitch,
+                            start_sec=round(start, 6),
+                            end_sec=round(end, 6),
+                            velocity=max(1, min(127, note.velocity)),
+                        )
+                    )
+        notes.sort(key=lambda note: note.start_sec)
+        return notes
 
     @staticmethod
-    def _fit_to_span(parsed: list[tuple[int, float, float]], span: tuple[Note, ...]) -> list[Note]:
+    def _fit_to_span(parsed: list[Note], span: tuple[Note, ...]) -> list[Note]:
         """Force the model's output into exactly the span it was given.
 
         Taking the model's own timing would let a long generation push every
@@ -235,43 +400,52 @@ class RwkvRuntime:
         count = min(len(parsed), len(span))
         if count == 0:
             return []
-
-        fitted: list[Note] = []
-        for index in range(count):
-            pitch = parsed[index][0]
-            original = span[index]
-            fitted.append(
-                Note(
-                    pitch=pitch,
-                    start_sec=original.start_sec,
-                    end_sec=original.end_sec,
-                    velocity=original.velocity,
-                )
+        fitted = [
+            Note(
+                pitch=parsed[index].pitch,
+                start_sec=span[index].start_sec,
+                end_sec=span[index].end_sec,
+                velocity=span[index].velocity,
             )
-
-        # Short generations keep the original tail rather than shortening the
+            for index in range(count)
+        ]
+        # A short generation keeps the original tail rather than shortening the
         # melody: the span must be filled, not truncated.
-        for index in range(count, len(span)):
-            fitted.append(span[index])
+        fitted.extend(span[count:])
         return fitted
 
-    def _sample(self, prompt: str, *, temperature: float, top_k: int, top_p: float, seed: int) -> str:
-        """Backend-specific sampling.
 
-        Split out so the two runtimes differ in one place, and so the compat
-        spike can call it directly without an HTTP hop.
-        """
-        if self._backend == "rwkv-pip":
-            from rwkv.utils import PIPELINE, PIPELINE_ARGS  # noqa: PLC0415
+def _sample_logits(logits, *, temperature: float, top_k: int, top_p: float, rng=None) -> int:
+    """Nucleus + top-k sampling over a logit vector.
 
-            if self._tokenizer is None:
-                self._tokenizer = PIPELINE(self._model, "20B_tokenizer.json")
-            args = PIPELINE_ARGS(temperature=temperature, top_p=top_p, top_k=top_k)
-            return self._tokenizer.generate(prompt, token_count=256, args=args)
+    Written out rather than imported so both backends share one definition:
+    rwkv.cpp and the pip runtime return different array types, and two sampling
+    implementations would be two places for a reproducibility bug to hide.
+    """
+    import numpy as np  # noqa: PLC0415
 
-        import rwkv_cpp_model  # noqa: PLC0415  (imported for symmetry with load())
+    array = np.asarray(logits, dtype=np.float64).reshape(-1)
+    if temperature <= 0:
+        return int(array.argmax())
 
-        raise ModelNotLoaded(
-            "the rwkv.cpp sampling path needs the tokenizer wired to the vendored "
-            "MIDI-RWKV tokeniser; see docs/architecture/musician-runtime-adr.md"
-        )
+    array = array / max(temperature, 1e-6)
+    array = array - array.max()
+    probs = np.exp(array)
+    probs /= probs.sum()
+
+    if top_k and top_k > 0:
+        cut = np.argsort(probs)[::-1][:top_k]
+        mask = np.zeros_like(probs)
+        mask[cut] = probs[cut]
+        probs = mask / mask.sum()
+
+    if 0 < top_p < 1:
+        order = np.argsort(probs)[::-1]
+        cumulative = np.cumsum(probs[order])
+        keep = order[: max(1, int(np.searchsorted(cumulative, top_p)) + 1)]
+        mask = np.zeros_like(probs)
+        mask[keep] = probs[keep]
+        probs = mask / mask.sum()
+
+    generator = rng if rng is not None else np.random.default_rng()
+    return int(generator.choice(len(probs), p=probs))

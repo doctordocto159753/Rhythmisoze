@@ -106,18 +106,81 @@ export interface OnsetFeatures {
 
 export interface DrumEvent {
   timeSec: number;
+  /**
+   * Which kit sound plays this hit.
+   *
+   * A *playback assignment*, not an identity. The synthesised kit has three
+   * slots, and a rhythm may well have more layers than that, so two unrelated
+   * parts can legitimately share a sound. What tells them apart is `voice`.
+   */
   drum: DrumClass;
   velocity: number;
   confidence: number;
   /**
-   * The MIDI note this hit was written as, when it came from a file that used
-   * pitched notes rather than the percussion channel.
+   * Which rhythmic layer this hit belongs to, as finely as the source knows.
    *
-   * Present so that reading a pitched rhythm into `drum` classes stays a
-   * reading: the class is what the app plays, this is what the file said, and
-   * the two can be compared. Absent for detected audio, which never had one.
+   * ## Why this is not `drum`
+   *
+   * They used to be the same field, and that cost a real user eight hits. Their
+   * imported rhythm had fifteen distinct pitched layers; the kit has three
+   * sounds; so the adapter mapped fifteen onto three, and the quantizer — which
+   * merges two hits of "the same drum" landing on one step — then read two
+   * *different* parts as a duplicate of each other and deleted one. Every event
+   * lost at the default cleanup was lost that way. None of them was a duplicate
+   * of anything.
+   *
+   * The identity is whatever the source is actually able to distinguish: the
+   * note number for a MIDI file, the detected class for audio, which is all a
+   * detector knows. Absent means "no finer identity than `drum`", which is the
+   * honest reading for anything that never had one.
+   */
+  voice?: string;
+  /**
+   * The MIDI note this hit was written as, when it came from a file.
+   *
+   * Provenance: it answers "which source event is this?" after the hit has been
+   * assigned a kit sound, and it is what a MIDI export writes back so a round
+   * trip does not flatten the layers into three drums.
    */
   sourcePitch?: number;
+  /**
+   * The MIDI channel the hit was written on, zero-based.
+   *
+   * `GM_DRUM_CHANNEL` means the file declared these as General MIDI percussion,
+   * and `sourcePitch` is then an instrument number rather than a pitch. Anything
+   * else means the file used ordinary notes and said nothing about drums. The
+   * distinction decides how an export writes them back, and it is a fact about
+   * the source rather than something inferred from one.
+   */
+  sourceChannel?: number;
+  /**
+   * How far to shift the kit sound for this hit, in semitones.
+   *
+   * The other half of the playback assignment. A rhythm may have more layers
+   * than the kit has sounds, so several share one — and if they also share the
+   * pitch of that sound, a listener hears three parts where the file has
+   * fifteen. Every event survives, every layer is in the data and the export,
+   * and the thing coming out of the speaker is still a three-piece kit.
+   *
+   * Shifting each layer away from its slot's centre is what makes them audible
+   * as separate parts. It is a tuning, not a transcription: absent means "play
+   * the kit as it is", which is right for detected audio and for General MIDI,
+   * where the sound already names the instrument.
+   */
+  tuneSemitones?: number;
+}
+
+/** General MIDI's percussion channel, zero-based. Channel 10 in one-based terms. */
+export const GM_DRUM_CHANNEL = 9;
+
+/**
+ * The identity of the rhythmic layer a hit belongs to.
+ *
+ * Falls back to the playback assignment, which is the correct answer when the
+ * source could not tell two layers apart in the first place.
+ */
+export function drumVoiceOf(event: DrumEvent): string {
+  return event.voice ?? event.drum;
 }
 
 /** A drum hit already snapped to a grid. */

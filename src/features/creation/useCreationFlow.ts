@@ -311,7 +311,7 @@ export function useCreationFlow(locale: Locale) {
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {
     if (versions.length === 0) return null;
-    const wanted = state.versionId ?? (rhythm ? defaultVersion(rhythm) : 'grid');
+    const wanted = state.versionId ?? (rhythm ? defaultVersion(rhythm, state.mode) : 'grid');
     const chosen = versions.find((version) => version.id === wanted);
     if (chosen) return chosen;
 
@@ -326,11 +326,11 @@ export function useCreationFlow(locale: Locale) {
     const parent = isMusicianVersion(wanted) ? describeVersion(wanted).sourceVersionId : null;
     return (
       (parent ? versions.find((version) => version.id === parent) : undefined) ??
-      versions.find((version) => version.id === (rhythm ? defaultVersion(rhythm) : 'grid')) ??
+      versions.find((version) => version.id === (rhythm ? defaultVersion(rhythm, state.mode) : 'grid')) ??
       versions[0] ??
       null
     );
-  }, [versions, state.versionId, rhythm]);
+  }, [versions, state.versionId, rhythm, state.mode]);
 
   /**
    * Whether the tapped tempo and the heard tempo disagree, and how.

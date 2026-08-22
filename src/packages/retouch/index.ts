@@ -4,3 +4,4 @@ export * from './extensions';
 export * from './macro';
 export * from './pipeline';
 export * from './qualityGuard';
+export * from './rhythmFidelity';

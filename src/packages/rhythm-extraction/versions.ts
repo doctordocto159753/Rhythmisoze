@@ -201,7 +201,7 @@ export interface VersionPlanInput {
  * what makes the whole thing testable.
  */
 export function planVersions(input: VersionPlanInput): VersionRecipe[] {
-  const { rhythm, tappedBpm, amount, tempoChoice, generated = [] } = input;
+  const { rhythm, tappedBpm, amount, mode, tempoChoice, generated = [] } = input;
   // One rule, resolved once, applied to every version. Previously each recipe
   // read `rhythm.reliable` through a local ternary, which is how the tempo the
   // Musician was asked for and the tempo the versions played at could differ.
@@ -216,6 +216,24 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
   // strength to everyone is how a good take gets flattened.
   const looseness = 1 - rhythm.groove.steadiness;
   const teacherTiming = clamp01(0.55 + looseness * 0.45);
+
+  /**
+   * Rhythm has two stages, not three.
+   *
+   * The three names come from the melody pipeline, where each one is a real and
+   * separate question: did we hear the notes, did we understand them, what
+   * would a teacher change. A rhythm has no second question. There is no
+   * transcription verdict to render — an imported file has no transcription at
+   * all — and no key or scale for a teacher to work on. What remains is timing
+   * and dynamics, which is one transformation with a strength, and the strength
+   * already has a control.
+   *
+   * So the Judge stage is omitted here rather than shown as a third reading
+   * that differs from its neighbours only by an undisclosed 0.15. Offering
+   * three stages when there are two is the picker claiming distinctions the
+   * engine does not make.
+   */
+  const rhythmMode = mode === 'rhythm';
 
   return [
     {
@@ -234,11 +252,11 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
         velocitySmoothing: 0,
       },
     },
-    {
+    ...(rhythmMode ? [] : [{
       // The Judge's repair, played at the performance's own pulse. Timing is
       // barely touched: the Judge fixed *what* was played, and imposing a grid
       // here would start answering a different question.
-      id: 'judge',
+      id: 'judge' as VersionId,
       bpm: performanceBpm,
       tempoSource,
       tempoConfidence,
@@ -249,7 +267,7 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
         scaleSnapStrength: 0,
         velocitySmoothing: 0.1,
       },
-    },
+    }]),
     {
       // What a teacher would hand back: the same idea, put in time and in key.
       //
@@ -305,11 +323,19 @@ const MUSICIAN_RECIPE_IDS: readonly MusicalVersionId[] = [
 ];
 
 /** The version to select when the user has not chosen. */
-export function defaultVersion(_rhythm: PerformanceRhythm): VersionId {
+export function defaultVersion(
+  _rhythm: PerformanceRhythm,
+  mode: CreationMode = 'melody',
+): VersionId {
   // The Judge's reading is the honest default: it is the most faithful account
   // of what the person actually did, which is what they came to hear. The
   // Teacher is a step they choose to take, not one taken for them.
-  return 'judge';
+  //
+  // Rhythm has no Judge stage, and its corrected reading is the same argument
+  // one step along: light timing tidying is what a beatboxed take wants, and it
+  // is still recognisably the take. An imported file gets there too, and now
+  // arrives with every one of its events intact.
+  return mode === 'rhythm' ? 'teacher' : 'judge';
 }
 
 /**

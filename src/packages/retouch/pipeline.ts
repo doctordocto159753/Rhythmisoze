@@ -271,6 +271,9 @@ function refineRhythm(rawDrums: readonly DrumEvent[], options: ResolvedOptions):
   const quantized = quantizeDrums(rawDrums, {
     stepSec,
     strength: params.timingStrength,
+    // Only a detector can produce a duplicate detection. A file cannot: its
+    // events are what somebody wrote, and two of them are two of them.
+    mergeDuplicateDetections: options.sourceKind !== 'midi-upload',
   });
 
   const key: MusicalKey = { root: 'C', mode: 'major', confidence: 0 };

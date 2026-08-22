@@ -237,13 +237,17 @@ class ProceduralInstrument implements PreparedInstrument {
     const context = this.context;
     const start = originSec + hit.startSec;
     const level = velocityToGain(hit.velocity) * spec.gain;
+    // One ratio for the whole voice, so a tuned hit keeps its character: the
+    // sweep, the noise colour and the tone move together, the way a drum does
+    // when it is tuned rather than pitch-shifted after the fact.
+    const tune = 2 ** ((hit.tuneSemitones ?? 0) / 12);
 
     if (spec.toneLevel > 0) {
       const oscillator = context.createOscillator();
       oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(spec.toneStartHz, start);
+      oscillator.frequency.setValueAtTime(spec.toneStartHz * tune, start);
       oscillator.frequency.exponentialRampToValueAtTime(
-        Math.max(20, spec.toneEndHz),
+        Math.max(20, spec.toneEndHz * tune),
         start + spec.toneSweepSec,
       );
       const gain = context.createGain();
@@ -263,7 +267,7 @@ class ProceduralInstrument implements PreparedInstrument {
       source.loop = true;
       const filter = context.createBiquadFilter();
       filter.type = spec.noiseType;
-      filter.frequency.value = spec.noiseHz;
+      filter.frequency.value = spec.noiseHz * tune;
       filter.Q.value = spec.noiseQ;
       const gain = context.createGain();
       gain.gain.setValueAtTime(0.0001, start);

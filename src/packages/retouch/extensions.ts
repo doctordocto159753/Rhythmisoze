@@ -13,6 +13,7 @@
  */
 
 import {
+  drumVoiceOf,
   UNKNOWN_DRUM_FALLBACK,
   type DrumEvent,
   type GridDrum,
@@ -240,19 +241,65 @@ export interface DrumQuantizeResult {
 }
 
 /**
+ * Two hits of one voice this close are heard as one, so quantization is not
+ * allowed to close the gap entirely.
+ *
+ * Thirty milliseconds is roughly where a flam stops being two strokes and
+ * becomes one thicker one. Below that, "both events survived" would be true of
+ * the data and false of the sound.
+ */
+const MIN_VOICE_SEPARATION_SEC = 0.03;
+
+export interface DrumQuantizeOptions {
+  stepSec: number;
+  strength: number;
+  /**
+   * Whether two hits of the same voice on one step may be treated as one
+   * detection of one physical event.
+   *
+   * True for audio, where a single beatboxed hit really can be detected twice
+   * and keeping both is a transcription error. False for anything symbolic: a
+   * MIDI file has no detection uncertainty to clean up, so two events in it are
+   * two events, and deleting one is not a correction of anything.
+   */
+  mergeDuplicateDetections: boolean;
+}
+
+/**
  * US-0504 - quantize rhythm events.
  *
  * Same grid and same strength curve as the melody path, so the Raw-to-Clean
  * control means the same thing in both modes.
  *
- * Collision rule, stated explicitly because the story requires it: when two
- * hits of the same class land on one step, the louder one wins and the other is
- * dropped. Different classes on the same step both survive - a kick and a hat
- * together is a real thing a person beatboxes.
+ * ## What changed, and the eight hits that paid for it
+ *
+ * The collision rule used to be: two hits of the same *drum class* on one step,
+ * the louder wins, the other is dropped. That is a sound rule when the class is
+ * the finest thing anyone knows about a hit — a beatboxed kick detected twice
+ * is one kick.
+ *
+ * It stopped being true when imported rhythms arrived. A real file had fifteen
+ * pitched layers rendered through a three-slot kit, so "the same drum class"
+ * became true of pairs that had nothing to do with each other, and the default
+ * cleanup deleted one of every such pair: eight hits, every one of them a
+ * different part from the one that survived, none of them a duplicate.
+ *
+ * So collisions are now keyed on `voice` — the identity the source actually
+ * knows — and merging is off entirely for symbolic sources. Distinct source
+ * events stay distinct events at every cleanup setting; what cleanup moves is
+ * their timing.
+ *
+ * ## Why a minimum separation
+ *
+ * Full quantization pulls everything onto a step, and two hits of one voice a
+ * tenth of a second apart would land on the same instant — surviving as data
+ * and vanishing as sound. They are held `MIN_VOICE_SEPARATION_SEC` apart, in
+ * their original order. A hard grid is what the user asked for; a hit they can
+ * no longer hear is not.
  */
 export function quantizeDrums(
   drums: readonly DrumEvent[],
-  options: { stepSec: number; strength: number },
+  options: DrumQuantizeOptions,
 ): DrumQuantizeResult {
   const amount = clamp(options.strength, 0, 1);
   const { stepSec } = options;
@@ -265,12 +312,15 @@ export function quantizeDrums(
   for (const event of sorted) {
     const drum = event.drum === 'unknown' ? UNKNOWN_DRUM_FALLBACK : event.drum;
     const step = pyRound(event.timeSec / stepSec);
-    const key = `${step}:${drum}`;
+    // Identity, not sound. Two layers sharing a kit slot are still two layers.
+    const key = `${step}:${drumVoiceOf(event)}`;
     const target = step * stepSec;
     const moved: DrumEvent = { ...event, drum, timeSec: lerp(event.timeSec, target, amount) };
 
     const existing = held.get(key);
-    if (amount > 0 && existing !== undefined) {
+    if (amount > 0 && existing !== undefined && options.mergeDuplicateDetections) {
+      // Counts merges, not near-misses. Two events landing on one step is only
+      // interesting if one of them stopped existing because of it.
       collisions += 1;
       if (moved.velocity > existing.velocity) {
         existing.velocity = moved.velocity;
@@ -278,19 +328,42 @@ export function quantizeDrums(
       }
       continue;
     }
-    held.set(key, moved);
+    if (existing === undefined) held.set(key, moved);
     ordered.push({ key, step, drum: moved });
   }
 
-  const result = ordered.map((entry) => held.get(entry.key) as DrumEvent);
-  const gridDrums: GridDrum[] = ordered.map((entry) => {
-    const drum = held.get(entry.key) as DrumEvent;
+  const result = ordered.map((entry) =>
+    entry.drum === held.get(entry.key) ? (held.get(entry.key) as DrumEvent) : entry.drum,
+  );
+  separateVoices(result);
+
+  const gridDrums: GridDrum[] = ordered.map((entry, index) => {
+    const drum = result[index] as DrumEvent;
     return { step: entry.step, drum: drum.drum, velocity: drum.velocity };
   });
 
   result.sort((a, b) => a.timeSec - b.timeSec);
   gridDrums.sort((a, b) => a.step - b.step);
   return { drums: result, gridDrums, collisions };
+}
+
+/**
+ * Keeps two hits of one voice audibly apart after quantization.
+ *
+ * In place and in source order, so the later of two hits stays the later one.
+ * Only ever pushes forward, and only far enough to be heard.
+ */
+function separateVoices(events: DrumEvent[]): void {
+  const lastByVoice = new Map<string, number>();
+  const inOrder = [...events].sort((a, b) => a.timeSec - b.timeSec);
+  for (const event of inOrder) {
+    const voice = drumVoiceOf(event);
+    const previous = lastByVoice.get(voice);
+    if (previous !== undefined && event.timeSec - previous < MIN_VOICE_SEPARATION_SEC) {
+      event.timeSec = previous + MIN_VOICE_SEPARATION_SEC;
+    }
+    lastByVoice.set(voice, event.timeSec);
+  }
 }
 
 /** Converts final second-based notes into the grid view the port's report uses. */

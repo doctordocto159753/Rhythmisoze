@@ -158,7 +158,18 @@ class SampleInstrument implements PreparedInstrument {
     for (const hit of hits) {
       const drum = hit.drum === 'unknown' ? 'hat' : hit.drum;
       const zone = this.pickZone(drum === 'kick' ? 36 : drum === 'snare' ? 38 : 42, hit.velocity, drum);
-      if (zone) this.play(destination, zone, zone.rootMidi, hit.velocity, originSec + hit.startSec, null);
+      // Played away from the zone's root rather than at it, which is how the
+      // sample engine already transposes: the playback rate follows.
+      if (zone) {
+        this.play(
+          destination,
+          zone,
+          zone.rootMidi + (hit.tuneSemitones ?? 0),
+          hit.velocity,
+          originSec + hit.startSec,
+          null,
+        );
+      }
     }
   }
 

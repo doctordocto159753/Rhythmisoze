@@ -6,14 +6,13 @@ import {
   BPM_MAX,
   BPM_MIN,
   DEFAULT_METER,
+  GM_DRUM_CHANNEL,
   type CreationMode,
   type DrumClass,
   type DrumEvent,
   type Meter,
   type NoteEvent,
 } from '@contracts';
-
-const GM_DRUM_CHANNEL = 9;
 
 export interface MidiImportResult {
   /**
@@ -53,6 +52,13 @@ export function importMidi(data: Uint8Array): MidiImportResult {
         drums.push({
           timeSec: startSec,
           drum: gmDrumClass(note.midi),
+          // General MIDI note numbers name instruments, so the number *is* the
+          // identity and the app's three-slot kit is a coarser rendering of it.
+          // A side stick and a snare are both played through `snare`; they are
+          // not the same part, and nothing downstream may treat them as one.
+          voice: `gm:${Math.round(note.midi)}`,
+          sourcePitch: Math.round(note.midi),
+          sourceChannel: GM_DRUM_CHANNEL,
           velocity,
           confidence: 1,
         });
@@ -121,34 +127,63 @@ function gmDrumClass(note: number): DrumClass {
  * the person made. When they disagree, the person is right, and this is how the
  * file is read into what they asked for.
  *
- * ## How pitches become classes
+ * ## What is identity here, and what is only a sound
  *
- * By rank within the file's own set of distinct pitches, split three ways:
- * lowest third to kick, middle to snare, highest to hat. Register order is how
- * percussion is laid out everywhere from a drum kit to General MIDI's own note
- * map to a sampler's pads, so this is the convention the file was almost
- * certainly written against.
+ * A pitched-channel file says nothing about drums. Pitch 43 is not a kick; it
+ * is the forty-third note, used by whoever made the file to mean whatever they
+ * meant. So **the note number is the voice**, and every distinct pitch stays a
+ * distinct rhythmic layer for the whole of the pipeline.
  *
- * By *rank* rather than by absolute pitch so that a file using a narrow range
- * still separates its voices — the real one uses fifteen pitches from 43 to 81,
- * and its three main layers at 62, 69 and 74 land in three different classes,
- * which is what keeps the pattern audible rather than flattening it.
+ * `drum` is separate and is only a *playback assignment*: the synthesised kit
+ * has three slots and this file has fifteen layers, so several layers share a
+ * sound. They are assigned by rank within the file's own pitch set — low third,
+ * middle, high — which is how percussion is laid out from a drum kit to a
+ * sampler's pads, and is therefore the least surprising rendering of an unknown
+ * mapping. It is a guess about how it should *sound*, and it is allowed to be a
+ * guess because nothing musical is decided by it.
  *
- * Nothing is thrown away: `sourcePitch` keeps the note the file actually
- * contained, so the mapping is a reading rather than a replacement.
+ * That separation is the whole point. When the two were one field, "these hits
+ * are both snare-ish" and "these hits are the same part" were the same
+ * statement, and the quantizer deleted one of every pair.
  */
+/** Beyond this a tuned hit stops sounding like the drum it was assigned to. */
+const MAX_HIT_TUNE_SEMITONES = 7;
+
 export function interpretNotesAsRhythm(notes: readonly NoteEvent[]): DrumEvent[] {
   if (notes.length === 0) return [];
   const distinct = [...new Set(notes.map((note) => note.pitch))].sort((a, b) => a - b);
   const third = distinct.length / 3;
 
+  // Each slot's own centre, so a layer can be tuned away from it and still be
+  // heard as that part of the kit rather than as a different instrument.
+  const slotOf = (pitch: number): DrumClass => {
+    const rank = distinct.indexOf(pitch);
+    return rank < third ? 'kick' : rank < 2 * third ? 'snare' : 'hat';
+  };
+  const slotCentres = new Map<DrumClass, number>();
+  for (const slot of ['kick', 'snare', 'hat'] as const) {
+    const members = distinct.filter((pitch) => slotOf(pitch) === slot);
+    if (members.length > 0) {
+      slotCentres.set(slot, members[Math.floor(members.length / 2)] as number);
+    }
+  }
+
   return notes
     .map((note) => {
-      const rank = distinct.indexOf(note.pitch);
-      const drum: DrumClass = rank < third ? 'kick' : rank < 2 * third ? 'snare' : 'hat';
+      const drum = slotOf(note.pitch);
+      // Bounded, because a kick tuned two octaves up is not a kick any more.
+      // Inside the bound the layers stay distinct and the kit stays a kit.
+      const tuneSemitones = Math.max(
+        -MAX_HIT_TUNE_SEMITONES,
+        Math.min(MAX_HIT_TUNE_SEMITONES, note.pitch - (slotCentres.get(drum) ?? note.pitch)),
+      );
       return {
         timeSec: note.startSec,
+        // How it sounds, and how far from that sound's centre.
         drum,
+        tuneSemitones,
+        // What it is. Two layers may share the lines above; they never share this.
+        voice: `pitch:${note.pitch}`,
         velocity: note.velocity,
         // The file said so. There is no detector here whose confidence could be
         // anything else, and pretending otherwise would understate the evidence.

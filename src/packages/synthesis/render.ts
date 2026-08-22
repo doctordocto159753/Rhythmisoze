@@ -355,6 +355,7 @@ function scheduleInto(
         drum: drum.drum,
         velocity: drum.velocity,
         startSec: drum.timeSec,
+        tuneSemitones: drum.tuneSemitones,
       })),
       originSec,
     );

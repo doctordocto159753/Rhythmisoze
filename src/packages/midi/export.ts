@@ -19,6 +19,7 @@
 import { Midi } from '@tonejs/midi';
 import {
   GM_DRUM_MAP,
+  GM_DRUM_CHANNEL,
   UNKNOWN_DRUM_FALLBACK,
   type DrumEvent,
   type Meter,
@@ -35,7 +36,6 @@ export interface MidiExportOptions {
 }
 
 /** GM percussion lives on channel 10, which is index 9. */
-const GM_DRUM_CHANNEL = 9;
 
 export function melodyToMidi(notes: readonly NoteEvent[], options: MidiExportOptions): Uint8Array {
   const midi = new Midi();
@@ -74,11 +74,30 @@ export function rhythmToMidi(drums: readonly DrumEvent[], options: MidiExportOpt
 
   const track = midi.addTrack();
   track.name = options.instrumentName ?? 'Drums';
-  track.channel = GM_DRUM_CHANNEL;
+
+  /**
+   * A rhythm is written back the way it arrived.
+   *
+   * Routing everything through `drumToGmNote` sends each hit through its *kit
+   * slot*, which is a playback assignment onto three sounds. A file with fifteen
+   * layers would come back with three, and the export would destroy on the way
+   * out exactly what the import was careful to keep.
+   *
+   * So a hit that carries its own source note is written as that note: on the
+   * percussion channel when the file declared it there, where the number really
+   * is an instrument and 37 and 38 are a side stick and a snare; on an ordinary
+   * channel otherwise, where the number is just the number somebody used.
+   *
+   * Detected audio has no source note at all, and channel 10 with a GM number is
+   * exactly right for it — a detected kick really is a kick.
+   */
+  const declaredPercussion = drums.every((event) => event.sourceChannel === GM_DRUM_CHANNEL);
+  const hasSourceNotes = drums.length > 0 && drums.every((event) => event.sourcePitch !== undefined);
+  track.channel = hasSourceNotes && !declaredPercussion ? 0 : GM_DRUM_CHANNEL;
 
   for (const event of drums) {
     track.addNote({
-      midi: drumToGmNote(event.drum),
+      midi: hasSourceNotes ? clampPitch(event.sourcePitch as number) : drumToGmNote(event.drum),
       time: Math.max(0, event.timeSec),
       // Percussion is one-shot; the note length only has to be non-zero for a
       // sequencer to draw it. An eighth of a second reads clearly in a piano roll.

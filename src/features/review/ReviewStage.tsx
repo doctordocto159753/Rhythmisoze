@@ -205,6 +205,7 @@ export function ReviewStage({
         tempoChoice={tempoChoice}
         onTempoChoiceChange={onTempoChoiceChange}
         sourceKind={sourceKind}
+        mode={mode}
         judge={judge}
         lesson={lesson}
         onSelect={onVersionChange}

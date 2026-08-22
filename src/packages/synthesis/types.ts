@@ -97,6 +97,13 @@ export interface ScheduledHit {
   drum: DrumClass;
   velocity: number;
   startSec: number;
+  /**
+   * Semitones to shift the kit sound by. See `DrumEvent.tuneSemitones`.
+   *
+   * Optional and defaulting to none, so every existing caller and both engines
+   * behave exactly as they did for material that has no such opinion.
+   */
+  tuneSemitones?: number;
 }
 
 /** An instrument that has finished loading and can be scheduled. */

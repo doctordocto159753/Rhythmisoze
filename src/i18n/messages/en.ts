@@ -159,6 +159,22 @@ export const en = {
       unprocessed: 'The file exactly as it arrived.',
       judge: 'The same notes — an imported file needs no correcting.',
     },
+    /**
+     * The same two versions, named for a rhythm.
+     *
+     * "What you played" and "Tidied up" are melody words — they belong to a
+     * pipeline that judges a transcription and then puts it in key. A rhythm has
+     * neither stage. What it has is the pattern and a tidier reading of the same
+     * pattern, so that is what the two entries say.
+     */
+    rhythmNames: {
+      unprocessed: 'The pattern',
+      teacher: 'Tightened',
+    },
+    rhythmHints: {
+      unprocessed: 'Every hit exactly where it landed.',
+      teacher: 'The same hits, pulled closer to the beat.',
+    },
     judgeRepaired: (count: number) =>
       count === 1 ? '1 correction' : `${count} corrections`,
     judgeClean: 'Nothing needed correcting.',

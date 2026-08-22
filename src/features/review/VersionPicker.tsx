@@ -1,6 +1,6 @@
 'use client';
 
-import type { JudgeVerdict, SourceKind } from '@contracts';
+import type { CreationMode, JudgeVerdict, SourceKind } from '@contracts';
 import type { TeacherResult } from '@music-teacher';
 import type { PerformanceRhythm, TempoChoice, VersionId, VersionRecipe } from '@rhythm-extraction';
 import type { TempoDisagreement } from '@rhythm-extraction';
@@ -22,6 +22,8 @@ export interface VersionPickerProps {
    * must not talk about what the person sang.
    */
   sourceKind: SourceKind | undefined;
+  /** Rhythm names its two stages differently; see `rhythmNames`. */
+  mode: CreationMode;
   /** What the user tapped. Offered as an alternative, never applied on its own. */
   tappedBpm: number | null;
   /** Which tempo the versions are built on right now. */
@@ -56,6 +58,7 @@ export function VersionPicker({
   rhythm,
   disagreement,
   sourceKind,
+  mode,
   tappedBpm,
   tempoChoice,
   onTempoChoiceChange,
@@ -69,10 +72,16 @@ export function VersionPicker({
   // An imported file was not performed here, so two of the hints would be
   // describing work that never happened.
   const imported = sourceKind === 'midi-upload';
-  const hintFor = (id: VersionId): string =>
-    imported && (id === 'unprocessed' || id === 'judge')
-      ? t.versions.importedHints[id]
-      : t.versions.hints[id];
+  const rhythm2 = mode === 'rhythm';
+  const nameFor = (id: VersionId): string =>
+    rhythm2 && (id === 'unprocessed' || id === 'teacher')
+      ? t.versions.rhythmNames[id]
+      : t.versions.names[id];
+  const hintFor = (id: VersionId): string => {
+    if (rhythm2 && (id === 'unprocessed' || id === 'teacher')) return t.versions.rhythmHints[id];
+    if (imported && (id === 'unprocessed' || id === 'judge')) return t.versions.importedHints[id];
+    return t.versions.hints[id];
+  };
 
   const notice =
     disagreement && disagreement.kind === 'half-or-double'
@@ -123,7 +132,7 @@ export function VersionPicker({
                   aria-pressed={selected}
                   onClick={() => onSelect(version.id)}
                 >
-                  <span className={styles.name}>{t.versions.names[version.id]}</span>
+                  <span className={styles.name}>{nameFor(version.id)}</span>
                   <span className={styles.hint}>{hintFor(version.id)}</span>
                   {/* What the Judge actually did, against the reading it
                       produced. A correction count with nothing behind it would

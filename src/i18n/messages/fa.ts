@@ -157,6 +157,16 @@ export const fa: Messages = {
       unprocessed: 'فایل دقیقاً همان‌طور که رسید.',
       judge: 'همان نت‌ها — فایل واردشده نیازی به اصلاح ندارد.',
     },
+    // همان دو نسخه، با نام‌هایی که به ریتم می‌خورد. «چیزی که نواختی» و «مرتب‌شده»
+    // واژه‌های ملودی‌اند: ریتم نه داوری رونویسی دارد نه گام.
+    rhythmNames: {
+      unprocessed: 'همان الگو',
+      teacher: 'جمع‌وجورشده',
+    },
+    rhythmHints: {
+      unprocessed: 'هر ضربه دقیقاً همان‌جا که افتاد.',
+      teacher: 'همان ضربه‌ها، نزدیک‌تر به ضرب.',
+    },
     judgeRepaired: (count: number) => `${count} اصلاح`,
     judgeClean: 'چیزی نیاز به اصلاح نداشت.',
     teacherSuggestions: (count: number) => `${count} پیشنهاد`,

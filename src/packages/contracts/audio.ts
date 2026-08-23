@@ -63,7 +63,7 @@ export type ProcessingBackend = 'browser' | 'server';
 export type TranscriptionInputMode = 'auto' | 'voice' | 'instrument' | 'rhythm';
 
 /** Internal material classification. This is routing evidence, not a user mode. */
-export type InputType = 'melody' | 'polyphonic' | 'rhythm' | 'mixed';
+export type InputType = 'melody' | 'polyphonic' | 'rhythm' | 'mixed' | 'unknown';
 
 export interface InputClassification {
   type: InputType;
@@ -75,6 +75,10 @@ export interface InputClassification {
   scores?: Record<InputType, number>;
   /** Optional numeric evidence retained for diagnostics. */
   features?: Record<string, number>;
+  /** Whether this route came from evidence or a correction made after review. */
+  method?: 'automatic' | 'user-corrected';
+  /** The automatic recommendation replaced by a user correction. */
+  originalType?: InputType;
 }
 
 export interface MelodyConfidence {

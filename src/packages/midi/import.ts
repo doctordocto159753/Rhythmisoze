@@ -126,9 +126,10 @@ function gmDrumClass(note: number): DrumClass {
  * Rhythmisoze concluded from the absence of channel 10 that the user's rhythm
  * was actually a tune — 145 percussive events routed into a melodic pipeline.
  *
- * Channel assignment is a convention of the file format. The mode is a decision
- * the person made. When they disagree, the person is right, and this is how the
- * file is read into what they asked for.
+ * Channel assignment is a convention of the file format. Structural evidence
+ * can recommend a rhythmic reading, and the post-review correction can request
+ * one explicitly. This adapter performs that reading without erasing source
+ * identity.
  *
  * ## What is identity here, and what is only a sound
  *
@@ -198,7 +199,7 @@ export function interpretNotesAsRhythm(notes: readonly NoteEvent[]): DrumEvent[]
 }
 
 /**
- * How an imported file should be read, given the mode the user is in.
+ * How an imported file should be read from structural evidence.
  *
  * Pure, and separate from the hook, because this is the decision that went
  * wrong: the rule was three lines of ternary inside an async upload handler,
@@ -222,34 +223,11 @@ export interface MidiImportPlan {
 }
 
 /**
- * ## The rule
- *
- * ```
- * selected  file has            ->  result
- * rhythm    percussion          ->  rhythm, as percussion
- * rhythm    pitched notes       ->  rhythm, pitched notes read as hits
- * rhythm    both                ->  rhythm, both
- * melody    pitched notes       ->  melody
- * melody    both                ->  melody, the pitched part
- * melody    percussion only     ->  rhythm, and it says so
- * ```
- *
- * ## Why only one cell changes the mode
- *
- * The old rule changed it in two, and the second one was a category error:
- * *no percussion channel, therefore not a rhythm*. Channel 10 is a convention
- * of the file format. Its absence says nothing whatever about what the music
- * is, and a rhythm exported from another application as pitched notes on
- * channel 1 is an ordinary thing to receive. Reading that as "the user was
- * wrong about their own take" sent 145 percussive events into the melodic
- * pipeline.
- *
- * The remaining cell is not the same kind of inference. General MIDI note
- * numbers on channel 10 name instruments — 36 is a bass drum, not a C2 — so a
- * percussion-only file has no melodic content to offer at all. Changing mode
- * there is not overruling a preference, it is the only reading that exists, and
- * `modeChangedBecause` records it so the app can say so rather than doing it
- * quietly.
+ * Automatic routing is preservation-first: declared GM percussion remains
+ * percussion; structurally rhythmic pitched notes can become hits; ambiguous
+ * all-pitched material keeps both readings. `selectedMode` is retained only as
+ * a compatibility/correction adapter for saved callers and the Review escape
+ * hatch. The creation screen never asks for it up front.
  */
 export function planMidiImport(
   result: MidiImportResult,
@@ -276,26 +254,21 @@ export function planMidiImport(
   }
 
   if (classification.type === 'mixed') {
-    // A declared drum channel already separates the streams authoritatively;
-    // every pitched note remains pitched, including staccato melody notes. Only
-    // an all-pitched file needs duration to separate its rhythmic hit layers.
-    const pitched = result.drums.length > 0
-      ? result.notes
-      : result.notes.filter((note) => note.endSec - note.startSec > 0.16);
-    const rhythmic = result.drums.length > 0
-      ? []
-      : result.notes.filter((note) => note.endSec - note.startSec <= 0.16);
-    const fromPitches = interpretNotesAsRhythm(rhythmic);
+    // Mixed is the preservation route, not a licence to guess which pitched
+    // events are disposable. A declared drum channel already separates the
+    // streams. For ambiguous all-pitched material we keep every note *and* add
+    // a rhythmic reading beside it; correction in Review can later choose one.
+    const fromPitches = result.drums.length > 0 ? [] : interpretNotesAsRhythm(result.notes);
     return {
       // Kept in the persisted v3 vocabulary; `classification.type` carries the
       // richer internal truth without changing saved-project schemas.
       mode: 'melody',
-      notes: pitched,
+      notes: result.notes,
       drums: [...result.drums, ...fromPitches].sort((a, b) => a.timeSec - b.timeSec),
       pitchedNotesAsRhythm: fromPitches.length,
       modeChangedBecause: null,
       classification,
-      judge: symbolicJudge(pitched),
+      judge: symbolicJudge(result.notes),
     };
   }
 

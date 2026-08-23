@@ -9,7 +9,6 @@ test('audio upload follows the real transcription path and packages the untouche
   page,
 }) => {
   await page.goto('/en');
-  await expect(page.getByRole('radio', { name: /Melody mode/i })).toBeChecked();
   const audioInput = page.getByLabel('Choose a recording to upload');
   await expect(audioInput).toBeDisabled();
   await setBpm(page, 120);
@@ -109,19 +108,19 @@ test('a rejected audio file can be replaced without losing the configured tempo'
   });
 });
 
-test('Instrument Mode keeps the Basic Pitch transcription path', async ({ page }) => {
+test('audio routing is automatic and its decision is visible in review', async ({ page }) => {
   await page.goto('/en');
-  const instrumentMode = page.getByRole('radio', { name: /Instrument mode/i });
-  await instrumentMode.check();
-  await expect(instrumentMode).toBeChecked();
   await setBpm(page, 120);
   await page.getByLabel('Choose a recording to upload').setInputFiles(AUDIO_FIXTURE);
 
   await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
     timeout: 90_000,
   });
+  await expect(page.getByRole('heading', { name: /Detected material/i })).toBeVisible();
+  await expect(page.getByText(/Melody.*confidence/i)).toBeVisible();
   await page.getByRole('button', { name: /^Details$/ }).click();
-  await expect(page.getByText(/^the note model, in your browser$/i)).toBeVisible();
+  await expect(page.getByText(/Input classifier/i)).toBeVisible();
+  await expect(page.getByText(/Classifier reasoning/i)).toBeVisible();
 });
 
 test('MIDI import works before tempo setup, persists its source and renders a package', async ({
@@ -208,10 +207,8 @@ async function setBpm(page: import('@playwright/test').Page, bpm: number): Promi
  * absence of channel 10 as proof that the user's rhythm was really a melody,
  * and quietly moved them into Melody mode.
  */
-test('a pitched rhythmic MIDI imported in Beat mode stays a beat', async ({ page }) => {
+test('an ambiguous pitched rhythm preserves both readings and can be corrected without re-uploading', async ({ page }) => {
   await page.goto('/en');
-  await page.getByRole('radio', { name: /A beat/i }).check();
-  await expect(page.getByRole('radio', { name: /A beat/i })).toBeChecked();
 
   await page.getByLabel('Choose a MIDI file to import').setInputFiles({
     name: 'pitched-rhythm.mid',
@@ -219,15 +216,30 @@ test('a pitched rhythmic MIDI imported in Beat mode stays a beat', async ({ page
     buffer: Buffer.from(readFileSync(resolve(__dirname, '../fixtures/midi/pitched-rhythm-export.mid'))),
   });
 
-  await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Mixed melody and rhythm.*confidence/i)).toBeVisible();
 
-  // The review screen counts hits in Beat mode and notes in Tune mode, so this
-  // is the assertion the old behaviour fails: it landed on Tune, and the 145
-  // percussive events were counted as a melody.
+  // Mixed is preservation-first: the same pitched events remain available as
+  // notes and as rhythmic layers instead of being destructively split by a
+  // duration threshold.
+  await page.getByRole('button', { name: /Unprocessed/i }).click();
+  const rawNotes = page.getByText(/\d+ notes/i).first();
+  await expect(rawNotes).toBeVisible();
+  // Review applies the cleanup preview to the selected recipe; exact 145-event
+  // source preservation is asserted at the import-plan boundary in unit tests.
+  expect(Number(/(\d+)/.exec((await rawNotes.textContent()) ?? '')?.[1] ?? 0)).toBeGreaterThan(120);
   const hits = page.getByText(/\d+ hits/i).first();
   await expect(hits).toBeVisible();
   expect(Number(/(\d+)/.exec((await hits.textContent()) ?? '')?.[1] ?? 0)).toBeGreaterThan(120);
+
+  // Classification is advice, not destructive authority. The same source can
+  // be re-read from Review and the correction is recorded in diagnostics.
+  await page.getByRole('button', { name: /Correct: rhythm/i }).click();
+  const correctedHits = page.getByText(/\d+ hits/i).first();
+  await expect(correctedHits).toBeVisible();
+  expect(Number(/(\d+)/.exec((await correctedHits.textContent()) ?? '')?.[1] ?? 0)).toBeGreaterThan(140);
   await expect(page.getByText(/\d+ notes/i)).toHaveCount(0);
+  await expect(page.getByText(/Route corrected after review/i)).toBeVisible();
 });
 
 function makeMidiFixture(): Uint8Array {

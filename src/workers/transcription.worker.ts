@@ -32,7 +32,8 @@ import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
 import { detectOnsets } from '@/packages/audio-core/onsets';
 import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
-import { classifyInput } from '@intent';
+import { classifyInput, reconcileClassificationWithMaterial } from '@intent';
+import { mapMonotonicProgress, type ProgressWindow } from './transcription-progress';
 
 export interface TranscribeRequest {
   type: 'transcribe';
@@ -66,6 +67,8 @@ export type WorkerResponse =
 const MODEL_SAMPLE_RATE = 22050;
 
 const cancelled = new Set<string>();
+const latestProgress = new Map<string, number>();
+const progressWindows = new Map<string, ProgressWindow>();
 
 /**
  * The request currently being worked on.
@@ -85,6 +88,19 @@ const post = (message: WorkerResponse): void => {
   (self as unknown as DedicatedWorkerGlobalScope).postMessage(message);
 };
 
+function reportProgress(id: string, stage: string, progress: number): void {
+  const window = progressWindows.get(id) ?? { start: 0, span: 1 };
+  const monotonic = mapMonotonicProgress(latestProgress.get(id) ?? 0, progress, window);
+  latestProgress.set(id, monotonic);
+  post({
+    type: 'progress',
+    id,
+    // A sub-engine finishing is not the whole mixed request finishing.
+    stage: stage === 'done' && monotonic < 1 ? 'collecting' : stage,
+    progress: monotonic,
+  });
+}
+
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /**
@@ -97,9 +113,8 @@ const now = (): number => (typeof performance !== 'undefined' ? performance.now(
  */
 function reportEscapedError(detail: string): void {
   // A model attempt is in progress: turn the escaped error into a rejection of
-  // that attempt, so Instrument Mode can fall back locally. Posting
-  // a failure here instead would deny the user a result the app can still
-  // produce perfectly well.
+  // that attempt. Polyphonic evidence may not be silently reinterpreted by a
+  // monophonic engine; the normal request catch reports the honest failure.
   const attempt = modelAttempt;
   if (attempt !== null) {
     modelAttempt = null;
@@ -152,8 +167,17 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
   };
 
   inFlight = request.id;
+  latestProgress.set(request.id, 0);
+  progressWindows.set(request.id, { start: 0, span: 1 });
   try {
-    const classification = request.mode === 'auto' ? classifyInput(audio) : null;
+    let classification = request.mode === 'auto' ? classifyInput(audio) : null;
+    if (classification?.type === 'unknown') {
+      throw new AppError(
+        'input_unrecognized',
+        'rerecord',
+        classification.reasoning.join('; ').slice(0, 200),
+      );
+    }
     const route = classification?.type ?? request.mode;
     const result = route === 'rhythm'
       ? await runRhythm(request, audio)
@@ -163,6 +187,13 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
           ? await runMixed(request, audio)
           : await runInstrument(request, audio);
 
+    if (classification) {
+      classification = reconcileClassificationWithMaterial(
+        classification,
+        result.notes.length,
+        result.drums?.length ?? 0,
+      );
+    }
     if (classification) result.diagnostics.classification = classification;
 
     if (cancelled.has(request.id)) {
@@ -185,6 +216,8 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
   } finally {
     if (inFlight === request.id) inFlight = null;
     cancelled.delete(request.id);
+    latestProgress.delete(request.id);
+    progressWindows.delete(request.id);
   }
 }
 
@@ -192,9 +225,25 @@ async function runMixed(
   request: TranscribeRequest,
   audio: MonoAudio,
 ): Promise<TranscriptionResult> {
+  progressWindows.set(request.id, { start: 0, span: 0.75 });
   const pitched = await runInstrument(request, audio);
   throwIfCancelled(request.id);
+  progressWindows.set(request.id, { start: 0.75, span: 0.25 });
   const rhythm = await runRhythm(request, audio);
+  if (pitched.notes.length === 0 && (rhythm.drums?.length ?? 0) > 0) {
+    return {
+      ...rhythm,
+      diagnostics: {
+        ...rhythm.diagnostics,
+        elapsedMs: pitched.diagnostics.elapsedMs + rhythm.diagnostics.elapsedMs,
+        warnings: [
+          ...pitched.diagnostics.warnings,
+          ...rhythm.diagnostics.warnings,
+          'mixed_pitch_branch_empty:rhythm_preserved',
+        ],
+      },
+    };
+  }
   return {
     ...pitched,
     drums: rhythm.drums ?? [],
@@ -224,7 +273,7 @@ async function runRhythm(
     audio,
     { mode: 'rhythm', onsetThreshold: request.onsetThreshold },
     (progress) =>
-      post({ type: 'progress', id: request.id, stage: progress.stage, progress: progress.progress }),
+      reportProgress(request.id, progress.stage, progress.progress),
   );
 }
 
@@ -247,12 +296,12 @@ function runVoiceMelody(
   warnings: string[] = [],
   started = now(),
 ): TranscriptionResult {
-  post({ type: 'progress', id: request.id, stage: 'preparing_audio', progress: 0.08 });
+  reportProgress(request.id, 'preparing_audio', 0.08);
   const extraction = extractHumanMelody(audio, {
     segmentation: { minDurationSec: request.minNoteLengthSec },
   });
   throwIfCancelled(request.id);
-  post({ type: 'progress', id: request.id, stage: 'collecting', progress: 0.86 });
+  reportProgress(request.id, 'collecting', 0.86);
 
   // The Judge runs here, in the worker, and reuses the contour the melody
   // engine has already produced. Re-tracking the fundamental purely to check it
@@ -265,7 +314,7 @@ function runVoiceMelody(
   const verdict = judgeAndRepair(extraction.notes, judgeFeatures);
   throwIfCancelled(request.id);
 
-  post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
+  reportProgress(request.id, 'done', 1);
   return {
     // The candidate is returned untouched; the repair travels beside it.
     notes: extraction.notes,
@@ -327,21 +376,15 @@ async function runInstrument(
         'model_timeout',
       );
     } catch (error) {
-      // Falling through to the tracker is the whole point of having one, but
-      // a cancelled run must not be "recovered" into a second inference.
       if (cancelled.has(request.id)) throw error;
-      const detail = error instanceof AppError ? error.detail : 'load failed';
-      return runVoiceMelody(
-        request,
-        audio,
-        [`model_unavailable:${detail ?? 'unknown'}`],
-        melodyStarted,
-      );
+      throw error instanceof AppError
+        ? error
+        : new AppError('model_load_failed', 'retry', 'polyphonic model unavailable', { cause: error });
     } finally {
       modelAttempt = null;
     }
   }
-  return runVoiceMelody(request, audio, ['instrument_model_disabled'], melodyStarted);
+  throw new AppError('model_load_failed', 'retry', 'polyphonic model disabled');
 }
 
 interface BasicPitchModule {
@@ -384,7 +427,7 @@ async function runBasicPitch(
   audio: MonoAudio,
   started: number,
 ): Promise<TranscriptionResult> {
-  post({ type: 'progress', id: request.id, stage: 'loading_model', progress: 0.02 });
+  reportProgress(request.id, 'loading_model', 0.02);
 
   const modelLoadStart = now();
   prepareWorkerGlobalsForTensorflow();
@@ -412,7 +455,7 @@ async function runBasicPitch(
   }
   const modelLoadMs = fromCache ? 0 : now() - modelLoadStart;
 
-  post({ type: 'progress', id: request.id, stage: 'preparing_audio', progress: 0.12 });
+  reportProgress(request.id, 'preparing_audio', 0.12);
   // The model has a fixed input rate. Resampling here, visibly, beats letting
   // the wrapper do it invisibly and then wondering why timings drifted.
   const prepared = peakNormalize(resample(audio, MODEL_SAMPLE_RATE));
@@ -431,13 +474,12 @@ async function runBasicPitch(
         contours.push(...c);
       },
       (percent) => {
-        post({
-          type: 'progress',
-          id: request.id,
-          stage: 'inferring',
+        reportProgress(
+          request.id,
+          'inferring',
           // The model's own percentage covers 15%..85% of the whole job.
-          progress: 0.15 + Math.max(0, Math.min(1, percent)) * 0.7,
-        });
+          0.15 + Math.max(0, Math.min(1, percent)) * 0.7,
+        );
       },
     );
   } catch (error) {
@@ -445,7 +487,7 @@ async function runBasicPitch(
   }
   throwIfCancelled(request.id);
 
-  post({ type: 'progress', id: request.id, stage: 'collecting', progress: 0.9 });
+  reportProgress(request.id, 'collecting', 0.9);
 
   const raw = basicPitch.outputToNotesPoly(
     frames,
@@ -474,7 +516,7 @@ async function runBasicPitch(
     .sort((a, b) => a.startSec - b.startSec);
   const notes = candidates;
 
-  post({ type: 'progress', id: request.id, stage: 'done', progress: 1 });
+  reportProgress(request.id, 'done', 1);
 
   const diagnostics: ProcessingDiagnostics = {
     transcriberId: 'basic-pitch',

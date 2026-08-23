@@ -53,23 +53,6 @@ export const fa: Messages = {
     },
   },
 
-  mode: {
-    label: 'چه چیزی می‌خواهی بسازی؟',
-    melody: 'یک ملودی',
-    melodyHint: 'زمزمه کن یا بخوان.',
-    rhythm: 'یک ریتم',
-    rhythmHint: 'بیت‌باکس کن.',
-    changeWarning: 'با تغییر این گزینه، ضبط فعلی پاک می‌شود.',
-  },
-
-  melodyInput: {
-    label: 'چه چیزی ضبط می‌کنی؟',
-    voice: 'حالت ملودی',
-    voiceHint: 'برای زمزمه، آواز یا سوت؛ یک خط ملودی را دنبال می‌کند.',
-    instrument: 'حالت ساز',
-    instrumentHint: 'برای گیتار، پیانو یا صداهایی که ممکن است چند نت را هم‌زمان بنوازند.',
-  },
-
   tempo: {
     label: 'سرعت',
     tapPrompt: 'چهار بار با سرعت خودت تپ کن',
@@ -249,6 +232,23 @@ export const fa: Messages = {
     keyCorrect: 'تغییر گام',
     detail: 'جزئیات',
     detailHide: 'بستن جزئیات',
+    classification: {
+      title: 'تشخیص محتوای موسیقایی',
+      detected: (type: string, confidence: number) => `${type} · اطمینان ${confidence}٪`,
+      help: 'اگر این برداشت درست نیست، همین‌جا اصلاحش کن. منبع اصلی حفظ می‌شود.',
+      corrected: 'مسیر پردازش پس از بازبینی اصلاح شد.',
+      correctMelody: 'اصلاح: ملودی',
+      correctRhythm: 'اصلاح: ریتم',
+      classifierLabel: 'دسته‌بندی ورودی',
+      reasoningLabel: 'دلیل دسته‌بندی',
+      types: {
+        melody: 'ملودی',
+        polyphonic: 'ساز چندصدایی',
+        rhythm: 'اجرای ریتمیک',
+        mixed: 'ملودی و ریتم ترکیبی',
+        unknown: 'ورودی نامشخص',
+      },
+    },
     analysis: {
       range: 'دامنه',
       detectedTempo: 'سرعت شنیده‌شده',
@@ -408,6 +408,7 @@ export const fa: Messages = {
     model_load_failed: 'مدل شنیدن دانلود نشد.',
     transcription_failed: 'ضبط تو به نت تبدیل نشد.',
     transcription_empty: 'در این ضبط نتی پیدا نشد.',
+    input_unrecognized: 'اجرای موسیقایی با اطمینان کافی تشخیص داده نشد.',
     melody_unclear: 'ملودی روشنی در ضبط پیدا نشد. نت‌ها را یکی‌یکی زمزمه کن.',
     transcription_cancelled: 'متوقف شد.',
     worker_unavailable: 'این مرورگر نمی‌تواند مرحله‌ی پردازش را اجرا کند.',

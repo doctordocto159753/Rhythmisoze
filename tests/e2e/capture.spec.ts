@@ -6,8 +6,8 @@ import { expect, test } from '@playwright/test';
  *
  * These are the only tests that exercise the real capture path: Chromium is
  * launched with a WAV file standing in for the microphone, so the whole chain
- * runs for real — MediaRecorder, decode, the worker, Basic Pitch or its
- * fallback, retouch, and the review screen.
+ * runs for real — MediaRecorder, decode, the worker, automatic routing, the
+ * human-melody extractor, retouch, and the review screen.
  *
  * ## The regression they exist for
  *
@@ -63,7 +63,6 @@ test.describe('melody', () => {
     page.on('pageerror', (error) => escaped.push(error.message));
 
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
 
@@ -79,7 +78,6 @@ test.describe('melody', () => {
 
   test('the transcription is musically plausible', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -100,7 +98,6 @@ test.describe('melody', () => {
 
   test('the details panel names which engine produced the result', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -118,7 +115,6 @@ test.describe('melody', () => {
   test('the complete package contains the original recorder bytes', async ({ page }) => {
     test.setTimeout(150_000);
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -144,21 +140,6 @@ test.describe('melody', () => {
     };
     expect(manifest.source.kind).toBe('recording');
     expect(manifest.source.bytes).toBe(sourceEntry?.[1].length);
-  });
-});
-
-test.describe('rhythm', () => {
-  test('a beatbox take reaches the review screen', async ({ page }) => {
-    await page.goto('/en');
-    await page.getByRole('radio', { name: /A beat/i }).check();
-    await setBpm(page, 120);
-    await recordATake(page);
-
-    // The rhythm path never loads a model, so it was never affected by the
-    // melody regression. Asserted so a future change cannot break it quietly.
-    await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
-      timeout: 60_000,
-    });
   });
 });
 
@@ -231,7 +212,6 @@ test.describe('recovery', () => {
    */
   test('a take too short to use is refused with a way forward', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
 
     await page.getByLabel('Choose a recording to upload').setInputFiles({
@@ -256,7 +236,6 @@ test.describe('recovery', () => {
 
   test('a take just over the floor is accepted, so the floor is a floor', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
 
     // The negative case above only proves something was rejected. This proves
@@ -275,7 +254,6 @@ test.describe('recovery', () => {
 
   test('a recording stopped early always reaches a coherent state', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await page.getByRole('button', { name: /Start a sketch/i }).click();
 
@@ -336,7 +314,6 @@ test.describe('versions', () => {
    */
   test('a hummed take is offered as three interpretations', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -351,7 +328,6 @@ test.describe('versions', () => {
 
   test('every version states which tempo it uses and where that came from', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -369,7 +345,6 @@ test.describe('versions', () => {
 
   test('choosing a version changes the result rather than only the label', async ({ page }) => {
     await page.goto('/en');
-    await page.getByRole('radio', { name: /A tune/i }).check();
     await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -399,7 +374,6 @@ test.describe('versions', () => {
 
   test('the Persian review screen offers the same interpretations', async ({ page }) => {
     await page.goto('/fa');
-    await page.getByRole('radio', { name: /یک ملودی/ }).check();
     await setBpm(page, 120);
     await page.getByRole('button', { name: /شروع یک اسکچ/ }).click();
     await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);

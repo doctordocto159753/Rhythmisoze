@@ -20,7 +20,7 @@ import {
   LOCAL_SCHEMA_VERSION,
   toAppError,
   type AudioValidation,
-  type CreationMode,
+  type InputClassification,
   type Locale,
   type LocalSourceAsset,
   type JudgeVerdict,
@@ -31,6 +31,7 @@ import {
   type ProcessingDiagnostics,
   type TranscriptionProgress,
 } from '@contracts';
+import { correctClassification } from '@intent';
 import {
   closeMicrophone,
   decodeToMono,
@@ -80,7 +81,7 @@ import {
   type VersionNoteSources,
 } from '@versions';
 import { buildMusicianRequest as assembleMusicianRequest, type MusicianRequest } from '@musician-client';
-import { importMidi, planMidiImport } from '@midi';
+import { importMidi, planMidiImport, type MidiImportResult } from '@midi';
 import {
   DEFAULT_MASTER,
   musicalDurationSec,
@@ -114,7 +115,7 @@ export const COUNT_IN_BARS = 1;
  * module, and moving the type was not the point of the change that moved it.
  */
 export type { Action, FlowState, MelodyInputMode } from './state';
-import { initialState, reducer, type FlowState, type MelodyInputMode } from './state';
+import { initialState, reducer, type FlowState } from './state';
 
 export function useCreationFlow(locale: Locale) {
   const [state, dispatch] = useReducer(reducer, undefined, () => initialState(newSketchId()));
@@ -605,24 +606,6 @@ export function useCreationFlow(locale: Locale) {
     [send],
   );
 
-  const setMode = useCallback(
-    (mode: CreationMode) => {
-      dispatch({ type: 'setMode', mode });
-      send('MODE_CHANGED');
-      track('mode_selected', { mode });
-    },
-    [send],
-  );
-
-  const setMelodyInputMode = useCallback(
-    (mode: MelodyInputMode) => {
-      dispatch({ type: 'setMelodyInputMode', mode });
-      send('MODE_CHANGED');
-      track('melody_input_mode_selected', { mode });
-    },
-    [send],
-  );
-
   const setMeter = useCallback((meter: Meter) => dispatch({ type: 'setMeter', meter }), []);
   const toggleMetronome = useCallback(() => dispatch({ type: 'toggleMetronome' }), []);
 
@@ -646,18 +629,32 @@ export function useCreationFlow(locale: Locale) {
   // --- Transcription -----------------------------------------------------
 
   const runTranscription = useCallback(
-    async (audio: MonoAudio) => {
+    async (
+      audio: MonoAudio,
+      correction?: { type: 'melody' | 'rhythm'; classification: InputClassification },
+    ) => {
       dispatch({ type: 'machine', event: 'PROCESS' });
       const controller = new AbortController();
       abortRef.current = controller;
-      track('processing_started', { route: 'auto' });
+      track('processing_started', { route: correction?.type ?? 'auto' });
 
       try {
         const result = await transcribe(audio, {
-          mode: 'auto',
+          mode: correction?.type === 'melody'
+            ? 'voice'
+            : correction?.type === 'rhythm'
+              ? 'rhythm'
+              : 'auto',
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
         });
+        if (correction) {
+          result.diagnostics.classification = correctClassification(
+            correction.classification,
+            correction.type,
+          );
+          result.diagnostics.warnings.push(`input_route_corrected:${correction.type}`);
+        }
         dispatch({
           type: 'transcribed',
           notes: result.notes,
@@ -789,6 +786,50 @@ export function useCreationFlow(locale: Locale) {
     [state.bpm, ingestAudioBlob, fail, stopEverything],
   );
 
+  const applyMidiImport = useCallback(
+    (
+      result: MidiImportResult,
+      source: LocalSourceAsset,
+      correction?: 'melody' | 'rhythm',
+    ) => {
+      const plan = planMidiImport(result, correction);
+      const classification = correction
+        ? correctClassification(plan.classification, correction)
+        : plan.classification;
+      const { mode, notes, drums } = plan;
+      dispatch({
+        type: 'midiImported',
+        mode,
+        bpm: result.bpm,
+        meter: result.meter,
+        notes,
+        drums,
+        durationSec: result.durationSec,
+        source,
+        diagnostics: {
+          transcriberId: 'midi-import',
+          backend: 'browser',
+          elapsedMs: 0,
+          modelLoadMs: 0,
+          modelFromCache: true,
+          notesBeforeFilter: result.notes.length + result.drums.length,
+          notesAfterFilter: notes.length + drums.length,
+          warnings: [
+            ...(plan.pitchedNotesAsRhythm > 0
+              ? [`midi_pitched_notes_as_rhythm:${plan.pitchedNotesAsRhythm}`]
+              : []),
+            `input_classified:${classification.type}:${classification.confidence.toFixed(3)}`,
+            ...(correction ? [`input_route_corrected:${correction}`] : []),
+          ],
+          classification,
+        },
+        judge: plan.judge,
+      });
+      send('MIDI_IMPORTED');
+    },
+    [send],
+  );
+
   const uploadMidi = useCallback(
     async (file: File) => {
       dispatch({ type: 'clearError' });
@@ -804,49 +845,17 @@ export function useCreationFlow(locale: Locale) {
         if (result.durationSec > MAX_RECORDING_SEC + 0.25) {
           throw new AppError('audio_too_long', 'retry', `${result.durationSec.toFixed(2)}s MIDI`);
         }
-        // The rule lives in `@midi` where it can be tested. See `planMidiImport`.
-        const plan = planMidiImport(result);
-        const { mode, notes, drums } = plan;
-        dispatch({
-          type: 'midiImported',
-          mode,
-          bpm: result.bpm,
-          meter: result.meter,
-          notes,
-          drums,
-          durationSec: result.durationSec,
-          source: {
-            kind: 'midi-upload',
-            filename: file.name || 'source.mid',
-            mimeType: file.type || 'audio/midi',
-            blob: file,
-          },
-          diagnostics: {
-            transcriberId: 'midi-import',
-            backend: 'browser',
-            elapsedMs: 0,
-            modelLoadMs: 0,
-            modelFromCache: true,
-            notesBeforeFilter: result.notes.length + result.drums.length,
-            notesAfterFilter: notes.length + drums.length,
-            warnings: [
-              // Every interpretation this import made, said out loud. A silent
-              // reading is exactly what produced a melody from a drum pattern.
-              ...(plan.pitchedNotesAsRhythm > 0
-                ? [`midi_pitched_notes_as_rhythm:${plan.pitchedNotesAsRhythm}`]
-                : []),
-              `input_classified:${plan.classification.type}:${plan.classification.confidence.toFixed(3)}`,
-            ],
-            classification: plan.classification,
-          },
-          judge: plan.judge,
+        applyMidiImport(result, {
+          kind: 'midi-upload',
+          filename: file.name || 'source.mid',
+          mimeType: file.type || 'audio/midi',
+          blob: file,
         });
-        send('MIDI_IMPORTED');
       } catch (error) {
         fail(error);
       }
     },
-    [send, fail, stopEverything],
+    [applyMidiImport, fail, stopEverything],
   );
 
   const arm = useCallback(async () => {
@@ -942,6 +951,39 @@ export function useCreationFlow(locale: Locale) {
     playbackRef.current = null;
     dispatch({ type: 'playing', playing: false, origin: null });
   }, []);
+
+  const correctInputRoute = useCallback(
+    async (type: 'melody' | 'rhythm') => {
+      const classification = state.diagnostics?.classification;
+      const source = state.source;
+      if (!classification || !source) return;
+
+      dispatch({ type: 'clearError' });
+      stopPlayback();
+      track('input_route_corrected', { from: classification.type, to: type });
+      try {
+        if (source.kind === 'midi-upload') {
+          const result = importMidi(new Uint8Array(await source.blob.arrayBuffer()));
+          applyMidiImport(result, source, type);
+          return;
+        }
+        if (!state.audio) return;
+        dispatch({ type: 'rerouteAudio' });
+        await runTranscription(state.audio, { type, classification });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [
+      state.diagnostics?.classification,
+      state.source,
+      state.audio,
+      stopPlayback,
+      applyMidiImport,
+      runTranscription,
+      fail,
+    ],
+  );
 
   const play = useCallback(async () => {
     if (!refined) return;
@@ -1204,8 +1246,6 @@ export function useCreationFlow(locale: Locale) {
     actions: {
       tap,
       setBpm,
-      setMode,
-      setMelodyInputMode,
       setMeter,
       toggleMetronome,
       arm,
@@ -1215,6 +1255,7 @@ export function useCreationFlow(locale: Locale) {
       cancelRecording,
       cancelProcessing,
       reprocess,
+      correctInputRoute,
       setRetouch,
       setVersion: (versionId: VersionId) => dispatch({ type: 'setVersion', versionId }),
       /**

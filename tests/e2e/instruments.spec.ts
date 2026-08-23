@@ -18,7 +18,6 @@ async function setBpm(page: Page, bpm: number): Promise<void> {
 
 async function reachReview(page: Page): Promise<void> {
   await page.goto('/en');
-  await page.getByRole('radio', { name: /A tune/i }).check();
   await setBpm(page, 120);
   await page.getByRole('button', { name: /Start a sketch/i }).click();
   await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);

@@ -14,17 +14,18 @@ Record / upload audio or MIDI
        InputClassifier
  type + confidence + reasoning
              |
-    +--------+-----------+---------+
- melody  polyphonic    rhythm    mixed
-    |        |            |       |  |
+    +--------+-----------+---------+---------+
+ melody  polyphonic    rhythm    mixed    unknown
+    |        |            |       |  |       |
  existing  Basic Pitch  fidelity  |  +-- rhythm fidelity
  YIN path  transcription pipeline +----- pitched pipeline
-    |        |
+    |        |                              no processing
     +--- Judge -> Teacher -> Musician
 ```
 
 Classification is not a user-facing mode. The creation screen offers one sound
-flow, and `InputClassifier` records `melody | polyphonic | rhythm | mixed`, its
+flow, and `InputClassifier` records `melody | polyphonic | rhythm | mixed |
+unknown`, its
 confidence, normalized scores, measured evidence, and human-readable reasoning
 in processing diagnostics. Audio classification runs inside the transcription
 worker. MIDI classification uses duration, density, overlap, and explicitly
@@ -34,6 +35,22 @@ The voice extractor remains YIN pitch evidence -> `FrameEvidence` -> hysteretic
 voicing -> continuity-aware segmentation -> `NoteEvent[]`. Rhythm keeps its
 fidelity-first pipeline and has no Teacher. Mixed material preserves both
 streams: Teacher and Musician see pitched notes, while drums use rhythm fidelity.
+`unknown` means there was not enough musical evidence to choose a safe engine,
+so processing stops with a recoverable error instead of manufacturing a melody
+from noise.
+
+The detected route is shown after processing, with its confidence and reasoning.
+From Review the person can correct it to melody or rhythm without recording or
+uploading again. The source bytes are retained, previous derived material is
+invalidated, and diagnostics preserve both the automatic route and the explicit
+correction. Classification is therefore a recommendation, not destructive
+authority.
+
+Polyphonic evidence has one honest execution path: Basic Pitch. If that engine
+cannot load or finish, the request fails recoverably; it is never silently
+downgraded to the monophonic YIN extractor. Progress from compound mixed jobs is
+mapped into monotonic phase windows, so one sub-engine cannot report completion
+and then move the UI backwards.
 
 Saved projects and export manifests retain the existing `melody | rhythm`
 field. Internal rhythm maps to `rhythm`; the other routes use the compatible
@@ -60,25 +77,19 @@ made. Forcing the grid does not tidy the idea — it destroys it.
                        Audio input
                             │
                   ┌─────────┴─────────┐
-                  │ Intent classifier │   confidence < 0.62 → ask the user
+                  │ InputClassifier   │
                   └─────────┬─────────┘
-          ┌─────────────────┼─────────────────┐
-       voice            instrument           beat
-          │                 │                 │
-   melody-extraction   Basic Pitch      onset + drum
-   (monophonic,        (polyphonic,     classification
-    glide-aware)        pitch bend)            │
-          │                 │                 │
-          └────────┬────────┴─────────────────┘
-                   │
-          rhythm-extraction          ← tempo, phase, meter, groove
-                   │                   detected from the performance
-                   │
-          version planning           ← Performed / Natural / Tight / Grid
-                   │
-              refine()               ← the existing, tested retouch layer
-                   │
-         instrument engine           ← unchanged
+          ┌───────────┬─────┴─────┬───────────┐
+       melody    polyphonic     rhythm       mixed
+          │           │            │          │ │
+   melody-extraction  │       onset + drum    │ └─ rhythm fidelity
+   (monophonic,       │       classification  └── Basic Pitch
+    glide-aware)      │            │
+                      └─ Basic Pitch
+
+                 unknown → recoverable refusal
+
+Every successful route → Review → optional route correction from original source
 ```
 
 Two things are deliberately unchanged: the retouch layer (verified against the
@@ -120,16 +131,19 @@ Both were added after the first version misclassified real signals:
   are. Without it, anything unpitched scores as a beat — tape hiss, a fan, a
   held breath — purely for lacking a fundamental.
 
-### Confidence, and asking
+### Confidence and abstention
 
 Confidence combines the **margin** over the runner-up with the **absolute** score
 of the winner. Both halves are needed: three scores near zero produce a large
 relative margin between them, which without the second term reads as certainty
 about noise.
 
-Below `INTENT_ASK_THRESHOLD` (0.62) the app asks. The threshold is high on
-purpose — processing in the wrong mode costs the user their idea and makes the
-product look broken; asking costs one tap on a screen they are already viewing.
+`INTENT_ASK_THRESHOLD` (0.62) remains the legacy three-way ambiguity threshold.
+The product-facing classifier does not expose an up-front question. It uses the
+threshold together with absolute pitch evidence: ambiguity between voice and a
+plucked instrument still routes to a compatible engine, while a signal with no
+usable musical evidence becomes `unknown` and is not processed. A successful
+classification can be corrected after Review from the original source.
 
 ---
 

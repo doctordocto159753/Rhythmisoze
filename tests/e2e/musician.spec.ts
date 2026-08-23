@@ -194,7 +194,6 @@ async function setBpm(page: Page, bpm: number) {
 /** Gets to the review screen with a Teacher version present. */
 async function reachReview(page: Page) {
   await page.goto('/en');
-  await expect(page.getByRole('radio', { name: /Melody mode/i })).toBeChecked();
   await setBpm(page, 120);
   await page
     .getByLabel('Choose a recording to upload')

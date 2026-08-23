@@ -278,6 +278,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             tappedBpm={state.bpm}
             tempoChoice={state.tempoChoice}
             onTempoChoiceChange={actions.setTempoChoice}
+            onCorrectRoute={(type) => void actions.correctInputRoute(type)}
             sourceKind={state.source?.kind}
             meter={state.meter}
             durationSec={musicalDurationSec}

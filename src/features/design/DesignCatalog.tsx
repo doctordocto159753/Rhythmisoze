@@ -38,7 +38,6 @@ import styles from './DesignCatalog.module.css';
 export function DesignCatalog() {
   const { locale, t } = useLocale();
   const [cleanup, setCleanup] = useState(55);
-  const [mode, setMode] = useState<'melody' | 'rhythm'>('melody');
   const audit = auditRegistry();
 
   return (
@@ -167,15 +166,6 @@ export function DesignCatalog() {
               disabled
               valueText="disabled"
               onChange={() => undefined}
-            />
-            <Choice<'melody' | 'rhythm'>
-              legend={t.mode.label}
-              value={mode}
-              options={[
-                { value: 'melody', title: t.mode.melody, hint: t.mode.melodyHint },
-                { value: 'rhythm', title: t.mode.rhythm, hint: t.mode.rhythmHint },
-              ]}
-              onChange={setMode}
             />
             <Choice<'3' | '4' | '6'>
               legend={t.tempo.meter}

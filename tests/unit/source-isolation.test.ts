@@ -253,6 +253,40 @@ describe('a second audio take after a first', () => {
     expect(second.versionId).toBeNull();
     expect(second.sourceId).not.toBe(first.sourceId);
   });
+
+  it('keeps the original audio while clearing every interpretation for a route correction', () => {
+    const captured = apply(afterAudioTake(), {
+      type: 'captured',
+      audio: { samples: new Float32Array(16), sampleRate: 16_000, durationSec: 0.001 },
+      validation: OK_VALIDATION,
+      source: {
+        kind: 'audio-upload',
+        filename: 'same-take.wav',
+        mimeType: 'audio/wav',
+        blob: new Blob([new Uint8Array([5])], { type: 'audio/wav' }),
+      },
+    });
+    const interpreted = apply(captured, {
+      type: 'transcribed',
+      notes: [note(67, 0)],
+      judge: STALE_JUDGE,
+      referenceNotes: [note(67, 0)],
+      drums: [],
+      diagnostics: DIAGNOSTICS,
+      melodyQuality: null,
+    });
+    const corrected = apply(interpreted, { type: 'rerouteAudio' });
+
+    expect(corrected.audio).toBe(interpreted.audio);
+    expect(corrected.source).toBe(interpreted.source);
+    expect(corrected.validation).toBe(interpreted.validation);
+    expect(corrected.rawNotes).toEqual([]);
+    expect(corrected.rawDrums).toEqual([]);
+    expect(corrected.judge).toBeNull();
+    expect(corrected.referenceNotes).toEqual([]);
+    expect(corrected.diagnostics).toBeNull();
+    expect(corrected.sourceId).not.toBe(interpreted.sourceId);
+  });
 });
 
 describe('what a new source does not touch', () => {

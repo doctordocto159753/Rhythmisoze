@@ -128,6 +128,30 @@ const DECLARED_MIXED_FILE = buildMidi([
   },
 ]);
 
+const STACCATO_CHORD_FILE = buildMidi([
+  {
+    channel: 0,
+    notes: Array.from({ length: 12 }, (_, step) =>
+      [60, 64, 67].map((midi) => ({
+        midi,
+        timeSec: step * 0.25,
+        durationSec: 0.1,
+      })),
+    ).flat(),
+  },
+]);
+
+const ARPEGGIO_FILE = buildMidi([
+  {
+    channel: 0,
+    notes: Array.from({ length: 24 }, (_, step) => ({
+      midi: [60, 64, 67, 72][step % 4] as number,
+      timeSec: step * 0.125,
+      durationSec: 0.08,
+    })),
+  },
+]);
+
 describe('A: a General MIDI drum file', () => {
   const file = importMidi(GM_DRUM_FILE);
 
@@ -318,10 +342,12 @@ describe('internal MIDI classification and routing', () => {
   it('splits mixed MIDI into pitched and rhythmic streams without collisions', () => {
     const plan = planMidiImport(importMidi(MIXED_FILE));
     expect(plan.classification.type).toBe('mixed');
-    expect(plan.notes).toHaveLength(3);
-    expect(plan.drums).toHaveLength(8);
+    expect(plan.notes).toHaveLength(11);
+    expect(plan.drums).toHaveLength(11);
     expect(plan.judge?.notes).toEqual(plan.notes);
-    expect(new Set(plan.drums.map((hit) => hit.voice))).toEqual(new Set(['pitch:42']));
+    expect(new Set(plan.drums.map((hit) => hit.sourcePitch))).toEqual(
+      new Set(plan.notes.map((note) => note.pitch)),
+    );
   });
 
   it('trusts declared stream identity and keeps short melodic notes pitched', () => {
@@ -331,5 +357,21 @@ describe('internal MIDI classification and routing', () => {
     expect(plan.notes).toEqual(file.notes);
     expect(plan.drums).toEqual(file.drums);
     expect(plan.pitchedNotesAsRhythm).toBe(0);
+  });
+
+  it('keeps repeated staccato triads pitched instead of collapsing them to drums', () => {
+    const file = importMidi(STACCATO_CHORD_FILE);
+    const plan = planMidiImport(file);
+    expect(plan.classification.type).toBe('polyphonic');
+    expect(plan.notes).toEqual(file.notes);
+    expect(plan.drums).toEqual([]);
+    expect(plan.judge?.notes).toEqual(file.notes);
+  });
+
+  it('preserves a short-note arpeggio when rhythm evidence is ambiguous', () => {
+    const file = importMidi(ARPEGGIO_FILE);
+    const plan = planMidiImport(file);
+    expect(plan.classification.type).not.toBe('rhythm');
+    expect(plan.notes).toEqual(file.notes);
   });
 });

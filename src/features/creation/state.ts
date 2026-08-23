@@ -139,8 +139,6 @@ export interface FlowState {
 
 export type Action =
   | { type: 'machine'; event: CreationEvent; payload?: { code: AppError['code']; recovery: AppError['recovery'] } }
-  | { type: 'setMode'; mode: CreationMode }
-  | { type: 'setMelodyInputMode'; mode: MelodyInputMode }
   | { type: 'setBpm'; bpm: number }
   | { type: 'setMeter'; meter: Meter }
   | { type: 'tap'; history: number[]; bpm: number | null; tapCount: number }
@@ -155,6 +153,7 @@ export type Action =
       source: LocalSourceAsset;
     }
   | { type: 'progress'; progress: TranscriptionProgress }
+  | { type: 'rerouteAudio' }
   | {
       type: 'transcribed';
       judge: JudgeVerdict | null;
@@ -341,23 +340,6 @@ export function reducer(state: FlowState, action: Action): FlowState {
       if (!result.accepted) return state;
       return { ...state, machine: result.context };
     }
-    case 'setMode':
-      // Changing mode throws the take away, which makes it a new-source event.
-      // It used to clear seven fields by hand and miss the rest.
-      return {
-        ...state,
-        ...beginNewSource(state),
-        mode: action.mode,
-        // Instruments are mode-specific; carrying a piano into rhythm mode
-        // would leave the gallery showing a selection that cannot be voiced.
-        instrumentId: resolveInstrument(undefined, action.mode).id,
-      };
-    case 'setMelodyInputMode':
-      return {
-        ...state,
-        ...beginNewSource(state),
-        melodyInputMode: action.mode,
-      };
     case 'setBpm':
       return { ...state, bpm: action.bpm };
     case 'setMeter':
@@ -393,6 +375,20 @@ export function reducer(state: FlowState, action: Action): FlowState {
       };
     case 'progress':
       return { ...state, progress: action.progress };
+    case 'rerouteAudio': {
+      const audio = state.audio;
+      const source = state.source;
+      const validation = state.validation;
+      const durationSec = state.durationSec;
+      return {
+        ...state,
+        ...beginNewSource(state),
+        audio,
+        source,
+        validation,
+        durationSec,
+      };
+    }
     case 'transcribed':
       // Not a new source — the same audio, now understood. `sourceId` is
       // deliberately unchanged, so a Musician result generated from this take

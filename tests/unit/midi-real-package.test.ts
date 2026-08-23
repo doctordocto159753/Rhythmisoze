@@ -56,6 +56,25 @@ describe('the file itself', () => {
   });
 });
 
+describe('automatic routing of the canonical rhythmic export', () => {
+  const plan = planMidiImport(file);
+
+  it('never sends the file to a melody-only pipeline', () => {
+    expect(['rhythm', 'mixed']).toContain(plan.classification.type);
+    expect(plan.mode).toBe(plan.classification.type === 'rhythm' ? 'rhythm' : 'melody');
+  });
+
+  it('keeps all source events in the selected material streams', () => {
+    if (plan.classification.type === 'rhythm') {
+      expect(plan.drums).toHaveLength(file.notes.length);
+      expect(plan.notes).toEqual([]);
+    } else {
+      expect(plan.notes).toEqual(file.notes);
+      expect(plan.drums).toHaveLength(file.notes.length);
+    }
+  });
+});
+
 describe('imported while Rhythm is selected', () => {
   const plan = planMidiImport(file, 'rhythm');
 

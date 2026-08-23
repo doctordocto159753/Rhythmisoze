@@ -26,12 +26,11 @@
 export type AnalyticsEvent =
   | 'landing_viewed'
   | 'tempo_set'
-  | 'mode_selected'
-  | 'melody_input_mode_selected'
   | 'recording_started'
   | 'recording_completed'
   | 'processing_started'
   | 'processing_completed'
+  | 'input_route_corrected'
   | 'retouch_changed'
   | 'instrument_previewed'
   | 'instrument_selected'

@@ -61,6 +61,7 @@ export interface ReviewStageProps {
   /** Where the material came from, so the version copy can stay honest. */
   sourceKind: SourceKind | undefined;
   onTempoChoiceChange(choice: TempoChoice): void;
+  onCorrectRoute(type: 'melody' | 'rhythm'): void;
   meter: Meter;
   /**
    * How long the selected version runs — the *musical* duration, which for a
@@ -105,6 +106,7 @@ export function ReviewStage({
   tappedBpm,
   tempoChoice,
   onTempoChoiceChange,
+  onCorrectRoute,
   sourceKind,
   meter,
   durationSec,
@@ -126,6 +128,7 @@ export function ReviewStage({
   const label = retouchLabel(retouchAmount);
   const cleanupText = t.review.cleanupLevels[label];
   const analysis = refined.analysis;
+  const mixedMaterial = diagnostics?.classification?.type === 'mixed';
   // A tapped tempo that is half or double what the app heard is the single most
   // common reason a result feels wrong, so it is surfaced rather than buried.
   //
@@ -170,7 +173,9 @@ export function ReviewStage({
           </Button>
 
           <span className={styles.counts}>
-            {mode === 'rhythm'
+            {mixedMaterial
+              ? `${t.review.notesHeard(refined.notes.length)} · ${t.review.hitsHeard(refined.drums.length)}`
+              : mode === 'rhythm'
               ? t.review.hitsHeard(refined.drums.length)
               : t.review.notesHeard(refined.notes.length)}
           </span>
@@ -195,6 +200,39 @@ export function ReviewStage({
           </div>
         ) : null}
       </Well>
+
+      {diagnostics?.classification && diagnostics.classification.type !== 'unknown' ? (
+        <Well as="section" aria-labelledby="classification-heading">
+          <Stack gap={3}>
+            <Text variant="heading" as="h3" id="classification-heading">
+              {t.review.classification.title}
+            </Text>
+            <Text>
+              {t.review.classification.detected(
+                t.review.classification.types[diagnostics.classification.type],
+                Math.round(diagnostics.classification.confidence * 100),
+              )}
+            </Text>
+            <Text variant="micro" muted>
+              {diagnostics.classification.method === 'user-corrected'
+                ? t.review.classification.corrected
+                : t.review.classification.help}
+            </Text>
+            <Row gap={2}>
+              {diagnostics.classification.type !== 'melody' ? (
+                <Button kind="ghost" size="small" onClick={() => onCorrectRoute('melody')}>
+                  {t.review.classification.correctMelody}
+                </Button>
+              ) : null}
+              {diagnostics.classification.type !== 'rhythm' ? (
+                <Button kind="ghost" size="small" onClick={() => onCorrectRoute('rhythm')}>
+                  {t.review.classification.correctRhythm}
+                </Button>
+              ) : null}
+            </Row>
+          </Stack>
+        </Well>
+      ) : null}
 
       <VersionPicker
         versions={versions}
@@ -310,7 +348,7 @@ export function ReviewStage({
             ) : null}
             {diagnostics?.classification ? (
               <DetailRow
-                label="Input classifier"
+                label={t.review.classification.classifierLabel}
                 value={`${diagnostics.classification.type} (${Math.round(
                   diagnostics.classification.confidence * 100,
                 )}%)`}
@@ -318,7 +356,7 @@ export function ReviewStage({
             ) : null}
             {diagnostics?.classification ? (
               <DetailRow
-                label="Classifier reasoning"
+                label={t.review.classification.reasoningLabel}
                 value={diagnostics.classification.reasoning.join(' · ')}
               />
             ) : null}

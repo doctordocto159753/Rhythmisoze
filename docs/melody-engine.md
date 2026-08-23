@@ -2,17 +2,23 @@
 
 ## Product boundary
 
-Rhythmisoze has two acoustic paths for a tune:
+Rhythmisoze has two internal acoustic paths for pitched material:
 
-- **Melody Mode** is for humming, singing and whistling. It assumes one human
+- The **melody route** handles humming, singing and whistling. It assumes one human
   melodic intention and uses the dedicated local engine in
   `src/packages/melody-extraction/`.
-- **Instrument Mode** is for guitar, piano and other potentially polyphonic
-  audio. It keeps Spotify Basic Pitch and its multipitch output.
+- The **polyphonic route** handles guitar, piano and other potentially
+  polyphonic audio. It keeps Spotify Basic Pitch and its multipitch output.
 
-Rhythm Mode remains the independent onset/drum-classification path. MIDI import
-does not pass through either acoustic transcriber. Nothing in these paths sends
-unpublished audio off the device.
+These are classifier decisions, not controls the user must choose before making
+sound. Rhythm remains the independent fidelity-first onset/drum path, and mixed
+material executes pitched and rhythmic branches. MIDI import does not pass
+through either acoustic transcriber. Nothing in these paths sends unpublished
+audio off the device.
+
+The polyphonic route never falls back to this monophonic engine. If Basic Pitch
+is unavailable, the app reports a recoverable model error; returning a plausible
+but structurally wrong single-note line would be silent data loss.
 
 ## Voice pipeline
 

@@ -154,13 +154,15 @@ test.describe('tempo', () => {
   });
 });
 
-test.describe('mode', () => {
-  test('melody and rhythm are both offered without jargon', async ({ page }) => {
+test.describe('unified input', () => {
+  test('asks for a source without asking the user to classify it', async ({ page }) => {
     await gotoSupportedCreation(page);
-    await expect(page.getByRole('radio', { name: /A tune/i })).toBeVisible();
-    await expect(page.getByRole('radio', { name: /A beat/i })).toBeVisible();
-    await page.getByRole('radio', { name: /A beat/i }).check();
-    await expect(page.getByRole('radio', { name: /A beat/i })).toBeChecked();
+    await expect(page.getByRole('radio', { name: /A tune/i })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: /A beat/i })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: /Melody mode/i })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: /Instrument mode/i })).toHaveCount(0);
+    await expect(page.getByLabel('Choose a recording to upload')).toHaveCount(1);
+    await expect(page.getByLabel('Choose a MIDI file to import')).toHaveCount(1);
   });
 });
 

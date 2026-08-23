@@ -20,8 +20,10 @@ import {
   InputClassifier,
   classifyInput,
   classifyIntent,
+  correctClassification,
   extractIntentFeatures,
   INTENT_ASK_THRESHOLD,
+  reconcileClassificationWithMaterial,
 } from '@intent';
 
 const RATE = 44100;
@@ -129,6 +131,19 @@ function mixedPhrase(): MonoAudio {
   return mono(out);
 }
 
+function ambiguousNoise(): MonoAudio {
+  const samples = new Float32Array(RATE * 2);
+  let state = 999;
+  let previous = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    const raw = (state / 0x7fffffff) * 2 - 1;
+    previous = previous * 0.7 + raw * 0.3;
+    samples[index] = previous * 0.3;
+  }
+  return mono(samples);
+}
+
 describe('feature extraction', () => {
   it('finds a sung phrase highly voiced with long unbroken runs', () => {
     const features = extractIntentFeatures(sungPhrase());
@@ -184,16 +199,7 @@ describe('classification', () => {
 
   it('asks the user rather than guessing on an ambiguous signal', () => {
     // Steady band-limited noise is genuinely none of the three.
-    const samples = new Float32Array(RATE * 2);
-    let state = 999;
-    let previous = 0;
-    for (let i = 0; i < samples.length; i += 1) {
-      state = (state * 1103515245 + 12345) & 0x7fffffff;
-      const raw = (state / 0x7fffffff) * 2 - 1;
-      previous = previous * 0.7 + raw * 0.3;
-      samples[i] = previous * 0.3;
-    }
-    const result = classifyIntent(mono(samples));
+    const result = classifyIntent(ambiguousNoise());
     if (result.confidence < INTENT_ASK_THRESHOLD) expect(result.shouldAsk).toBe(true);
     // Whatever it decides, it must not claim near-certainty about noise.
     expect(result.confidence).toBeLessThan(0.95);
@@ -239,10 +245,40 @@ describe('internal InputClassifier routing contract', () => {
     expect(classifyInput(mixedPhrase()).type).toBe('mixed');
   });
 
+  it('abstains on noise instead of forcing a melody route', () => {
+    const result = classifyInput(ambiguousNoise());
+    expect(result.type).toBe('unknown');
+    expect(result.confidence).toBeLessThan(INTENT_ASK_THRESHOLD);
+    expect(result.reasoning.join(' ')).toMatch(/enough musical evidence/i);
+  });
+
   it('returns normalized scores for every internal route', () => {
     const scores = classifyInput(sungPhrase()).scores;
     expect(scores).toBeDefined();
-    expect(Object.keys(scores ?? {}).sort()).toEqual(['melody', 'mixed', 'polyphonic', 'rhythm']);
+    expect(Object.keys(scores ?? {}).sort()).toEqual([
+      'melody',
+      'mixed',
+      'polyphonic',
+      'rhythm',
+      'unknown',
+    ]);
     expect(Object.values(scores ?? {}).reduce((sum, score) => sum + score, 0)).toBeCloseTo(1, 6);
+  });
+
+  it('records a post-review correction without erasing automatic evidence', () => {
+    const automatic = classifyInput(beatPattern());
+    const corrected = correctClassification(automatic, 'melody');
+    expect(corrected.type).toBe('melody');
+    expect(corrected.method).toBe('user-corrected');
+    expect(corrected.originalType).toBe('rhythm');
+    expect(corrected.features).toEqual(automatic.features);
+    expect(corrected.reasoning.at(-1)).toBe('user_corrected_route=melody');
+  });
+
+  it('presents rhythm when a mixed pitch branch has no survivors', () => {
+    const mixed = classifyInput(mixedPhrase());
+    const reconciled = reconcileClassificationWithMaterial(mixed, 0, 12);
+    expect(reconciled.type).toBe('rhythm');
+    expect(reconciled.reasoning.at(-1)).toMatch(/pitch_branch_empty/);
   });
 });

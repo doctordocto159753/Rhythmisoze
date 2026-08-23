@@ -52,23 +52,6 @@ export const en = {
     },
   },
 
-  mode: {
-    label: 'What are you going to make?',
-    melody: 'A tune',
-    melodyHint: 'Hum or sing it.',
-    rhythm: 'A beat',
-    rhythmHint: 'Beatbox it.',
-    changeWarning: 'Changing this clears the current take.',
-  },
-
-  melodyInput: {
-    label: 'What will you record?',
-    voice: 'Melody mode',
-    voiceHint: 'For humming, singing or whistling. Follows one melody line.',
-    instrument: 'Instrument mode',
-    instrumentHint: 'For guitar, piano or other sounds that may play several notes.',
-  },
-
   tempo: {
     label: 'Speed',
     tapPrompt: 'Tap four times at your speed',
@@ -281,6 +264,23 @@ export const en = {
     keyCorrect: 'Change key',
     detail: 'Details',
     detailHide: 'Hide details',
+    classification: {
+      title: 'Detected material',
+      detected: (type: string, confidence: number) => `${type} · ${confidence}% confidence`,
+      help: 'If that reading is wrong, correct it here. Your original source is kept.',
+      corrected: 'Route corrected after review.',
+      correctMelody: 'Correct: melody',
+      correctRhythm: 'Correct: rhythm',
+      classifierLabel: 'Input classifier',
+      reasoningLabel: 'Classifier reasoning',
+      types: {
+        melody: 'Melody',
+        polyphonic: 'Polyphonic instrument',
+        rhythm: 'Rhythmic performance',
+        mixed: 'Mixed melody and rhythm',
+        unknown: 'Unclear input',
+      },
+    },
     analysis: {
       range: 'Range',
       detectedTempo: 'Speed heard',
@@ -440,6 +440,7 @@ export const en = {
     model_load_failed: 'The listener could not be downloaded.',
     transcription_failed: 'Your take could not be read as notes.',
     transcription_empty: 'No notes were found in that take.',
+    input_unrecognized: 'Could not confidently identify a musical performance.',
     melody_unclear:
       'Your recording does not contain a clear melody. Try humming one note after another.',
     transcription_cancelled: 'Stopped.',

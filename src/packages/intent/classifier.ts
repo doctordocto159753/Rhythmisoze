@@ -7,7 +7,8 @@
  *
  * This classifies the audio into the three intents the product actually has,
  * and — the part that matters most — **says when it does not know**. A confident
- * wrong guess costs the user their idea; an honest question costs them one tap.
+ * wrong guess costs the user their idea. Insufficient evidence is therefore an
+ * explicit result instead of being forced through one of the musical routes.
  *
  * ## What separates the three
  *
@@ -258,7 +259,7 @@ export class InputClassifier {
       3.2;
     const mixedEvidence = Math.max(onsetMixedEvidence, embeddedTransientEvidence);
 
-    const raw: Record<InputType, number> = {
+    const raw = {
       melody: legacy.scores.voice * (0.55 + voiceContinuity) * pitchedEvidence,
       polyphonic:
         (legacy.scores.instrument * (0.55 + instrumentAttacks) +
@@ -273,12 +274,35 @@ export class InputClassifier {
       polyphonic: raw.polyphonic / total,
       rhythm: raw.rhythm / total,
       mixed: raw.mixed / total,
+      unknown: 0,
     };
-    const ranked = (Object.keys(scores) as InputType[]).sort((a, b) => scores[b] - scores[a]);
-    const type = ranked[0] as InputType;
-    const runnerUp = ranked[1] as InputType;
-    const margin = scores[type] - scores[runnerUp];
+    const ranked: Array<Exclude<InputType, 'unknown'>> = [
+      'melody',
+      'polyphonic',
+      'rhythm',
+      'mixed',
+    ];
+    ranked.sort((a, b) => scores[b] - scores[a]);
+    const recommendation = ranked[0] as Exclude<InputType, 'unknown'>;
+    const runnerUp = ranked[1] as Exclude<InputType, 'unknown'>;
+    const margin = scores[recommendation] - scores[runnerUp];
     const confidence = clamp01(legacy.confidence * 0.7 + margin * 0.6);
+    // `shouldAsk` in the original three-way classifier also means "voice and
+    // instrument are close". That is route uncertainty, not absence of music:
+    // a clearly periodic plucked phrase must still reach the multipitch engine.
+    // Abstain only when the confidence is low *and* there is no usable pitched
+    // evidence. Transient rhythm already wins its legacy classification with
+    // enough confidence; steady noise has neither kind of evidence.
+    const hasUsablePitch = pitchedEvidence >= 0.25 && legacy.features.pitchStability >= 0.35;
+    const type: InputType = legacy.shouldAsk && !hasUsablePitch ? 'unknown' : recommendation;
+    if (type === 'unknown') {
+      const unknownScore = Math.max(0.5, 1 - confidence);
+      const routedScale = 1 - unknownScore;
+      for (const route of ['melody', 'polyphonic', 'rhythm', 'mixed'] as const) {
+        scores[route] *= routedScale;
+      }
+      scores.unknown = unknownScore;
+    }
 
     return {
       type,
@@ -286,6 +310,7 @@ export class InputClassifier {
       reasoning: audioReasoning(type, legacy.features, scores),
       scores,
       features: { ...legacy.features },
+      method: 'automatic',
     };
   }
 
@@ -294,34 +319,103 @@ export class InputClassifier {
     const durations = notes.map((note) => Math.max(0, note.endSec - note.startSec));
     const shortNotes = durations.filter((duration) => duration <= 0.16).length;
     const shortRatio = notes.length > 0 ? shortNotes / notes.length : 0;
-    const sustainedRatio = notes.length > 0 ? 1 - shortRatio : 0;
+    const onsetGroups = groupNotesByOnset(notes);
+    const onsetCount = onsetGroups.length;
+    const pitchCounts = countBy(notes.map((note) => note.pitch));
+    const pitchCount = pitchCounts.size;
+    const orderedPitchCounts = [...pitchCounts.values()].sort((a, b) => b - a);
+    const dominantLayerRatio = notes.length > 0
+      ? orderedPitchCounts.slice(0, 3).reduce((sum, count) => sum + count, 0) / notes.length
+      : 0;
+    const repeatedLayerRatio = notes.length > 0
+      ? notes.filter((note) => (pitchCounts.get(note.pitch) ?? 0) >= 4).length / notes.length
+      : 0;
+    const simultaneousOnsetRatio = onsetCount > 0
+      ? onsetGroups.filter((group) => group.length > 1).length / onsetCount
+      : 0;
+    const chordalOnsetRatio = onsetCount > 0
+      ? onsetGroups.filter(isChordLikeGroup).length / onsetCount
+      : 0;
+    const maxOnsetGroup = Math.max(0, ...onsetGroups.map((group) => group.length));
     const maxPolyphony = maximumPolyphony(notes);
-    const onsetDensity = (notes.length + drums.length) / Math.max(0.25, input.durationSec);
+    const onsetDensity = (onsetCount + drums.length) / Math.max(0.25, input.durationSec);
+    const onsetTimes = onsetGroups.map((group) => group[0]?.startSec ?? 0);
+    const onsetGaps = onsetTimes.slice(1).map((time, index) => time - (onsetTimes[index] ?? 0));
+    const medianOnsetGap = median(onsetGaps.filter((gap) => gap > 0.003));
+    const medianDuration = median(durations);
+    const longNoteRatio = notes.length > 0
+      ? durations.filter((duration) => duration > Math.max(0.25, medianDuration * 2.5)).length /
+        notes.length
+      : 0;
+    const durationToGapRatio = medianOnsetGap > 0 ? medianDuration / medianOnsetGap : 0;
+    const layerRegularity = rhythmicLayerRegularity(notes);
+    const melodicStepRatio = sequentialStepRatio(onsetGroups);
+    const velocityVariation = normalizedDeviation(notes.map((note) => note.velocity));
     const hasDeclaredRhythm = drums.length > 0;
-    const hasPitchedRhythm = notes.length >= 6 && shortRatio >= 0.72 && onsetDensity >= 2;
-    const hasSustainedPitch = notes.length > 0 && sustainedRatio >= 0.2;
+    const hasChordStructure =
+      chordalOnsetRatio >= 0.35 || (simultaneousOnsetRatio >= 0.65 && maxOnsetGroup >= 3);
+    const hasDurationSeparatedStreams = shortRatio >= 0.4 && longNoteRatio >= 0.2;
+    const compactMelodicSequence =
+      pitchCount >= 2 && pitchCount <= 7 && simultaneousOnsetRatio < 0.1 && melodicStepRatio >= 0.7;
+    const hasStrongPitchedRhythm =
+      notes.length >= 8 &&
+      onsetDensity >= 2 &&
+      repeatedLayerRatio >= 0.7 &&
+      dominantLayerRatio >= 0.55 &&
+      chordalOnsetRatio < 0.2 &&
+      layerRegularity >= 0.5 &&
+      (shortRatio >= 0.5 || durationToGapRatio >= 0.65) &&
+      (pitchCount >= 6 || simultaneousOnsetRatio >= 0.1 || durationToGapRatio >= 0.8) &&
+      !compactMelodicSequence;
+    const hasAmbiguousRhythm =
+      notes.length >= 6 && onsetDensity >= 2 && repeatedLayerRatio >= 0.55;
 
     let type: InputType;
-    if ((hasDeclaredRhythm && notes.length > 0) || (hasPitchedRhythm && hasSustainedPitch)) type = 'mixed';
-    else if (hasDeclaredRhythm || hasPitchedRhythm) type = 'rhythm';
+    if (hasDeclaredRhythm && notes.length > 0) type = 'mixed';
+    else if (hasDeclaredRhythm) type = 'rhythm';
+    else if (hasChordStructure) type = 'polyphonic';
+    else if (hasDurationSeparatedStreams) type = 'mixed';
+    else if (hasStrongPitchedRhythm) type = 'rhythm';
+    else if (hasAmbiguousRhythm) type = 'mixed';
     else if (maxPolyphony > 1) type = 'polyphonic';
     else type = 'melody';
 
-    const structuralEvidence = notes.length + drums.length >= 4 ? 0.92 : 0.76;
-    const confidence = type === 'mixed' ? Math.min(0.9, structuralEvidence) : structuralEvidence;
+    const confidence = hasDeclaredRhythm
+      ? 0.98
+      : hasChordStructure
+        ? 0.94
+        : hasStrongPitchedRhythm
+          ? 0.9
+          : type === 'mixed'
+            ? 0.62
+            : notes.length >= 4 ? 0.82 : 0.7;
     const scores: Record<InputType, number> = {
-      melody: type === 'melody' ? confidence : (1 - confidence) / 3,
-      polyphonic: type === 'polyphonic' ? confidence : (1 - confidence) / 3,
-      rhythm: type === 'rhythm' ? confidence : (1 - confidence) / 3,
-      mixed: type === 'mixed' ? confidence : (1 - confidence) / 3,
+      melody: type === 'melody' ? confidence : (1 - confidence) / 4,
+      polyphonic: type === 'polyphonic' ? confidence : (1 - confidence) / 4,
+      rhythm: type === 'rhythm' ? confidence : (1 - confidence) / 4,
+      mixed: type === 'mixed' ? confidence : (1 - confidence) / 4,
+      unknown: (1 - confidence) / 4,
     };
     const features = {
       noteCount: notes.length,
       drumCount: drums.length,
+      onsetCount,
+      pitchCount,
       shortNoteRatio: shortRatio,
-      sustainedNoteRatio: sustainedRatio,
+      medianDuration,
+      longNoteRatio,
+      medianOnsetGap,
+      durationToGapRatio,
       maxPolyphony,
+      maxOnsetGroup,
       onsetDensity,
+      simultaneousOnsetRatio,
+      chordalOnsetRatio,
+      dominantLayerRatio,
+      repeatedLayerRatio,
+      layerRegularity,
+      melodicStepRatio,
+      velocityVariation,
       trackCount: input.trackCount,
     };
 
@@ -331,6 +425,7 @@ export class InputClassifier {
       scores,
       features,
       reasoning: midiReasoning(type, features, hasDeclaredRhythm),
+      method: 'automatic',
     };
   }
 }
@@ -343,6 +438,37 @@ export function classifyInput(audio: MonoAudio): InputClassification {
 
 export function classifyMidiInput(input: MidiClassificationInput): InputClassification {
   return inputClassifier.classifyMidi(input);
+}
+
+/** Records a post-detection correction without erasing the classifier's evidence. */
+export function correctClassification(
+  classification: InputClassification,
+  type: 'melody' | 'rhythm',
+): InputClassification {
+  return {
+    ...classification,
+    type,
+    confidence: 1,
+    method: 'user-corrected',
+    originalType: classification.originalType ?? classification.type,
+    reasoning: [...classification.reasoning, `user_corrected_route=${type}`],
+  };
+}
+
+export function reconcileClassificationWithMaterial(
+  classification: InputClassification,
+  noteCount: number,
+  drumCount: number,
+): InputClassification {
+  if (classification.type !== 'mixed' || noteCount > 0 || drumCount === 0) return classification;
+  return {
+    ...classification,
+    type: 'rhythm',
+    reasoning: [
+      ...classification.reasoning,
+      'mixed_pitch_branch_empty; presenting preserved rhythm material',
+    ],
+  };
 }
 
 function audioReasoning(
@@ -359,6 +485,7 @@ function audioReasoning(
   if (type === 'polyphonic') reasons.push('pitched attacks favour multipitch transcription');
   if (type === 'rhythm') reasons.push('transient evidence dominates pitched continuity');
   if (type === 'mixed') reasons.push('pitched continuity and repeated transient evidence are both material');
+  if (type === 'unknown') reasons.push('no route had enough musical evidence to process safely');
   return reasons;
 }
 
@@ -370,11 +497,86 @@ function midiReasoning(
   return [
     `route=${type}; source=midi`,
     `notes=${features.noteCount}; drums=${features.drumCount}; tracks=${features.trackCount}`,
-    `short_note_ratio=${features.shortNoteRatio?.toFixed(3)}; max_polyphony=${features.maxPolyphony}`,
+    `onset_density=${features.onsetDensity?.toFixed(3)}; repeated_layers=${features.repeatedLayerRatio?.toFixed(3)}`,
+    `chordal_onsets=${features.chordalOnsetRatio?.toFixed(3)}; max_polyphony=${features.maxPolyphony}`,
     hasDeclaredRhythm
       ? 'the file explicitly contains General MIDI percussion material'
       : 'routing was inferred from event duration, density, and overlap; channel absence was not treated as intent',
   ];
+}
+
+function groupNotesByOnset(notes: readonly NoteEvent[], toleranceSec = 0.003): NoteEvent[][] {
+  const groups: NoteEvent[][] = [];
+  for (const note of [...notes].sort((a, b) => a.startSec - b.startSec || a.pitch - b.pitch)) {
+    const current = groups[groups.length - 1];
+    const anchor = current?.[0]?.startSec;
+    if (!current || anchor === undefined || Math.abs(note.startSec - anchor) > toleranceSec) {
+      groups.push([note]);
+    } else {
+      current.push(note);
+    }
+  }
+  return groups;
+}
+
+function isChordLikeGroup(group: readonly NoteEvent[]): boolean {
+  const pitches = [...new Set(group.map((note) => note.pitch))].sort((a, b) => a - b);
+  if (pitches.length < 2) return false;
+  const intervals: number[] = [];
+  for (let left = 0; left < pitches.length; left += 1) {
+    for (let right = left + 1; right < pitches.length; right += 1) {
+      intervals.push(((pitches[right] as number) - (pitches[left] as number)) % 12);
+    }
+  }
+  const hasThird = intervals.some((interval) => interval === 3 || interval === 4);
+  const hasChordSpan = intervals.some((interval) => [7, 8, 9].includes(interval));
+  return hasThird && (pitches.length === 2 || hasChordSpan);
+}
+
+function countBy(values: readonly number[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return counts;
+}
+
+function rhythmicLayerRegularity(notes: readonly NoteEvent[]): number {
+  const byPitch = new Map<number, number[]>();
+  for (const note of notes) {
+    const starts = byPitch.get(note.pitch) ?? [];
+    starts.push(note.startSec);
+    byPitch.set(note.pitch, starts);
+  }
+  let weighted = 0;
+  let weight = 0;
+  for (const starts of byPitch.values()) {
+    if (starts.length < 4) continue;
+    starts.sort((a, b) => a - b);
+    const gaps = starts.slice(1).map((time, index) => time - (starts[index] ?? 0));
+    const centre = median(gaps);
+    if (centre <= 0) continue;
+    const regular = gaps.filter((gap) => {
+      const multiple = Math.max(1, Math.round(gap / centre));
+      return Math.abs(gap - centre * multiple) <= Math.max(0.025, centre * 0.18);
+    }).length / gaps.length;
+    weighted += regular * starts.length;
+    weight += starts.length;
+  }
+  return weight > 0 ? weighted / weight : 0;
+}
+
+function sequentialStepRatio(groups: readonly NoteEvent[][]): number {
+  if (groups.length < 2) return 0;
+  const centres = groups.map((group) => median(group.map((note) => note.pitch)));
+  const intervals = centres.slice(1).map((pitch, index) => Math.abs(pitch - (centres[index] ?? pitch)));
+  return intervals.filter((interval) => interval > 0 && interval <= 12).length / intervals.length;
+}
+
+function normalizedDeviation(values: readonly number[]): number {
+  if (values.length < 2) return 0;
+  const average = mean(values);
+  if (average <= 0) return 0;
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  return clamp01(Math.sqrt(variance) / average);
 }
 
 function maximumPolyphony(notes: readonly NoteEvent[]): number {

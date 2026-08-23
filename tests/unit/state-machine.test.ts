@@ -238,6 +238,27 @@ describe('iteration (US-0704)', () => {
     expect(transition(ready, 'RETOUCH_CHANGED').context.state).toBe('review');
   });
 
+  it('can reprocess the same source after a route correction', () => {
+    for (const upto of [7, 9, 11]) {
+      const context = run(HAPPY_PATH.slice(0, upto));
+      const corrected = transition(context, 'PROCESS');
+      expect({ state: context.state, accepted: corrected.accepted }).toEqual({
+        state: context.state,
+        accepted: true,
+      });
+      expect(corrected.context.state).toBe('processing');
+    }
+  });
+
+  it('can reinterpret imported MIDI from review, ready or published', () => {
+    for (const upto of [7, 9, 11]) {
+      const context = run(HAPPY_PATH.slice(0, upto));
+      const corrected = transition(context, 'MIDI_IMPORTED');
+      expect(corrected.accepted).toBe(true);
+      expect(corrected.context.state).toBe('review');
+    }
+  });
+
   it('restores a saved sketch straight into review', () => {
     expect(transition(INITIAL_CONTEXT, 'RESTORE').context.state).toBe('review');
   });

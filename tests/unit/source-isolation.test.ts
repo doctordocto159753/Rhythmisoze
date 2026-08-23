@@ -308,3 +308,47 @@ describe('the list of source-derived fields', () => {
     expect(SOURCE_DERIVED_FIELDS).toContain('versionId');
   });
 });
+
+describe('internal route becomes the compatible creation mode', () => {
+  it('maps rhythm classification to the saved rhythm mode', () => {
+    const before = initialState('auto-route');
+    const after = reducer(before, {
+      type: 'transcribed',
+      notes: [],
+      judge: null,
+      referenceNotes: [],
+      drums: [{ timeSec: 0, drum: 'kick', velocity: 100, confidence: 1 }],
+      diagnostics: {
+        ...DIAGNOSTICS,
+        classification: {
+          type: 'rhythm',
+          confidence: 0.9,
+          reasoning: ['transient evidence dominates'],
+        },
+      },
+      melodyQuality: null,
+    });
+    expect(after.mode).toBe('rhythm');
+    expect(after.diagnostics?.classification?.type).toBe('rhythm');
+    expect(after.judge).toBeNull();
+  });
+
+  it('keeps mixed as compatible melody mode while retaining both streams', () => {
+    const after = reducer(initialState('mixed-route'), {
+      type: 'transcribed',
+      notes: [note(60, 0)],
+      judge: { ...STALE_JUDGE, notes: [note(60, 0)] },
+      referenceNotes: [],
+      drums: [{ timeSec: 0, drum: 'hat', velocity: 80, confidence: 1 }],
+      diagnostics: {
+        ...DIAGNOSTICS,
+        classification: { type: 'mixed', confidence: 0.8, reasoning: ['both streams'] },
+      },
+      melodyQuality: null,
+    });
+    expect(after.mode).toBe('melody');
+    expect(after.rawNotes).toHaveLength(1);
+    expect(after.rawDrums).toHaveLength(1);
+    expect(after.diagnostics?.classification?.type).toBe('mixed');
+  });
+});

@@ -111,11 +111,13 @@ microphone ─► MonoAudio ─► voice melody engine ─► NoteEvent[] ─►
                                       └─ YIN → contour → segmentation → monophonic notes
 ```
 
-Instrument Mode is deliberately separate: guitar, piano and other potentially
-polyphonic audio continues through Basic Pitch in the worker. See
-[`docs/melody-engine.md`](docs/melody-engine.md).
+The user does not choose a mode. `InputClassifier` internally routes melody to
+the existing YIN engine, pitched re-attacked/polyphonic audio to Basic Pitch,
+rhythm to its fidelity path, and mixed input to both pitched and rhythm streams.
+The route, confidence and reasoning remain visible in Review diagnostics. See
+[`docs/architecture/musical-intent.md`](docs/architecture/musical-intent.md).
 
-Rhythm is a separate path, not melody with the pitch discarded:
+Rhythm remains a separate path, not melody with the pitch discarded:
 
 ```
 microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat ─► GM drums

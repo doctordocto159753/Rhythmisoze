@@ -308,6 +308,20 @@ export function ReviewStage({
                 value={t.privacy.backends[diagnostics.transcriberId]}
               />
             ) : null}
+            {diagnostics?.classification ? (
+              <DetailRow
+                label="Input classifier"
+                value={`${diagnostics.classification.type} (${Math.round(
+                  diagnostics.classification.confidence * 100,
+                )}%)`}
+              />
+            ) : null}
+            {diagnostics?.classification ? (
+              <DetailRow
+                label="Classifier reasoning"
+                value={diagnostics.classification.reasoning.join(' · ')}
+              />
+            ) : null}
           </Well>
         ) : null}
       </div>

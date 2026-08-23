@@ -3,7 +3,6 @@
 import { useEffect } from 'react';
 import { retouchLabel } from '@retouch';
 import { Button } from '@/components/Button';
-import { Choice } from '@/components/Choice';
 import { ErrorPanel } from '@/components/ErrorPanel';
 import { Raised, Row, Stack, Well } from '@/components/Layout';
 import { StageLabel, Text } from '@/components/Text';
@@ -166,36 +165,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                 <StageLabel>{t.landing.steps.tempo.title}</StageLabel>
               </Row>
 
-              <Choice<'melody' | 'rhythm'>
-                legend={t.mode.label}
-                value={state.mode}
-                options={[
-                  { value: 'melody', title: t.mode.melody, hint: t.mode.melodyHint },
-                  { value: 'rhythm', title: t.mode.rhythm, hint: t.mode.rhythmHint },
-                ]}
-                onChange={actions.setMode}
-              />
-
-              {state.mode === 'melody' ? (
-                <Choice<'voice' | 'instrument'>
-                  legend={t.melodyInput.label}
-                  value={state.melodyInputMode}
-                  options={[
-                    {
-                      value: 'voice',
-                      title: t.melodyInput.voice,
-                      hint: t.melodyInput.voiceHint,
-                    },
-                    {
-                      value: 'instrument',
-                      title: t.melodyInput.instrument,
-                      hint: t.melodyInput.instrumentHint,
-                    },
-                  ]}
-                  onChange={actions.setMelodyInputMode}
-                />
-              ) : null}
-
               <Raised as="section" aria-labelledby="setup-heading">
                 <Text variant="heading" as="h2" id="setup-heading" className={styles.srHeading}>
                   {t.tempo.label}
@@ -210,9 +179,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                   onBpmChange={actions.setBpm}
                   onMeterChange={actions.setMeter}
                   onToggleMetronome={actions.toggleMetronome}
-                  onWarm={state.mode === 'melody' && state.melodyInputMode === 'instrument'
-                    ? warmModel
-                    : undefined}
+                  onWarm={warmModel}
                 />
               </Raised>
 

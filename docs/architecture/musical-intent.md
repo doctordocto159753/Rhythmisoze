@@ -6,6 +6,41 @@ This document covers the re-architecture that moved the product from *audio
 transcription* to *musical intent extraction*. The voice pipeline itself is in
 [`../melody-engine.md`](../melody-engine.md); this is the layer around it.
 
+## Current internal-routing architecture
+
+```text
+Record / upload audio or MIDI
+             |
+       InputClassifier
+ type + confidence + reasoning
+             |
+    +--------+-----------+---------+
+ melody  polyphonic    rhythm    mixed
+    |        |            |       |  |
+ existing  Basic Pitch  fidelity  |  +-- rhythm fidelity
+ YIN path  transcription pipeline +----- pitched pipeline
+    |        |
+    +--- Judge -> Teacher -> Musician
+```
+
+Classification is not a user-facing mode. The creation screen offers one sound
+flow, and `InputClassifier` records `melody | polyphonic | rhythm | mixed`, its
+confidence, normalized scores, measured evidence, and human-readable reasoning
+in processing diagnostics. Audio classification runs inside the transcription
+worker. MIDI classification uses duration, density, overlap, and explicitly
+declared percussion; absence of channel 10 is never treated as intent.
+
+The voice extractor remains YIN pitch evidence -> `FrameEvidence` -> hysteretic
+voicing -> continuity-aware segmentation -> `NoteEvent[]`. Rhythm keeps its
+fidelity-first pipeline and has no Teacher. Mixed material preserves both
+streams: Teacher and Musician see pitched notes, while drums use rhythm fidelity.
+
+Saved projects and export manifests retain the existing `melody | rhythm`
+field. Internal rhythm maps to `rhythm`; the other routes use the compatible
+melody container while their richer classification remains in diagnostics. The
+legacy `classifyIntent()` API and explicit MIDI-plan argument remain adapters
+for older callers, but the current UI does not use them.
+
 ---
 
 ## The two mistakes this replaced

@@ -60,7 +60,22 @@ export type TranscriberId =
 export type ProcessingBackend = 'browser' | 'server';
 
 /** Which acoustic assumption the transcription engine should make. */
-export type TranscriptionInputMode = 'voice' | 'instrument' | 'rhythm';
+export type TranscriptionInputMode = 'auto' | 'voice' | 'instrument' | 'rhythm';
+
+/** Internal material classification. This is routing evidence, not a user mode. */
+export type InputType = 'melody' | 'polyphonic' | 'rhythm' | 'mixed';
+
+export interface InputClassification {
+  type: InputType;
+  /** 0..1 confidence in the selected route. */
+  confidence: number;
+  /** Human-readable evidence for debugging and misclassification reports. */
+  reasoning: string[];
+  /** Optional normalized scores retained for diagnostics. */
+  scores?: Record<InputType, number>;
+  /** Optional numeric evidence retained for diagnostics. */
+  features?: Record<string, number>;
+}
 
 export interface MelodyConfidence {
   melodyConfidence: number;
@@ -96,6 +111,8 @@ export interface ProcessingDiagnostics {
   notesBeforeFilter: number;
   notesAfterFilter: number;
   warnings: string[];
+  /** How the source was routed. Absent on saved results produced before auto-routing. */
+  classification?: InputClassification;
 }
 
 /**
@@ -130,9 +147,10 @@ export interface TranscriptionResult {
   /**
    * The Judge's verdict on `notes`, and its repair of them.
    *
-   * Present only for the voice path, where a reference contour exists to judge
-   * against. `notes` above is always the untouched candidate: the repair lives
-   * here so the product can offer both without one overwriting the other.
+   * Voice uses independent contour evidence. Polyphonic audio and exact MIDI
+   * use a conservative fidelity verdict that never applies monophonic repair.
+   * `notes` above is always the untouched candidate: the verdict lives here so
+   * the product can offer both without one overwriting the other.
    */
   judge?: JudgeVerdict;
   onsets?: OnsetEvent[];

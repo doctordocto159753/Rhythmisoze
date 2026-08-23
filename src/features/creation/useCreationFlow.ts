@@ -29,7 +29,6 @@ import {
   type MonoAudio,
   type NoteEvent,
   type ProcessingDiagnostics,
-  type TranscriptionInputMode,
   type TranscriptionProgress,
 } from '@contracts';
 import {
@@ -120,6 +119,7 @@ import { initialState, reducer, type FlowState, type MelodyInputMode } from './s
 export function useCreationFlow(locale: Locale) {
   const [state, dispatch] = useReducer(reducer, undefined, () => initialState(newSketchId()));
   const sourceKind = state.source?.kind;
+  const inputType = state.diagnostics?.classification?.type;
 
   const captureRef = useRef<CaptureStream | null>(null);
   const recorderRef = useRef<ActiveRecording | null>(null);
@@ -459,6 +459,7 @@ export function useCreationFlow(locale: Locale) {
           playableRange: state.mode === 'melody' ? instrument.range : undefined,
           referenceNotes: state.referenceNotes,
           sourceKind,
+          preserveRhythm: inputType === 'mixed',
         },
       );
     } catch {
@@ -475,6 +476,7 @@ export function useCreationFlow(locale: Locale) {
     state.retouchAmount,
     state.keyOverride,
     state.instrumentId,
+    inputType,
     sourceKind,
     activeVersion,
     versionNoteSources,
@@ -648,11 +650,11 @@ export function useCreationFlow(locale: Locale) {
       dispatch({ type: 'machine', event: 'PROCESS' });
       const controller = new AbortController();
       abortRef.current = controller;
-      track('processing_started', { mode: state.mode });
+      track('processing_started', { route: 'auto' });
 
       try {
         const result = await transcribe(audio, {
-          mode: state.mode === 'rhythm' ? 'rhythm' : state.melodyInputMode,
+          mode: 'auto',
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
         });
@@ -670,6 +672,7 @@ export function useCreationFlow(locale: Locale) {
           transcriber: result.diagnostics.transcriberId,
           ms: Math.round(result.diagnostics.elapsedMs),
           notes: result.notes.length,
+          inputType: result.diagnostics.classification?.type ?? 'legacy',
         });
 
         if (result.notes.length === 0 && (result.drums?.length ?? 0) === 0) {
@@ -688,7 +691,7 @@ export function useCreationFlow(locale: Locale) {
         abortRef.current = null;
       }
     },
-    [state.mode, state.melodyInputMode, send, fail],
+    [send, fail],
   );
 
   const ingestAudioBlob = useCallback(
@@ -746,12 +749,12 @@ export function useCreationFlow(locale: Locale) {
         },
         'RECORDING_STOPPED',
       );
-      track('recording_completed', { seconds: Math.round(audio.durationSec), mode: state.mode });
+      track('recording_completed', { seconds: Math.round(audio.durationSec), route: 'auto' });
     } catch (error) {
       stopEverything();
       fail(error);
     }
-  }, [fail, state.mode, stopEverything, ingestAudioBlob]);
+  }, [fail, stopEverything, ingestAudioBlob]);
 
   const uploadAudio = useCallback(
     async (file: File) => {
@@ -802,7 +805,7 @@ export function useCreationFlow(locale: Locale) {
           throw new AppError('audio_too_long', 'retry', `${result.durationSec.toFixed(2)}s MIDI`);
         }
         // The rule lives in `@midi` where it can be tested. See `planMidiImport`.
-        const plan = planMidiImport(result, state.mode);
+        const plan = planMidiImport(result);
         const { mode, notes, drums } = plan;
         dispatch({
           type: 'midiImported',
@@ -832,18 +835,18 @@ export function useCreationFlow(locale: Locale) {
               ...(plan.pitchedNotesAsRhythm > 0
                 ? [`midi_pitched_notes_as_rhythm:${plan.pitchedNotesAsRhythm}`]
                 : []),
-              ...(plan.modeChangedBecause !== null
-                ? [`midi_mode_changed:${state.mode}->${mode}:${plan.modeChangedBecause}`]
-                : []),
+              `input_classified:${plan.classification.type}:${plan.classification.confidence.toFixed(3)}`,
             ],
+            classification: plan.classification,
           },
+          judge: plan.judge,
         });
         send('MIDI_IMPORTED');
       } catch (error) {
         fail(error);
       }
     },
-    [state.mode, send, fail, stopEverything],
+    [send, fail, stopEverything],
   );
 
   const arm = useCallback(async () => {
@@ -1194,7 +1197,7 @@ export function useCreationFlow(locale: Locale) {
         if (request) musician.regenerate(request);
       },
     },
-    /** What a teacher would suggest, and why. Null outside the voice path. */
+    /** What a teacher would suggest, and why. Null outside the pitched path. */
     lesson,
     /** Set when the heard tempo and the tapped tempo disagree. */
     tempoDisagreement,

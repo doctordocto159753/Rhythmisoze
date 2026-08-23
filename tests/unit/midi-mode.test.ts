@@ -98,6 +98,36 @@ const MIXED_FILE = buildMidi([
   },
 ]);
 
+const POLYPHONIC_FILE = buildMidi([
+  {
+    channel: 0,
+    notes: [
+      { midi: 60, timeSec: 0, durationSec: 0.8 },
+      { midi: 64, timeSec: 0, durationSec: 0.8 },
+      { midi: 67, timeSec: 0, durationSec: 0.8 },
+      { midi: 62, timeSec: 1, durationSec: 0.8 },
+      { midi: 65, timeSec: 1, durationSec: 0.8 },
+    ],
+  },
+]);
+
+const DECLARED_MIXED_FILE = buildMidi([
+  {
+    channel: 0,
+    notes: [
+      { midi: 72, timeSec: 0, durationSec: 0.1 },
+      { midi: 74, timeSec: 0.25, durationSec: 0.1 },
+    ],
+  },
+  {
+    channel: 9,
+    notes: [
+      { midi: 36, timeSec: 0, durationSec: 0.08 },
+      { midi: 42, timeSec: 0.25, durationSec: 0.08 },
+    ],
+  },
+]);
+
 describe('A: a General MIDI drum file', () => {
   const file = importMidi(GM_DRUM_FILE);
 
@@ -256,5 +286,50 @@ describe('reading pitched notes as hits', () => {
 
   it('has nothing to say about an empty melody', () => {
     expect(interpretNotesAsRhythm([])).toEqual([]);
+  });
+});
+
+describe('internal MIDI classification and routing', () => {
+  it('auto-routes declared percussion without a user mode', () => {
+    const plan = planMidiImport(importMidi(GM_DRUM_FILE));
+    expect(plan.classification.type).toBe('rhythm');
+    expect(plan.mode).toBe('rhythm');
+    expect(plan.notes).toEqual([]);
+  });
+
+  it('recognizes a dense short-note pitched rhythm without reading channel as intent', () => {
+    const file = importMidi(PITCHED_RHYTHM_FILE);
+    const plan = planMidiImport(file);
+    expect(plan.classification.type).toBe('rhythm');
+    expect(plan.drums).toHaveLength(file.notes.length);
+    expect(plan.drums.map((hit) => hit.sourcePitch)).toEqual(
+      expect.arrayContaining(file.notes.map((note) => note.pitch)),
+    );
+  });
+
+  it('routes overlapping sustained notes as polyphonic and keeps every note', () => {
+    const file = importMidi(POLYPHONIC_FILE);
+    const plan = planMidiImport(file);
+    expect(plan.classification.type).toBe('polyphonic');
+    expect(plan.notes).toEqual(file.notes);
+    expect(plan.judge?.notes).toEqual(file.notes);
+  });
+
+  it('splits mixed MIDI into pitched and rhythmic streams without collisions', () => {
+    const plan = planMidiImport(importMidi(MIXED_FILE));
+    expect(plan.classification.type).toBe('mixed');
+    expect(plan.notes).toHaveLength(3);
+    expect(plan.drums).toHaveLength(8);
+    expect(plan.judge?.notes).toEqual(plan.notes);
+    expect(new Set(plan.drums.map((hit) => hit.voice))).toEqual(new Set(['pitch:42']));
+  });
+
+  it('trusts declared stream identity and keeps short melodic notes pitched', () => {
+    const file = importMidi(DECLARED_MIXED_FILE);
+    const plan = planMidiImport(file);
+    expect(plan.classification.type).toBe('mixed');
+    expect(plan.notes).toEqual(file.notes);
+    expect(plan.drums).toEqual(file.drums);
+    expect(plan.pitchedNotesAsRhythm).toBe(0);
   });
 });

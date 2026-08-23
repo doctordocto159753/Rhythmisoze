@@ -10,9 +10,12 @@ import {
   type CreationMode,
   type DrumClass,
   type DrumEvent,
+  type InputClassification,
+  type JudgeVerdict,
   type Meter,
   type NoteEvent,
 } from '@contracts';
+import { classifyMidiInput } from '@intent';
 
 export interface MidiImportResult {
   /**
@@ -212,6 +215,10 @@ export interface MidiImportPlan {
   pitchedNotesAsRhythm: number;
   /** Set when the file had nothing the selected mode could use. */
   modeChangedBecause: 'percussion-only' | null;
+  /** Internal routing decision, absent only from no path in current code. */
+  classification: InputClassification;
+  /** Source-faithful symbolic Judge result for pitched material. */
+  judge: JudgeVerdict | null;
 }
 
 /**
@@ -246,7 +253,67 @@ export interface MidiImportPlan {
  */
 export function planMidiImport(
   result: MidiImportResult,
+  selectedMode?: CreationMode,
+): MidiImportPlan {
+  const classification = classifyMidiInput(result);
+
+  // Compatibility adapter for callers that still pass the saved legacy mode.
+  // The creation UI no longer calls this branch, but keeping it means old
+  // integrations preserve their exact interpretation while projects migrate.
+  if (selectedMode !== undefined) return planLegacyMidiImport(result, selectedMode, classification);
+
+  if (classification.type === 'rhythm') {
+    const fromPitches = interpretNotesAsRhythm(result.notes);
+    return {
+      mode: 'rhythm',
+      notes: [],
+      drums: [...result.drums, ...fromPitches].sort((a, b) => a.timeSec - b.timeSec),
+      pitchedNotesAsRhythm: fromPitches.length,
+      modeChangedBecause: null,
+      classification,
+      judge: null,
+    };
+  }
+
+  if (classification.type === 'mixed') {
+    // A declared drum channel already separates the streams authoritatively;
+    // every pitched note remains pitched, including staccato melody notes. Only
+    // an all-pitched file needs duration to separate its rhythmic hit layers.
+    const pitched = result.drums.length > 0
+      ? result.notes
+      : result.notes.filter((note) => note.endSec - note.startSec > 0.16);
+    const rhythmic = result.drums.length > 0
+      ? []
+      : result.notes.filter((note) => note.endSec - note.startSec <= 0.16);
+    const fromPitches = interpretNotesAsRhythm(rhythmic);
+    return {
+      // Kept in the persisted v3 vocabulary; `classification.type` carries the
+      // richer internal truth without changing saved-project schemas.
+      mode: 'melody',
+      notes: pitched,
+      drums: [...result.drums, ...fromPitches].sort((a, b) => a.timeSec - b.timeSec),
+      pitchedNotesAsRhythm: fromPitches.length,
+      modeChangedBecause: null,
+      classification,
+      judge: symbolicJudge(pitched),
+    };
+  }
+
+  return {
+    mode: 'melody',
+    notes: result.notes,
+    drums: [],
+    pitchedNotesAsRhythm: 0,
+    modeChangedBecause: null,
+    classification,
+    judge: symbolicJudge(result.notes),
+  };
+}
+
+function planLegacyMidiImport(
+  result: MidiImportResult,
   selectedMode: CreationMode,
+  classification: InputClassification,
 ): MidiImportPlan {
   const percussionOnly = result.notes.length === 0 && result.drums.length > 0;
   const mode: CreationMode = selectedMode === 'melody' && percussionOnly ? 'rhythm' : selectedMode;
@@ -258,6 +325,8 @@ export function planMidiImport(
       drums: [],
       pitchedNotesAsRhythm: 0,
       modeChangedBecause: null,
+      classification,
+      judge: symbolicJudge(result.notes),
     };
   }
 
@@ -268,5 +337,19 @@ export function planMidiImport(
     drums: [...result.drums, ...fromPitches].sort((a, b) => a.timeSec - b.timeSec),
     pitchedNotesAsRhythm: fromPitches.length,
     modeChangedBecause: mode === selectedMode ? null : 'percussion-only',
+    classification,
+    judge: null,
+  };
+}
+
+function symbolicJudge(notes: readonly NoteEvent[]): JudgeVerdict | null {
+  if (notes.length === 0) return null;
+  return {
+    notes: notes.map((note) => ({ ...note })),
+    score: 1,
+    scoreBefore: 1,
+    repairs: [],
+    unsupportedNotesRemoved: 0,
+    octaveErrorsCorrected: 0,
   };
 }

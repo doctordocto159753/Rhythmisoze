@@ -28,7 +28,13 @@
  * receives a bad classification report.
  */
 
-import type { MonoAudio } from '@contracts';
+import type {
+  DrumEvent,
+  InputClassification,
+  InputType,
+  MonoAudio,
+  NoteEvent,
+} from '@contracts';
 import { bandEnergyRatio, magnitudeSpectrum, rmsOf, spectralCentroid, zeroCrossingRate } from '@audio-core';
 
 export type Intent = 'voice' | 'instrument' | 'beat';
@@ -211,6 +217,178 @@ export function classifyIntent(audio: MonoAudio): IntentClassification {
     features,
     shouldAsk: confidence < INTENT_ASK_THRESHOLD,
   };
+}
+
+export interface MidiClassificationInput {
+  notes: readonly NoteEvent[];
+  drums: readonly DrumEvent[];
+  durationSec: number;
+  trackCount: number;
+}
+
+/**
+ * Product-facing classifier. It never asks the user to label their own sound;
+ * uncertainty remains observable in `confidence` and `reasoning` instead.
+ */
+export class InputClassifier {
+  classify(audio: MonoAudio): InputClassification {
+    const legacy = classifyIntent(audio);
+    const pitched = legacy.scores.voice + legacy.scores.instrument;
+    const pitchedEvidence = ramp(legacy.features.voicedRatio, 0.15, 0.55);
+    const voiceContinuity =
+      inverse(legacy.features.attackSharpness) *
+      ramp(legacy.features.meanVoicedRunSec, 0.1, 0.45);
+    const instrumentAttacks =
+      legacy.features.attackSharpness *
+      inverse(ramp(legacy.features.meanVoicedRunSec, 0.18, 0.55));
+    const onsetMixedEvidence =
+      ramp(legacy.features.voicedRatio, 0.18, 0.55) *
+      ramp(legacy.features.onsetRate, 0.8, 3.5) *
+      Math.min(pitched, legacy.scores.beat) *
+      2.4;
+    // A sustained pitched bed can raise the adaptive energy floor enough that
+    // attacks embedded in it no longer count as standalone onsets. Spectral
+    // brightness plus sharp rises inside a long voiced run retains that mixed
+    // evidence without mistaking a sequence of short plucks for voice+rhythm.
+    const embeddedTransientEvidence =
+      pitchedEvidence *
+      voiceContinuity *
+      ramp(legacy.features.attackSharpness, 0.12, 0.34) *
+      ramp(legacy.features.centroidHz, 1400, 4000) *
+      3.2;
+    const mixedEvidence = Math.max(onsetMixedEvidence, embeddedTransientEvidence);
+
+    const raw: Record<InputType, number> = {
+      melody: legacy.scores.voice * (0.55 + voiceContinuity) * pitchedEvidence,
+      polyphonic:
+        (legacy.scores.instrument * (0.55 + instrumentAttacks) +
+          pitched * instrumentAttacks * 0.35) *
+        pitchedEvidence,
+      rhythm: legacy.scores.beat,
+      mixed: mixedEvidence,
+    };
+    const total = Object.values(raw).reduce((sum, value) => sum + value, 0) || 1;
+    const scores: Record<InputType, number> = {
+      melody: raw.melody / total,
+      polyphonic: raw.polyphonic / total,
+      rhythm: raw.rhythm / total,
+      mixed: raw.mixed / total,
+    };
+    const ranked = (Object.keys(scores) as InputType[]).sort((a, b) => scores[b] - scores[a]);
+    const type = ranked[0] as InputType;
+    const runnerUp = ranked[1] as InputType;
+    const margin = scores[type] - scores[runnerUp];
+    const confidence = clamp01(legacy.confidence * 0.7 + margin * 0.6);
+
+    return {
+      type,
+      confidence,
+      reasoning: audioReasoning(type, legacy.features, scores),
+      scores,
+      features: { ...legacy.features },
+    };
+  }
+
+  classifyMidi(input: MidiClassificationInput): InputClassification {
+    const { notes, drums } = input;
+    const durations = notes.map((note) => Math.max(0, note.endSec - note.startSec));
+    const shortNotes = durations.filter((duration) => duration <= 0.16).length;
+    const shortRatio = notes.length > 0 ? shortNotes / notes.length : 0;
+    const sustainedRatio = notes.length > 0 ? 1 - shortRatio : 0;
+    const maxPolyphony = maximumPolyphony(notes);
+    const onsetDensity = (notes.length + drums.length) / Math.max(0.25, input.durationSec);
+    const hasDeclaredRhythm = drums.length > 0;
+    const hasPitchedRhythm = notes.length >= 6 && shortRatio >= 0.72 && onsetDensity >= 2;
+    const hasSustainedPitch = notes.length > 0 && sustainedRatio >= 0.2;
+
+    let type: InputType;
+    if ((hasDeclaredRhythm && notes.length > 0) || (hasPitchedRhythm && hasSustainedPitch)) type = 'mixed';
+    else if (hasDeclaredRhythm || hasPitchedRhythm) type = 'rhythm';
+    else if (maxPolyphony > 1) type = 'polyphonic';
+    else type = 'melody';
+
+    const structuralEvidence = notes.length + drums.length >= 4 ? 0.92 : 0.76;
+    const confidence = type === 'mixed' ? Math.min(0.9, structuralEvidence) : structuralEvidence;
+    const scores: Record<InputType, number> = {
+      melody: type === 'melody' ? confidence : (1 - confidence) / 3,
+      polyphonic: type === 'polyphonic' ? confidence : (1 - confidence) / 3,
+      rhythm: type === 'rhythm' ? confidence : (1 - confidence) / 3,
+      mixed: type === 'mixed' ? confidence : (1 - confidence) / 3,
+    };
+    const features = {
+      noteCount: notes.length,
+      drumCount: drums.length,
+      shortNoteRatio: shortRatio,
+      sustainedNoteRatio: sustainedRatio,
+      maxPolyphony,
+      onsetDensity,
+      trackCount: input.trackCount,
+    };
+
+    return {
+      type,
+      confidence,
+      scores,
+      features,
+      reasoning: midiReasoning(type, features, hasDeclaredRhythm),
+    };
+  }
+}
+
+export const inputClassifier = new InputClassifier();
+
+export function classifyInput(audio: MonoAudio): InputClassification {
+  return inputClassifier.classify(audio);
+}
+
+export function classifyMidiInput(input: MidiClassificationInput): InputClassification {
+  return inputClassifier.classifyMidi(input);
+}
+
+function audioReasoning(
+  type: InputType,
+  features: IntentFeatures,
+  scores: Record<InputType, number>,
+): string[] {
+  const reasons = [
+    `route=${type}; score=${scores[type].toFixed(3)}`,
+    `voiced_ratio=${features.voicedRatio.toFixed(3)}; pitch_stability=${features.pitchStability.toFixed(3)}`,
+    `onset_rate=${features.onsetRate.toFixed(3)}; attack_sharpness=${features.attackSharpness.toFixed(3)}`,
+  ];
+  if (type === 'melody') reasons.push('continuous pitched evidence favours the existing human-melody tracker');
+  if (type === 'polyphonic') reasons.push('pitched attacks favour multipitch transcription');
+  if (type === 'rhythm') reasons.push('transient evidence dominates pitched continuity');
+  if (type === 'mixed') reasons.push('pitched continuity and repeated transient evidence are both material');
+  return reasons;
+}
+
+function midiReasoning(
+  type: InputType,
+  features: Record<string, number>,
+  hasDeclaredRhythm: boolean,
+): string[] {
+  return [
+    `route=${type}; source=midi`,
+    `notes=${features.noteCount}; drums=${features.drumCount}; tracks=${features.trackCount}`,
+    `short_note_ratio=${features.shortNoteRatio?.toFixed(3)}; max_polyphony=${features.maxPolyphony}`,
+    hasDeclaredRhythm
+      ? 'the file explicitly contains General MIDI percussion material'
+      : 'routing was inferred from event duration, density, and overlap; channel absence was not treated as intent',
+  ];
+}
+
+function maximumPolyphony(notes: readonly NoteEvent[]): number {
+  const points = notes.flatMap((note) => [
+    { time: note.startSec, delta: 1 },
+    { time: note.endSec, delta: -1 },
+  ]).sort((a, b) => a.time - b.time || a.delta - b.delta);
+  let active = 0;
+  let maximum = 0;
+  for (const point of points) {
+    active += point.delta;
+    maximum = Math.max(maximum, active);
+  }
+  return maximum;
 }
 
 /**

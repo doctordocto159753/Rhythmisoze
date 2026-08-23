@@ -50,7 +50,7 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | US-0301 normalize audio | Done | `MonoAudio`, deterministic downmix, diagnostics, resampling |
 | US-0302 model load and cache | Built, unverified | Self-hosted 0.9 MB model, versioned, warmed on record hover; load time not measured |
 | US-0303 off the main thread | Done | Worker with typed protocol, real cancellation, an escaped-error trap and a watchdog; verified end to end in Chromium by `tests/e2e/capture.spec.ts` |
-| US-0304 result contract | Done | Voice uses the isolated Human Melody Extraction Engine; Instrument Mode keeps polyphonic Basic Pitch; rhythm and MIDI import remain explicit |
+| US-0304 result contract | Done | `InputClassifier` internally routes melody, polyphonic, rhythm and mixed input; the isolated Human Melody Extraction Engine, Basic Pitch and rhythm fidelity paths remain distinct and observable |
 | US-0305 progress and recovery | Done | Real stages, typed errors, retry without re-recording |
 | US-0306 server adapter | **Not done** | Correctly conditional on ADR-001 selecting a server path. It did not. |
 

@@ -37,7 +37,7 @@ import {
   type MachineContext,
 } from '@/features/state/machine';
 
-export type MelodyInputMode = Exclude<TranscriptionInputMode, 'rhythm'>;
+export type MelodyInputMode = Exclude<TranscriptionInputMode, 'auto' | 'rhythm'>;
 
 export interface FlowState {
   machine: MachineContext;
@@ -84,7 +84,7 @@ export interface FlowState {
   validation: AudioValidation | null;
 
   rawNotes: NoteEvent[];
-  /** The Judge's repair of `rawNotes`, and its verdict. Null outside the voice path. */
+  /** The current source's Judge verdict. Null for rhythm-only material. */
   judge: JudgeVerdict | null;
   referenceNotes: NoteEvent[];
   rawDrums: RefineResult['drums'];
@@ -174,6 +174,7 @@ export type Action =
       durationSec: number;
       source: LocalSourceAsset;
       diagnostics: ProcessingDiagnostics;
+      judge?: JudgeVerdict | null;
     }
   | { type: 'setRetouch'; amount: number }
   | { type: 'setVersion'; versionId: VersionId }
@@ -396,24 +397,35 @@ export function reducer(state: FlowState, action: Action): FlowState {
       // Not a new source — the same audio, now understood. `sourceId` is
       // deliberately unchanged, so a Musician result generated from this take
       // survives a reprocess of the very same recording.
-      return {
-        ...state,
-        rawNotes: action.notes,
-        judge: action.judge,
-        referenceNotes: action.referenceNotes,
-        rawDrums: action.drums,
-        diagnostics: action.diagnostics,
-        melodyQuality: action.melodyQuality,
-        progress: null,
-        // A re-read of the take can move every note, so the previous choice of
-        // version described a reading that no longer exists. The same goes for a
-        // tempo override: it was a judgement about different notes.
-        versionId: null,
-        tempoChoice: 'performance',
-        renderedAudio: null,
-        renderedKey: null,
-        renderRealtimeRatio: null,
-      };
+      {
+        const classification = action.diagnostics.classification?.type;
+        const mode: CreationMode = classification
+          ? classification === 'rhythm' ? 'rhythm' : 'melody'
+          : state.mode;
+        return {
+          ...state,
+          mode,
+          melodyInputMode: classification
+            ? classification === 'melody' ? 'voice' : 'instrument'
+            : state.melodyInputMode,
+          instrumentId: mode === state.mode ? state.instrumentId : resolveInstrument(undefined, mode).id,
+          rawNotes: action.notes,
+          judge: action.judge,
+          referenceNotes: action.referenceNotes,
+          rawDrums: action.drums,
+          diagnostics: action.diagnostics,
+          melodyQuality: action.melodyQuality,
+          progress: null,
+          // A re-read of the take can move every note, so the previous choice of
+          // version described a reading that no longer exists. The same goes for a
+          // tempo override: it was a judgement about different notes.
+          versionId: null,
+          tempoChoice: 'performance',
+          renderedAudio: null,
+          renderedKey: null,
+          renderRealtimeRatio: null,
+        };
+      }
     case 'midiImported':
       return {
         ...state,
@@ -431,6 +443,7 @@ export function reducer(state: FlowState, action: Action): FlowState {
         source: action.source,
         durationSec: action.durationSec,
         rawNotes: action.notes,
+        judge: action.judge ?? null,
         rawDrums: action.drums,
         diagnostics: action.diagnostics,
       };

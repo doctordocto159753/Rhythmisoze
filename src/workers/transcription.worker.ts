@@ -32,6 +32,7 @@ import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
 import { detectOnsets } from '@/packages/audio-core/onsets';
 import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
+import { classifyInput } from '@intent';
 
 export interface TranscribeRequest {
   type: 'transcribe';
@@ -152,11 +153,17 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
 
   inFlight = request.id;
   try {
-    const result = request.mode === 'rhythm'
+    const classification = request.mode === 'auto' ? classifyInput(audio) : null;
+    const route = classification?.type ?? request.mode;
+    const result = route === 'rhythm'
       ? await runRhythm(request, audio)
-      : request.mode === 'voice'
+      : route === 'melody' || route === 'voice'
         ? runVoiceMelody(request, audio)
-        : await runInstrument(request, audio);
+        : route === 'mixed'
+          ? await runMixed(request, audio)
+          : await runInstrument(request, audio);
+
+    if (classification) result.diagnostics.classification = classification;
 
     if (cancelled.has(request.id)) {
       cancelled.delete(request.id);
@@ -179,6 +186,33 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
     if (inFlight === request.id) inFlight = null;
     cancelled.delete(request.id);
   }
+}
+
+async function runMixed(
+  request: TranscribeRequest,
+  audio: MonoAudio,
+): Promise<TranscriptionResult> {
+  const pitched = await runInstrument(request, audio);
+  throwIfCancelled(request.id);
+  const rhythm = await runRhythm(request, audio);
+  return {
+    ...pitched,
+    drums: rhythm.drums ?? [],
+    onsets: rhythm.onsets,
+    diagnostics: {
+      ...pitched.diagnostics,
+      elapsedMs: pitched.diagnostics.elapsedMs + rhythm.diagnostics.elapsedMs,
+      notesBeforeFilter:
+        pitched.diagnostics.notesBeforeFilter + rhythm.diagnostics.notesBeforeFilter,
+      notesAfterFilter:
+        pitched.diagnostics.notesAfterFilter + rhythm.diagnostics.notesAfterFilter,
+      warnings: [
+        ...pitched.diagnostics.warnings,
+        ...rhythm.diagnostics.warnings,
+        'mixed_route:pitch_and_rhythm_preserved',
+      ],
+    },
+  };
 }
 
 async function runRhythm(
@@ -455,8 +489,26 @@ async function runBasicPitch(
 
   return {
     notes,
+    // Audio has no independent polyphonic ground truth. The Judge therefore
+    // acts as a fidelity guard: it validates the candidate structurally and
+    // abstains from monophonic pitch repair, which would destroy chords.
+    judge: polyphonicFidelityVerdict(notes),
     durationSec: audio.durationSec,
     diagnostics,
+  };
+}
+
+function polyphonicFidelityVerdict(notes: readonly NoteEvent[]): NonNullable<TranscriptionResult['judge']> {
+  const confidence = notes.length === 0
+    ? 0
+    : notes.reduce((sum, note) => sum + (note.confidence ?? 0.75), 0) / notes.length;
+  return {
+    notes: notes.map((note) => ({ ...note })),
+    score: Math.max(0, Math.min(1, confidence)),
+    scoreBefore: Math.max(0, Math.min(1, confidence)),
+    repairs: [],
+    unsupportedNotesRemoved: 0,
+    octaveErrorsCorrected: 0,
   };
 }
 

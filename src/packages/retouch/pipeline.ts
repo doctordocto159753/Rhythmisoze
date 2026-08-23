@@ -85,6 +85,8 @@ export interface RefineOptions {
   referenceNotes?: readonly NoteEvent[];
   /** MIDI imports may be intentionally polyphonic/wide-register. */
   sourceKind?: SourceKind;
+  /** Preserve and fidelity-process rhythm material beside pitched material. */
+  preserveRhythm?: boolean;
   /**
    * Direct parameter overrides, used by the version presets so that timing and
    * pitch correction can move independently. Not reachable from the UI: the
@@ -146,9 +148,25 @@ export function refine(
   });
   const stepSec = stepSeconds(options.bpm, params.grid);
 
-  return options.mode === 'rhythm'
-    ? refineRhythm(input.drums, { ...options, params, stepSec })
-    : refineMelody(input.notes, { ...options, params, stepSec });
+  const resolved = { ...options, params, stepSec };
+  if (options.mode === 'rhythm') return refineRhythm(input.drums, resolved);
+
+  const melody = refineMelody(input.notes, resolved);
+  if (!options.preserveRhythm || input.drums.length === 0) return melody;
+
+  // Mixed material is two parallel responsibilities: Teacher/Musician shape
+  // the pitched stream, while rhythm keeps the existing fidelity pipeline.
+  const rhythm = refineRhythm(input.drums, resolved);
+  return {
+    ...melody,
+    drums: rhythm.drums,
+    gridDrums: rhythm.gridDrums,
+    analysis: {
+      ...melody.analysis,
+      noteCount: melody.notes.length + rhythm.drums.length,
+      notesMerged: melody.analysis.notesMerged + rhythm.analysis.notesMerged,
+    },
+  };
 }
 
 interface ResolvedOptions extends RefineOptions {

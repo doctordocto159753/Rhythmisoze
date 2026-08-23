@@ -16,7 +16,13 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MonoAudio } from '@contracts';
-import { classifyIntent, extractIntentFeatures, INTENT_ASK_THRESHOLD } from '@intent';
+import {
+  InputClassifier,
+  classifyInput,
+  classifyIntent,
+  extractIntentFeatures,
+  INTENT_ASK_THRESHOLD,
+} from '@intent';
 
 const RATE = 44100;
 
@@ -111,6 +117,18 @@ function beatPattern(): MonoAudio {
   return mono(out);
 }
 
+function mixedPhrase(): MonoAudio {
+  const voice = sungPhrase();
+  const beat = beatPattern();
+  const out = new Float32Array(Math.max(voice.samples.length, beat.samples.length));
+  for (let index = 0; index < out.length; index += 1) {
+    out[index] =
+      (voice.samples[index] ?? 0) * 0.75 +
+      (beat.samples[index] ?? 0) * 0.55;
+  }
+  return mono(out);
+}
+
 describe('feature extraction', () => {
   it('finds a sung phrase highly voiced with long unbroken runs', () => {
     const features = extractIntentFeatures(sungPhrase());
@@ -198,5 +216,33 @@ describe('classification', () => {
     const result = classifyIntent(sungPhrase());
     expect(result.features.voicedRatio).toBeGreaterThan(0);
     expect(Object.keys(result.scores).sort()).toEqual(['beat', 'instrument', 'voice']);
+  });
+});
+
+describe('internal InputClassifier routing contract', () => {
+  it('routes continuous voice-shaped pitch through the melody path', () => {
+    const result = classifyInput(sungPhrase());
+    expect(result.type).toBe('melody');
+    expect(result.confidence).toBeGreaterThan(0);
+    expect(result.reasoning.length).toBeGreaterThan(1);
+  });
+
+  it('routes re-attacked pitched material through multipitch transcription', () => {
+    expect(new InputClassifier().classify(pluckedPhrase()).type).toBe('polyphonic');
+  });
+
+  it('routes transient unpitched material through rhythm fidelity', () => {
+    expect(classifyInput(beatPattern()).type).toBe('rhythm');
+  });
+
+  it('keeps simultaneous pitched and transient evidence as mixed', () => {
+    expect(classifyInput(mixedPhrase()).type).toBe('mixed');
+  });
+
+  it('returns normalized scores for every internal route', () => {
+    const scores = classifyInput(sungPhrase()).scores;
+    expect(scores).toBeDefined();
+    expect(Object.keys(scores ?? {}).sort()).toEqual(['melody', 'mixed', 'polyphonic', 'rhythm']);
+    expect(Object.values(scores ?? {}).reduce((sum, score) => sum + score, 0)).toBeCloseTo(1, 6);
   });
 });

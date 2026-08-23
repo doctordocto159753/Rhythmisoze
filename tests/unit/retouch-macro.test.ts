@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { NoteEvent } from '@contracts';
+import type { DrumEvent, NoteEvent } from '@contracts';
 import {
   refine,
   resolveRetouchParams,
@@ -229,5 +229,24 @@ describe('refine key handling', () => {
     expect(result.key.root).toBe('F');
     expect(result.key.mode).toBe('major');
     expect(result.keyIsReliable).toBe(true);
+  });
+});
+
+describe('mixed-material refinement', () => {
+  it('runs pitched cleanup and rhythm fidelity in parallel', () => {
+    const notes = messyPhrase();
+    const drums: DrumEvent[] = [
+      { timeSec: 0.13, drum: 'kick', velocity: 100, confidence: 1, voice: 'pitch:40' },
+      { timeSec: 0.13, drum: 'snare', velocity: 80, confidence: 1, voice: 'pitch:60' },
+    ];
+    const result = refine(
+      { notes, drums },
+      { bpm: 100, mode: 'melody', amount: 60, preserveRhythm: true, sourceKind: 'midi-upload' },
+    );
+
+    expect(result.notes.length).toBeGreaterThan(0);
+    expect(result.drums).toHaveLength(2);
+    expect(result.drums.map((hit) => hit.voice)).toEqual(['pitch:40', 'pitch:60']);
+    expect(result.analysis.noteCount).toBe(result.notes.length + result.drums.length);
   });
 });

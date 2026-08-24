@@ -10,7 +10,9 @@ rather than left to the next person to run `docker compose build`.
 
 from __future__ import annotations
 
+import json
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -152,6 +154,28 @@ class TestTheRwkvImageCanActuallyRunTheV1Runtime:
     def test_the_runtime_extra_is_installed(self) -> None:
         text = (ROOT / "services/musician/rwkv-worker/Dockerfile").read_text(encoding="utf-8")
         assert "worker[pip]" in text, "the V1 runtime dependencies are not installed"
+
+    def test_the_saved_mmm_tokenizer_runtime_is_installed(self) -> None:
+        """The low-level ``tokenizers`` package is not the MMM runtime.
+
+        The container previously installed ``tokenizers`` and looked complete,
+        but startup failed with ``No module named 'miditok'``. Pin the runtime
+        to the version that wrote the checked-in upstream tokenizer so its
+        serialised representation cannot silently drift.
+        """
+        pyproject = tomllib.loads(
+            (ROOT / "services/musician/rwkv-worker/pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        dependencies = pyproject["project"]["optional-dependencies"]["pip"]
+        tokenizer = json.loads(
+            (
+                ROOT
+                / "vendor/midi-rwkv/train/tokenizer/tokenizer_with_acs.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert f"miditok=={tokenizer['miditok_version']}" in dependencies
 
     def test_rwkv_v7_is_selected(self) -> None:
         """MIDI-RWKV is RWKV-7, and the package needs telling.

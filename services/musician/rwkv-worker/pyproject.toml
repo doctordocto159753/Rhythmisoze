@@ -28,7 +28,14 @@ cpu = []
 # MIDI-RWKV's own tokenizer JSON, and the failure is a parse error at load rather
 # than anything that names a version. It is also why this worker cannot share an
 # environment with MelodyT5, which needs <0.20 via transformers 4.40.
-pip = ["rwkv>=0.8", "torch>=2.0", "tokenizers>=0.21"]
+pip = [
+  "rwkv>=0.8",
+  "torch>=2.0",
+  "tokenizers>=0.21",
+  # The checkpoint is trained against this exact saved MMM representation.
+  # Installing tokenizers alone cannot load or decode it.
+  "miditok==3.0.5.post1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -46,9 +46,10 @@ COPY shared/src /app/shared/src
 COPY rwkv-worker/pyproject.toml /app/worker/pyproject.toml
 COPY rwkv-worker/src /app/worker/src
 
-# `[pip]` is the runtime extra: rwkv, torch and tokenizers. Installing the worker
-# without it produced an image that started, answered /health, and then failed
-# every generation with "no RWKV runtime available".
+# `[pip]` is the runtime extra: rwkv, torch, tokenizers and the miditok MMM
+# representation. Installing only the lower-level tokenizer packages produces
+# an image that starts and answers /health but cannot load the saved MIDI
+# tokenizer, so every infill request fails at runtime.
 RUN pip install --no-cache-dir ./shared && \
     pip install --no-cache-dir --index-url "${TORCH_INDEX_URL}" torch && \
     pip install --no-cache-dir "./worker[pip]"

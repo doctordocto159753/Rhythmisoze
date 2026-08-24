@@ -30,6 +30,7 @@ import {
 import { peakNormalize, resample } from '@/packages/audio-core/normalize';
 import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
+import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { detectOnsets } from '@/packages/audio-core/onsets';
 import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
 import { classifyInput, reconcileClassificationWithMaterial } from '@intent';
@@ -306,18 +307,33 @@ function runVoiceMelody(
   // The Judge runs here, in the worker, and reuses the contour the melody
   // engine has already produced. Re-tracking the fundamental purely to check it
   // would roughly double the wait for no extra information.
+  const onsetsSec = detectOnsets(audio.samples, audio.sampleRate).onsets.map(
+    (onset) => onset.timeSec,
+  );
+  const sourcePhrase = buildMusicalPhraseModel(extraction.notes, {
+    sourceKind: 'voice',
+    frames: extraction.frames,
+    onsetsSec,
+  });
   const judgeFeatures = judgeFeaturesFromFrames(
     extraction.frames,
     audio.durationSec,
-    detectOnsets(audio.samples, audio.sampleRate).onsets.map((onset) => onset.timeSec),
+    onsetsSec,
   );
-  const verdict = judgeAndRepair(extraction.notes, judgeFeatures);
+  const verdict = judgeAndRepair(sourcePhrase.sourceEvidence.notes, judgeFeatures);
+  const phraseModel = buildMusicalPhraseModel(extraction.notes, {
+    sourceKind: 'voice',
+    interpretationNotes: verdict.judgedNotes,
+    frames: extraction.frames,
+    onsetsSec,
+  });
   throwIfCancelled(request.id);
 
   reportProgress(request.id, 'done', 1);
   return {
     // The candidate is returned untouched; the repair travels beside it.
     notes: extraction.notes,
+    phraseModel,
     referenceNotes: extraction.notes.map((note) => ({ ...note })),
     melodyQuality: extraction.quality,
     judge: {
@@ -353,6 +369,8 @@ function runVoiceMelody(
         ...(!extraction.quality.clear
           ? [`unclear_melody:${extraction.quality.melodyConfidence.toFixed(2)}`]
           : []),
+        `phrase_continuity:${phraseModel.metrics.connectedTransitions}:` +
+          `${phraseModel.metrics.reconstructedGapSec.toFixed(3)}s`,
       ],
     },
   };
@@ -531,6 +549,7 @@ async function runBasicPitch(
 
   return {
     notes,
+    phraseModel: buildMusicalPhraseModel(notes, { sourceKind: 'polyphonic' }),
     // Audio has no independent polyphonic ground truth. The Judge therefore
     // acts as a fidelity guard: it validates the candidate structurally and
     // abstains from monophonic pitch repair, which would destroy chords.

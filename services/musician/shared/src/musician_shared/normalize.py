@@ -128,14 +128,17 @@ def from_teacher(payload: dict[str, Any]) -> MusicianInput:
             confidence=_as_float(raw_key.get("confidence", 0.0), "key.confidence"),
         )
 
-    phrases = tuple(
-        Phrase(
-            start_index=int(p.get("startIndex", p.get("start_index"))),
-            end_index=int(p.get("endIndex", p.get("end_index"))),
+    try:
+        phrases = tuple(
+            Phrase(
+                start_index=int(p.get("startIndex", p.get("start_index"))),
+                end_index=int(p.get("endIndex", p.get("end_index"))),
+            )
+            for p in payload.get("phrases", [])
+            if isinstance(p, dict)
         )
-        for p in payload.get("phrases", [])
-        if isinstance(p, dict)
-    )
+    except (TypeError, ValueError) as error:
+        raise NormalisationError(f"phrase span is not usable: {error}") from error
 
     motifs = tuple(
         Motif(

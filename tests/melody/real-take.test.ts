@@ -49,6 +49,7 @@ import {
   type FrameEvidence,
   type PitchFrame,
 } from '@/packages/melody-extraction';
+import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 
 interface ContourFixture {
   durationSec: number;
@@ -152,6 +153,28 @@ describe('the real hummed take', () => {
     const pitches = notes.map((note) => note.pitch);
     expect(Math.max(...pitches), JSON.stringify(notes)).toBeLessThanOrEqual(75);
     expect(Math.min(...pitches), JSON.stringify(notes)).toBeGreaterThanOrEqual(55);
+  });
+
+  it('adds phrase continuity without rewriting the real take evidence', () => {
+    const phraseModel = buildMusicalPhraseModel(notes, {
+      sourceKind: 'voice',
+      frames,
+    });
+    expect(phraseModel.sourceEvidence.notes).toEqual(notes);
+    expect(phraseModel.interpretedNotes.map((note) => note.startSec)).toEqual(
+      notes.map((note) => note.startSec),
+    );
+    expect(phraseModel.interpretedNotes.map((note) => note.pitch)).toEqual(
+      notes.map((note) => note.pitch),
+    );
+    expect(phraseModel.metrics.interpretedGapSec).toBeLessThanOrEqual(
+      phraseModel.metrics.interpretedInputGapSec,
+    );
+    // 7.01 s of physical gaps becomes 4.72 s after 2.29 s of energetic
+    // consonant/dropout transitions are interpreted as connected gestures.
+    // The remaining rests stay explicit rather than being painted over.
+    expect(phraseModel.metrics.reconstructedGapSec).toBeGreaterThan(1.5);
+    expect(phraseModel.metrics.interpretedGapSec).toBeGreaterThan(4);
   });
 
   it('does not place a note over the silence before the first phrase', () => {

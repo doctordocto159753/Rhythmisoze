@@ -236,6 +236,14 @@ describe('the version registry', () => {
         noteDigest([note(60, 0), note(62, 0.5)]),
       );
     });
+
+    it('includes phrase interpretation without changing legacy note-only digests', () => {
+      const notes = [note(60, 0), note(62, 0.5), note(64, 1)];
+      expect(noteDigest(notes)).toBe(noteDigest(notes, []));
+      expect(noteDigest(notes, [{ startIndex: 0, endIndex: 2 }])).not.toBe(
+        noteDigest(notes, [{ startIndex: 0, endIndex: 1 }]),
+      );
+    });
   });
 
   describe('staleness against the Teacher', () => {
@@ -258,6 +266,14 @@ describe('the version registry', () => {
       // recomputes, and the stored version silently becomes a variation on a
       // phrase that no longer exists.
       expect(isStaleAgainst(fromTeacher(teacher), [...teacher, note(67, 1.5)])).toBe(true);
+    });
+
+    it('rejects a version when only the phrase reading moved', () => {
+      const version = fromTeacher(teacher);
+      version.provenance.sourceDigest = noteDigest(teacher, [{ startIndex: 0, endIndex: 2 }]);
+      expect(
+        isStaleAgainst(version, teacher, [{ startIndex: 0, endIndex: 1 }]),
+      ).toBe(true);
     });
 
     it('treats a missing digest as unverifiable rather than as a match', () => {

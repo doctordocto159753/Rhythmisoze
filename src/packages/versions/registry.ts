@@ -230,6 +230,11 @@ export interface VersionNoteSources {
   generated: Partial<Record<MusicalVersionId, GeneratedVersion>>;
 }
 
+export interface PhraseSpanDigestInput {
+  startIndex: number;
+  endIndex: number;
+}
+
 /**
  * The one question everything above the registry asks.
  *
@@ -295,10 +300,11 @@ export function availableVersions(
 export function isStaleAgainst(
   generated: GeneratedVersion,
   teacherNotes: readonly NoteEvent[],
+  phrases: readonly PhraseSpanDigestInput[] = [],
 ): boolean {
   const recorded = generated.provenance.sourceDigest;
   if (recorded === undefined) return true;
-  return recorded !== noteDigest(teacherNotes);
+  return recorded !== noteDigest(teacherNotes, phrases);
 }
 
 /**
@@ -312,11 +318,12 @@ export function isStaleAgainst(
 export function freshGenerated(
   generated: Partial<Record<MusicalVersionId, GeneratedVersion>>,
   teacherNotes: readonly NoteEvent[],
+  phrases: readonly PhraseSpanDigestInput[] = [],
 ): Partial<Record<MusicalVersionId, GeneratedVersion>> {
   const fresh: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
   for (const id of MUSICIAN_VERSION_IDS) {
     const entry = generated[id];
-    if (entry && !isStaleAgainst(entry, teacherNotes)) fresh[id] = entry;
+    if (entry && !isStaleAgainst(entry, teacherNotes, phrases)) fresh[id] = entry;
   }
   return fresh;
 }
@@ -357,8 +364,9 @@ export interface WithheldReasons {
 export function offerableGenerated(
   generated: Partial<Record<MusicalVersionId, GeneratedVersion>>,
   teacherNotes: readonly NoteEvent[],
+  phrases: readonly PhraseSpanDigestInput[] = [],
 ): { offered: Partial<Record<MusicalVersionId, GeneratedVersion>>; withheld: WithheldReasons } {
-  const fresh = freshGenerated(generated, teacherNotes);
+  const fresh = freshGenerated(generated, teacherNotes, phrases);
   const offered: Partial<Record<MusicalVersionId, GeneratedVersion>> = {};
   for (const id of MUSICIAN_VERSION_IDS) {
     const entry = fresh[id];
@@ -370,7 +378,7 @@ export function offerableGenerated(
     const entry = generated[id];
     if (!entry) continue;
     if (entry.provenance.sourceFallback === true) withheld.refused = true;
-    else if (isStaleAgainst(entry, teacherNotes)) withheld.stale = true;
+    else if (isStaleAgainst(entry, teacherNotes, phrases)) withheld.stale = true;
   }
   return { offered, withheld };
 }
@@ -428,7 +436,10 @@ export function renderCacheKey(
  * which is cheap enough to run on every render and far cheaper than the WAV it
  * prevents re-serving.
  */
-export function noteDigest(notes: readonly NoteEvent[]): string {
+export function noteDigest(
+  notes: readonly NoteEvent[],
+  phrases: readonly PhraseSpanDigestInput[] = [],
+): string {
   let hash = 2166136261;
   const mix = (value: number): void => {
     hash ^= value | 0;
@@ -442,6 +453,16 @@ export function noteDigest(notes: readonly NoteEvent[]): string {
     mix(Math.round(note.startSec * 1000));
     mix(Math.round(note.endSec * 1000));
     mix(note.velocity);
+  }
+  // Keep the legacy note-only digest byte-identical when no phrase information
+  // exists. Once spans are present they affect the model prompt and therefore
+  // participate in provenance too.
+  if (phrases.length > 0) {
+    mix(phrases.length);
+    for (const phrase of phrases) {
+      mix(phrase.startIndex);
+      mix(phrase.endIndex);
+    }
   }
   return (hash >>> 0).toString(36);
 }

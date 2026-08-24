@@ -37,6 +37,8 @@ export interface MusicianRequest {
   sourceId: string;
   /** Teacher notes. The registry asserts this is Teacher material (AC-02). */
   notes: readonly NoteEvent[];
+  /** Inclusive note-index spans from the phrase representation layer. */
+  phrases?: readonly MusicianPhraseSpan[];
   bpm: number;
   tempoConfidence: number;
   meter: { numerator: number; denominator: number; confidence: number };
@@ -44,6 +46,11 @@ export interface MusicianRequest {
   durationSec: number;
   /** Omitted on a first attempt; set by "Try another" to force a new result. */
   seed?: number;
+}
+
+export interface MusicianPhraseSpan {
+  startIndex: number;
+  endIndex: number;
 }
 
 /**
@@ -121,6 +128,10 @@ export class MusicianClient {
           startSec: note.startSec,
           endSec: note.endSec,
           velocity: Math.max(1, Math.min(127, Math.round(note.velocity))),
+        })),
+        phrases: (request.phrases ?? []).map((phrase) => ({
+          startIndex: phrase.startIndex,
+          endIndex: phrase.endIndex,
         })),
         tempo: { bpm: request.bpm, confidence: request.tempoConfidence },
         meter: request.meter,

@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from ..contract import Meter, Note
+from ..contract import Meter, Note, Phrase
 from ..policies import SamplingParameters
 
 
@@ -52,6 +52,8 @@ class MelodyRequest:
     #: stops there even if the model would keep going -- a runaway generation is
     #: the one failure a growth variant cannot self-diagnose.
     max_bars: int = 24
+    #: Inclusive note-index spans retained as ABC slurs by the model worker.
+    phrases: tuple[Phrase, ...] = ()
 
 
 @dataclass(frozen=True)

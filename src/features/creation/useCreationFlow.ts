@@ -92,6 +92,7 @@ import {
   type PlaybackHandle,
 } from '@synthesis';
 import { transcribe } from '@/features/transcription/client';
+import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { track } from '@/features/analytics/track';
 import {
   INITIAL_CONTEXT,
@@ -193,7 +194,7 @@ export function useCreationFlow(locale: Locale) {
    */
   const lesson = useMemo<TeacherResult | null>(() => {
     if (state.mode !== 'melody') return null;
-    const source = state.judge?.notes ?? state.rawNotes;
+    const source = state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes;
     if (source.length < 4 || state.durationSec <= 0) return null;
     try {
       return teach(source, state.durationSec);
@@ -203,7 +204,7 @@ export function useCreationFlow(locale: Locale) {
       // sketch.
       return null;
     }
-  }, [state.mode, state.judge, state.rawNotes, state.durationSec]);
+  }, [state.mode, state.phraseModel, state.judge, state.rawNotes, state.durationSec]);
 
   const musicianAvailability = useMusicianAvailability();
 
@@ -257,8 +258,8 @@ export function useCreationFlow(locale: Locale) {
    * to happen before the picker is built.
    */
   const teacherNotes = useMemo<readonly NoteEvent[]>(
-    () => lesson?.notes ?? state.judge?.notes ?? state.rawNotes,
-    [lesson, state.judge, state.rawNotes],
+    () => lesson?.notes ?? state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes,
+    [lesson, state.phraseModel, state.judge, state.rawNotes],
   );
 
   /**
@@ -284,8 +285,15 @@ export function useCreationFlow(locale: Locale) {
    * happened stays inspectable and the panel can say which of the two occurred.
    */
   const offerable = useMemo(
-    () => offerableGenerated(musician.generated, teacherNotes),
-    [musician.generated, teacherNotes],
+    () => offerableGenerated(
+      musician.generated,
+      teacherNotes,
+      state.phraseModel?.phrases.map((phrase) => ({
+        startIndex: phrase.startNoteIndex,
+        endIndex: phrase.endNoteIndex,
+      })) ?? [],
+    ),
+    [musician.generated, teacherNotes, state.phraseModel],
   );
   const offeredGenerated = offerable.offered;
 
@@ -353,7 +361,7 @@ export function useCreationFlow(locale: Locale) {
    * the difference.
    */
   const versionNoteSources = useMemo<VersionNoteSources>(() => {
-    const judged = state.judge?.notes ?? state.rawNotes;
+    const judged = state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes;
     return {
       unprocessed: state.rawNotes,
       judge: judged,
@@ -363,7 +371,7 @@ export function useCreationFlow(locale: Locale) {
       // one the picker withheld, is how a withheld version gets played anyway.
       generated: offeredGenerated,
     };
-  }, [state.rawNotes, state.judge, teacherNotes, offeredGenerated]);
+  }, [state.rawNotes, state.phraseModel, state.judge, teacherNotes, offeredGenerated]);
 
   /**
    * The payload for a Musician request.
@@ -399,6 +407,10 @@ export function useCreationFlow(locale: Locale) {
       // things to ask the model about, and the seed is derived from this.
       sourceId: state.sourceId,
       versionNotes: versionNoteSources,
+      phrases: state.phraseModel?.phrases.map((phrase) => ({
+        startIndex: phrase.startNoteIndex,
+        endIndex: phrase.endNoteIndex,
+      })) ?? [],
       tempo: { bpm: tempo.bpm, confidence: tempo.confidence },
       meter: { beatsPerBar: state.meter.beatsPerBar, beatUnit: state.meter.beatUnit },
       key: analysis
@@ -415,6 +427,7 @@ export function useCreationFlow(locale: Locale) {
     });
   }, [
     versionNoteSources,
+    state.phraseModel,
     state.bpm,
     state.sourceId,
     state.meter,
@@ -658,6 +671,7 @@ export function useCreationFlow(locale: Locale) {
         dispatch({
           type: 'transcribed',
           notes: result.notes,
+          phraseModel: result.phraseModel ?? null,
           judge: result.judge ?? null,
           referenceNotes: result.referenceNotes ?? [],
           drums: result.drums ?? [],
@@ -797,12 +811,22 @@ export function useCreationFlow(locale: Locale) {
         ? correctClassification(plan.classification, correction)
         : plan.classification;
       const { mode, notes, drums } = plan;
+      const phraseModel = mode === 'melody'
+        ? buildMusicalPhraseModel(notes, {
+            sourceKind:
+              classification.type === 'polyphonic' || classification.type === 'mixed'
+                ? 'polyphonic'
+                : 'symbolic',
+            interpretationNotes: plan.judge?.notes ?? notes,
+          })
+        : null;
       dispatch({
         type: 'midiImported',
         mode,
         bpm: result.bpm,
         meter: result.meter,
         notes,
+        phraseModel,
         drums,
         durationSec: result.durationSec,
         source,
@@ -1088,6 +1112,7 @@ export function useCreationFlow(locale: Locale) {
             : undefined,
         },
         rawNotes: state.rawNotes,
+        phraseModel: state.phraseModel ?? undefined,
         rawDrums: state.rawDrums,
         analysis: refined?.analysis ?? null,
         durationSec: state.durationSec,
@@ -1143,6 +1168,7 @@ export function useCreationFlow(locale: Locale) {
     state.retouchAmount,
     state.instrumentId,
     state.rawNotes,
+    state.phraseModel,
     state.referenceNotes,
     state.sourceId,
     renderedAudio,

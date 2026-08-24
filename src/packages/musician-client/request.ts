@@ -24,13 +24,15 @@
  */
 
 import { notesForVersion, type VersionNoteSources } from '@versions';
-import type { MusicianRequest } from './client';
+import type { MusicianPhraseSpan, MusicianRequest } from './client';
 
 export interface MusicianRequestInput {
   /** Identifies the sketch, so a result can be matched to it on return. */
   sourceId: string;
   /** Every version's notes. Only the Teacher's are read. */
   versionNotes: VersionNoteSources;
+  /** Phrase spans in Teacher note indices. Empty for legacy/polyphonic input. */
+  phrases?: readonly MusicianPhraseSpan[];
   /**
    * The tempo the music is interpreted at, with the estimator's own confidence.
    *
@@ -69,6 +71,14 @@ export function buildMusicianRequest(input: MusicianRequestInput): MusicianReque
   return {
     sourceId: input.sourceId,
     notes,
+    phrases: (input.phrases ?? []).filter(
+      (phrase) =>
+        Number.isInteger(phrase.startIndex)
+        && Number.isInteger(phrase.endIndex)
+        && phrase.startIndex >= 0
+        && phrase.endIndex >= phrase.startIndex
+        && phrase.endIndex < notes.length,
+    ),
     bpm: input.tempo.bpm,
     // Reported as measured. Uncertainty is information the service can weigh;
     // a substituted figure is not.

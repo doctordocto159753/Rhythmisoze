@@ -6,7 +6,16 @@
  * microphone recording.
  */
 
-import type { CreationMode, DrumEvent, GridDivision, KeyMode, Meter, NoteEvent, PitchClassName } from './music';
+import type {
+  CreationMode,
+  DrumEvent,
+  GridDivision,
+  KeyMode,
+  Meter,
+  MusicalPhraseModel,
+  NoteEvent,
+  PitchClassName,
+} from './music';
 
 /**
  * 3 adds the Musician versions.
@@ -73,6 +82,8 @@ export interface LocalSketch {
   retouch: RetouchSettings;
   /** Raw transcriber output. Kept so retouch strength stays non-destructive. */
   rawNotes: NoteEvent[];
+  /** Additive; absent on projects saved before phrase interpretation existed. */
+  phraseModel?: MusicalPhraseModel;
   rawDrums: DrumEvent[];
   analysis: SketchAnalysis | null;
   durationSec: number;

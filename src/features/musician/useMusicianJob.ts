@@ -297,7 +297,7 @@ export function useMusicianJob(options: UseMusicianJobOptions) {
 
         if (runId !== runIdRef.current) return;
 
-        const pair = toPair(result, startedJobId, request.notes);
+        const pair = toPair(result, startedJobId, request.notes, request.phrases);
         setState((current) => {
           const next: MusicianJobState = {
             ...current,
@@ -469,15 +469,16 @@ function toGenerated(
  * question it exists for, and made the render cache key identical across
  * regenerations of the same sketch.
  *
- * `sourceNotes` is the Teacher material that was sent. Its digest is what later
- * lets a stale version be recognised when the Teacher moves.
+ * `sourceNotes` and `sourcePhrases` are the Teacher material that was sent.
+ * Their digest lets a stale version be recognised when either reading moves.
  */
 export function toPair(
   result: MusicianResult,
   jobId: string,
   sourceNotes: readonly NoteEvent[] = [],
+  sourcePhrases: readonly { startIndex: number; endIndex: number }[] = [],
 ): MusicianSet {
-  const digest = noteDigest(sourceNotes);
+  const digest = noteDigest(sourceNotes, sourcePhrases);
   return {
     'musician-refined': toGenerated('musician-refined', result.refined, result, jobId, digest),
     'musician-developed': toGenerated(

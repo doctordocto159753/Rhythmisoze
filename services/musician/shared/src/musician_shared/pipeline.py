@@ -380,6 +380,7 @@ def generate_variant(
                     sampling=policy.melody_sampling,
                     seed=seed,
                     max_bars=_bar_budget(source, policy),
+                    phrases=source.phrases,
                 )
             )
         except GenerationError as error:

@@ -126,6 +126,13 @@ class TestFingerprint:
         second = first.model_copy(update={"source_id": "somewhere-else"})
         assert first.fingerprint() == second.fingerprint()
 
+    def test_phrase_interpretation_is_part_of_the_fingerprint(self) -> None:
+        source = build_input([60, 62, 64])
+        phrased = source.model_copy(
+            update={"phrases": (Phrase(start_index=0, end_index=2),)}
+        )
+        assert source.fingerprint() != phrased.fingerprint()
+
 
 class TestMeterIsNeverAssumed:
     def test_an_absent_meter_is_refused_rather_than_defaulted(self) -> None:
@@ -163,6 +170,16 @@ class TestFromTeacher:
         assert result.meter.numerator == 3
         assert result.key is not None
         assert result.key.mode.value == "minor"
+
+    def test_phrase_spans_survive_the_web_payload(self) -> None:
+        result = from_teacher(
+            self._payload(phrases=[{"startIndex": 0, "endIndex": 1}])
+        )
+        assert result.phrases == (Phrase(start_index=0, end_index=1),)
+
+    def test_a_malformed_phrase_is_refused_as_bad_input(self) -> None:
+        with pytest.raises(NormalisationError, match="phrase span"):
+            from_teacher(self._payload(phrases=[{"startIndex": "nope"}]))
 
     def test_a_payload_with_no_notes_is_refused(self) -> None:
         with pytest.raises(NormalisationError, match="no notes"):

@@ -69,6 +69,98 @@ export interface NoteEvent {
   confidence?: number;
 }
 
+/** Where a phrase interpretation came from. */
+export type MusicalPhraseSourceKind = 'voice' | 'symbolic' | 'polyphonic';
+
+/**
+ * One frame of physical evidence retained beside the musical interpretation.
+ *
+ * `detectedPitch` is the accepted contour. `candidatePitch` is what YIN heard
+ * before the voicing decision, so a rejected frame is not confused with a
+ * frame that was never measured.
+ */
+export interface MusicalFrameEvidence {
+  timeSec: number;
+  detectedPitch: number | null;
+  candidatePitch: number | null;
+  energy: number;
+  clarity: number;
+  voiced: boolean;
+}
+
+/** Physical observations. These are never rewritten by phrase interpretation. */
+export interface MusicalSourceEvidence {
+  /** Exact transcriber/Judge candidate supplied to the representation layer. */
+  notes: NoteEvent[];
+  /** Detected attacks in absolute performance time. */
+  onsetsSec: number[];
+  /** Present for voice extraction; symbolic sources have no acoustic frames. */
+  frames?: MusicalFrameEvidence[];
+}
+
+export type NoteArticulation = 'legato' | 'rearticulated' | 'detached';
+
+/** Why two consecutive interpreted notes were, or were not, connected. */
+export interface NoteConnectionEvidence {
+  gapSec: number;
+  intervalSemitones: number;
+  /** Gap energy relative to the two sounding edges, clamped to 0..1. */
+  energyContinuity: number;
+  /** Longest genuinely quiet run inside the gap. */
+  maxSilenceSec: number;
+  onsetNearNext: boolean;
+  reasoning: string[];
+}
+
+/** Relationship between two consecutive notes in the interpreted line. */
+export interface MusicalNoteConnection {
+  fromNoteIndex: number;
+  toNoteIndex: number;
+  articulation: NoteArticulation;
+  confidence: number;
+  evidence: NoteConnectionEvidence;
+}
+
+/** A connected gesture. Note indices are inclusive and refer to interpretedNotes. */
+export interface MusicalPhrase {
+  id: string;
+  startNoteIndex: number;
+  endNoteIndex: number;
+  startSec: number;
+  endSec: number;
+  /** Signed semitone movements between adjacent notes. */
+  contour: number[];
+  confidence: number;
+}
+
+/** Observable before/after continuity measurements in seconds. */
+export interface PhraseContinuityMetrics {
+  sourceGapSec: number;
+  interpretedInputGapSec: number;
+  interpretedGapSec: number;
+  reconstructedGapSec: number;
+  connectedTransitions: number;
+  detachedTransitions: number;
+}
+
+/**
+ * Additive representation between transcription and the creative layers.
+ *
+ * Source evidence stays independent from interpreted notes. The latter may
+ * reconstruct an evidence-backed vocal connection, but never moves an onset,
+ * changes pitch, or quantizes expressive timing.
+ */
+export interface MusicalPhraseModel {
+  version: 1;
+  sourceKind: MusicalPhraseSourceKind;
+  sourceEvidence: MusicalSourceEvidence;
+  interpretedNotes: NoteEvent[];
+  phrases: MusicalPhrase[];
+  connections: MusicalNoteConnection[];
+  expressiveTiming: true;
+  metrics: PhraseContinuityMetrics;
+}
+
 /** A note already snapped to a grid. Times are integer grid steps. */
 export interface GridNote {
   /** Onset in grid steps from zero. */

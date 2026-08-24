@@ -5,7 +5,7 @@
  * to Basic Pitch, a pitch tracker or a future server endpoint directly.
  */
 
-import type { DrumEvent, NoteEvent, OnsetEvent } from './music';
+import type { DrumEvent, MusicalPhraseModel, NoteEvent, OnsetEvent } from './music';
 
 /**
  * The single internal audio representation. Everything upstream (MediaRecorder
@@ -140,6 +140,11 @@ export interface JudgeVerdict {
 
 export interface TranscriptionResult {
   notes: NoteEvent[];
+  /**
+   * Evidence-preserving interpretation of continuity for pitched material.
+   * Absent for rhythm-only sources and older saved/transcribed results.
+   */
+  phraseModel?: MusicalPhraseModel;
   /**
    * Independent monophonic reference extracted from the source audio.
    * Retouch uses it as a quality guard; it is never rendered directly unless

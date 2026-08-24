@@ -16,7 +16,7 @@ from musician_shared.adapters.fake import (
     FakeRwkvAdapter,
     RogueMelodyAdapter,
 )
-from musician_shared.contract import VariantKind
+from musician_shared.contract import Phrase, VariantKind
 from musician_shared.pipeline import CancelledError, generate_variant, run_musician
 from musician_shared.policies import DEVELOPED, REFINED
 from musician_shared.weak_spans import nominate_weak_spans
@@ -30,6 +30,22 @@ class TestOrchestration:
         assert result.refined.kind is VariantKind.REFINED
         assert result.developed.kind is VariantKind.DEVELOPED
         assert result.refined.notes and result.developed.notes
+
+    def test_phrase_spans_reach_the_melody_adapter(self, simple_melody) -> None:
+        class CapturingMelody(FakeMelodyAdapter):
+            requests: list[MelodyRequest] = []
+
+            def generate(self, request: MelodyRequest):
+                self.requests.append(request)
+                return super().generate(request)
+
+        melody = CapturingMelody()
+        source = simple_melody.model_copy(
+            update={"phrases": (Phrase(start_index=0, end_index=5),)}
+        )
+        run_musician(source=source, melody=melody, rwkv=FakeRwkvAdapter())
+        assert melody.requests
+        assert all(request.phrases == source.phrases for request in melody.requests)
 
     def test_the_teacher_input_is_never_mutated(self, simple_melody) -> None:
         """AC-07.

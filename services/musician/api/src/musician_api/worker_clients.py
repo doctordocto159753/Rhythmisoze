@@ -153,6 +153,7 @@ class HttpMelodyAdapter(_WorkerClient):
                 "seed": request.seed,
                 "task": request.task,
                 "maxBars": request.max_bars,
+                "phrases": [phrase.model_dump(mode="json") for phrase in request.phrases],
             },
         )
         notes = _notes_from(body.get("notes", []))

@@ -25,6 +25,7 @@ function note(pitch: number, start: number): NoteEvent {
 const request: MusicianRequest = {
   sourceId: 'sketch-1',
   notes: [note(60, 0), note(62, 0.5), note(64, 1)],
+  phrases: [{ startIndex: 0, endIndex: 2 }],
   bpm: 120,
   tempoConfidence: 0.8,
   meter: { numerator: 4, denominator: 4, confidence: 0.8 },
@@ -166,9 +167,11 @@ describe('the client', () => {
       'key',
       'meter',
       'notes',
+      'phrases',
       'sourceId',
       'tempo',
     ]);
+    expect(body.teacher.phrases).toEqual([{ startIndex: 0, endIndex: 2 }]);
     const serialised = JSON.stringify(sent);
     for (const forbidden of ['blob', 'audio', 'wav', 'pcm', 'recording', 'base64']) {
       expect(serialised.toLowerCase()).not.toContain(forbidden);

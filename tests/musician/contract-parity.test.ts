@@ -74,6 +74,15 @@ describe('contract parity with the Python service', () => {
     }
   });
 
+  it('agrees that phrase spans are part of Musician input', () => {
+    const python = readFileSync(PYTHON_CONTRACT, 'utf8');
+    const input = python.slice(
+      python.indexOf('class MusicianInput(BaseModel)'),
+      python.indexOf('class VariantKind'),
+    );
+    expect(input).toMatch(/phrases:\s*tuple\[Phrase,\s*\.\.\.\]/);
+  });
+
   it('agrees that both variants are required', () => {
     const python = readFileSync(PYTHON_CONTRACT, 'utf8');
     const output = python.slice(python.indexOf('class MusicianOutput(BaseModel)'));

@@ -181,6 +181,7 @@ export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
     instrumentId: sketch.instrumentId,
     retouch: sketch.retouch,
     rawNotes: sketch.rawNotes,
+    phraseModel: sketch.phraseModel,
     rawDrums: sketch.rawDrums,
     analysis: sketch.analysis,
     durationSec: sketch.durationSec,

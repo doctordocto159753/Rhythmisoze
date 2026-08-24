@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from conftest import build_notes
 from musician_shared.abc import from_abc, to_abc, validate_with_music21
-from musician_shared.contract import Key, Meter, Mode
+from musician_shared.contract import Key, Meter, Mode, Phrase
 
 FOUR_FOUR = Meter(numerator=4, denominator=4, confidence=0.8)
 
@@ -74,6 +74,22 @@ class TestRoundTrip:
         back = from_abc(document.text, tempo_bpm=120.0)
         assert [n.pitch for n in back] == [60, 62, 64, 65]
         assert back[2].start_sec == pytest.approx(3.0, abs=1e-6)
+
+    def test_phrase_slurs_reach_notation_without_changing_notes(self) -> None:
+        notes = build_notes([60, 62, 64, 65], duration=0.5, gap=0.0)
+        document = to_abc(
+            notes,
+            meter=FOUR_FOUR,
+            tempo_bpm=120.0,
+            phrases=(Phrase(start_index=0, end_index=1), Phrase(start_index=2, end_index=3)),
+        )
+        assert document.text.count("(") == 2
+        assert document.text.count(")") == 2
+        restored = from_abc(document.text, tempo_bpm=120.0)
+        assert [note.pitch for note in restored] == [60, 62, 64, 65]
+        assert [(note.start_sec, note.end_sec) for note in restored] == [
+            (note.start_sec, note.end_sec) for note in notes
+        ]
 
     @pytest.mark.parametrize(
         "numerator,denominator", [(3, 4), (6, 8), (5, 4), (7, 8), (2, 2), (12, 8)]

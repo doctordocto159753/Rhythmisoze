@@ -68,7 +68,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from musician_shared.abc import from_abc, to_abc
-from musician_shared.contract import Key, Meter, Mode, Note
+from musician_shared.contract import Key, Meter, Mode, Note, Phrase
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +263,7 @@ def build_prompt(
     meter: Meter,
     tempo_bpm: float,
     key: Key | None,
+    phrases: tuple[Phrase, ...] = (),
     task: str = "variation",
 ) -> tuple[str, str]:
     """Build the upstream `%%input` / `%%output` prompt.
@@ -272,7 +273,7 @@ def build_prompt(
     letting it choose every note, is what "variation" means. Seeding it with
     notes would make it a continuation of our own material instead.
     """
-    document = to_abc(notes, meter=meter, tempo_bpm=tempo_bpm, key=key)
+    document = to_abc(notes, meter=meter, tempo_bpm=tempo_bpm, key=key, phrases=phrases)
     header_lines = [
         line
         for line in document.text.splitlines()
@@ -483,6 +484,7 @@ class MelodyT5Runtime:
         seed: int = 0,
         task: str = "variation",
         max_patch: int = DEFAULT_MAX_PATCH,
+        phrases: tuple[Phrase, ...] = (),
     ) -> tuple[tuple[Note, ...], str]:
         """One variation, generated bar by bar.
 
@@ -496,7 +498,12 @@ class MelodyT5Runtime:
         import torch  # noqa: PLC0415
 
         input_abc, decoder_prompt = build_prompt(
-            notes, meter=meter, tempo_bpm=tempo_bpm, key=key, task=task
+            notes,
+            meter=meter,
+            tempo_bpm=tempo_bpm,
+            key=key,
+            phrases=phrases,
+            task=task,
         )
 
         with self._lock:

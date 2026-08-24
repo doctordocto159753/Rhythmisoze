@@ -225,6 +225,7 @@ class MusicianInput(BaseModel):
         payload = json.dumps(
             {
                 "notes": [[n.pitch, round(n.start_sec, 6), round(n.end_sec, 6)] for n in self.notes],
+                "phrases": [[p.start_index, p.end_index] for p in self.phrases],
                 "tempo": round(self.tempo.bpm, 4),
                 "meter": [self.meter.numerator, self.meter.denominator],
             },

@@ -21,6 +21,7 @@ import {
   type MelodyConfidence,
   type Meter,
   type MonoAudio,
+  type MusicalPhraseModel,
   type NoteEvent,
   type ProcessingDiagnostics,
   type TranscriptionInputMode,
@@ -84,6 +85,8 @@ export interface FlowState {
   validation: AudioValidation | null;
 
   rawNotes: NoteEvent[];
+  /** Source evidence and its continuity interpretation; null for rhythm. */
+  phraseModel: MusicalPhraseModel | null;
   /** The current source's Judge verdict. Null for rhythm-only material. */
   judge: JudgeVerdict | null;
   referenceNotes: NoteEvent[];
@@ -158,6 +161,7 @@ export type Action =
       type: 'transcribed';
       judge: JudgeVerdict | null;
       notes: NoteEvent[];
+      phraseModel?: MusicalPhraseModel | null;
       drums: RefineResult['drums'];
       diagnostics: ProcessingDiagnostics;
       referenceNotes: NoteEvent[];
@@ -169,6 +173,7 @@ export type Action =
       bpm: number;
       meter: Meter;
       notes: NoteEvent[];
+      phraseModel?: MusicalPhraseModel | null;
       drums: RefineResult['drums'];
       durationSec: number;
       source: LocalSourceAsset;
@@ -222,6 +227,7 @@ export const SOURCE_DERIVED_FIELDS = [
   'durationSec',
   'validation',
   'rawNotes',
+  'phraseModel',
   'judge',
   'referenceNotes',
   'rawDrums',
@@ -269,6 +275,7 @@ export function beginNewSource(state: FlowState): Pick<FlowState, SourceDerivedF
     durationSec: 0,
     validation: null,
     rawNotes: [],
+    phraseModel: null,
     judge: null,
     referenceNotes: [],
     rawDrums: [],
@@ -308,6 +315,7 @@ export function initialState(sketchId: string, mode: CreationMode = 'melody'): F
     durationSec: 0,
     validation: null,
     rawNotes: [],
+    phraseModel: null,
     judge: null,
     referenceNotes: [],
     rawDrums: [],
@@ -406,6 +414,7 @@ export function reducer(state: FlowState, action: Action): FlowState {
             : state.melodyInputMode,
           instrumentId: mode === state.mode ? state.instrumentId : resolveInstrument(undefined, mode).id,
           rawNotes: action.notes,
+          phraseModel: action.phraseModel ?? null,
           judge: action.judge,
           referenceNotes: action.referenceNotes,
           rawDrums: action.drums,
@@ -439,6 +448,7 @@ export function reducer(state: FlowState, action: Action): FlowState {
         source: action.source,
         durationSec: action.durationSec,
         rawNotes: action.notes,
+        phraseModel: action.phraseModel ?? null,
         judge: action.judge ?? null,
         rawDrums: action.drums,
         diagnostics: action.diagnostics,

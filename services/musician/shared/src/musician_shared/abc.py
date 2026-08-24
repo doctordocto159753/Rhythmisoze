@@ -33,7 +33,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .contract import Key, Meter, Note
+from .contract import Key, Meter, Note, Phrase
 
 _PITCH_LETTERS = ("C", "C", "D", "D", "E", "F", "F", "G", "G", "A", "A", "B")
 _IS_SHARP = (False, True, False, True, False, False, True, False, True, False, True, False)
@@ -196,6 +196,7 @@ def to_abc(
     meter: Meter,
     tempo_bpm: float,
     key: Key | None = None,
+    phrases: Sequence[Phrase] = (),
 ) -> AbcDocument:
     """Render notes as ABC.
 
@@ -243,7 +244,12 @@ def to_abc(
         # disagree about the bar they are in.
         bar_state.clear()
 
-    for note in notes:
+    phrase_starts = {phrase.start_index for phrase in phrases}
+    phrase_ends = {phrase.end_index for phrase in phrases}
+    if phrase_ends and max(phrase_ends) >= len(notes):
+        raise ValueError("phrase points past the last note")
+
+    for note_index, note in enumerate(notes):
         gap = note.start_sec - cursor
         if gap > seconds_per_unit * 0.5:
             rest_units = max(1, round(gap / seconds_per_unit))
@@ -261,9 +267,15 @@ def to_abc(
 
         units = max(1, round(note.duration_sec / seconds_per_unit))
         residual += abs(note.duration_sec - units * seconds_per_unit)
-        body.append(
-            f"{_abc_pitch_in_context(note.pitch, key_map=key_map, bar_state=bar_state)}{units}"
-        )
+        token = f"{_abc_pitch_in_context(note.pitch, key_map=key_map, bar_state=bar_state)}{units}"
+        # ABC slurs carry the phrase gesture into MelodyT5 without changing a
+        # note or a duration. Our parser already treats slurs as articulation,
+        # so the representation remains lossless on round-trip.
+        if note_index in phrase_starts:
+            token = f"({token}"
+        if note_index in phrase_ends:
+            token = f"{token})"
+        body.append(token)
         units_in_bar += units
         cursor = note.start_sec + note.duration_sec
 

@@ -12,8 +12,8 @@ import logging
 import os
 
 from fastapi import FastAPI, HTTPException
-from musician_shared.contract import Meter, Note
-from pydantic import BaseModel
+from musician_shared.contract import Meter, Note, Phrase
+from pydantic import BaseModel, Field
 
 from .inference import ModelNotLoaded, MelodyT5Runtime, key_from_payload
 
@@ -39,6 +39,7 @@ class GenerateRequest(BaseModel):
     seed: int = 0
     task: str = "variation"
     maxBars: int = 24
+    phrases: list[Phrase] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -96,6 +97,7 @@ def generate(request: GenerateRequest) -> dict:
             seed=request.seed,
             task=request.task,
             max_patch=request.maxBars,
+            phrases=tuple(request.phrases),
         )
     except ModelNotLoaded as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

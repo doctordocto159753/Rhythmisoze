@@ -298,15 +298,21 @@ test.describe('generating Musician versions', () => {
     await expect(page.getByRole('button', { name: /Shaped/i })).toBeVisible({ timeout: 30_000 });
 
     expect(bodies).toHaveLength(1);
-    const payload = JSON.parse(bodies[0] as string) as { teacher: Record<string, unknown> };
+    const payload = JSON.parse(bodies[0] as string) as {
+      teacher: Record<string, unknown> & { phrases: unknown[] };
+    };
     expect(Object.keys(payload.teacher).sort()).toEqual([
       'durationSec',
       'key',
       'meter',
       'notes',
+      'phrases',
       'sourceId',
       'tempo',
     ]);
+    // Phrase boundaries are symbolic musical evidence too. Their presence is
+    // the contract that stops the Musician from receiving isolated events.
+    expect(payload.teacher.phrases.length).toBeGreaterThan(0);
     // A whole take of audio would be orders of magnitude larger than this.
     expect((bodies[0] as string).length).toBeLessThan(200_000);
     expect(bodies[0]?.toLowerCase()).not.toContain('audio');

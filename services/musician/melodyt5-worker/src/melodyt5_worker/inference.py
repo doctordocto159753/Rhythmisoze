@@ -125,6 +125,14 @@ DEFAULT_TEMPERATURE = 2.6
 #: bars would produce something no identity guard could relate to the original.
 DEFAULT_MAX_PATCH = 64
 
+#: Published MelodyT5 input dimensions. A patch has two control bytes, leaving
+#: 62 bytes for ABC. Upstream silently slices longer bars in ``bar2patch``;
+#: Rhythmisoze must split them first or expressive fractional lengths erase the
+#: tail of a phrase before inference.
+PATCH_LENGTH = 256
+PATCH_SIZE = 64
+PATCH_PAYLOAD_SIZE = PATCH_SIZE - 2
+
 
 class ModelNotLoaded(RuntimeError):
     pass
@@ -286,6 +294,93 @@ def build_prompt(
     input_abc = "\n".join([f"%%{task}", *header_lines, body]) + "\n"
     decoder_prompt = "\n".join(header_lines) + "\n"
     return input_abc, decoder_prompt
+
+
+def _split_patch_payload(text: str) -> list[str]:
+    """Split one logical ABC item without dropping or breaking a token."""
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > PATCH_PAYLOAD_SIZE:
+        # ABC tokens are whitespace-delimited. Keep the separator in the first
+        # chunk so concatenating decoded patches reproduces the prompt byte for
+        # byte. A token larger than a whole patch is rejected instead of being
+        # made ambiguous by a hidden character split.
+        split_at = remaining.rfind(" ", 0, PATCH_PAYLOAD_SIZE + 1)
+        if split_at < 0:
+            split_at = remaining.rfind("\n", 0, PATCH_PAYLOAD_SIZE + 1)
+        if split_at < 0:
+            raise ValueError(
+                f"ABC token exceeds MelodyT5's {PATCH_PAYLOAD_SIZE}-byte patch payload"
+            )
+        split_at += 1
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def encode_prompt_losslessly(
+    patchilizer,
+    abc_code: str,
+    *,
+    add_special_patches: bool = False,
+) -> list[list[int]]:
+    """Encode an upstream prompt without ``bar2patch`` silently truncating it.
+
+    The published Patchilizer makes one fixed-width patch per logical bar and
+    slices at 64 bytes. Fractional ABC timing can legitimately make a bar
+    longer. This keeps upstream's header/bar parsing and byte encoding, but
+    carries an overlength bar in consecutive patches split only between tokens.
+    Patch boundaries are transport; the ABC character stream is unchanged.
+    """
+    if any(ord(character) >= 128 for character in abc_code):
+        raise ValueError("MelodyT5 prompts must be ASCII before patch encoding")
+
+    lines = [line for line in abc_code.split("\n") if line]
+    logical_items: list[str] = []
+    body = ""
+
+    def flush_body() -> None:
+        nonlocal body
+        if not body:
+            return
+        bars = patchilizer.split_bars(body)
+        logical_items.extend(
+            bar + ("\n" if index == len(bars) - 1 else "")
+            for index, bar in enumerate(bars)
+        )
+        body = ""
+
+    for line in lines:
+        is_header = len(line) > 1 and (
+            (line[0].isalpha() and line[1] == ":") or line.startswith("%%")
+        )
+        if is_header:
+            flush_body()
+            logical_items.append(line + "\n")
+        else:
+            body += line + "\n"
+    flush_body()
+
+    patches = [
+        patchilizer.bar2patch(chunk, PATCH_SIZE)
+        for item in logical_items
+        for chunk in _split_patch_payload(item)
+    ]
+    if add_special_patches:
+        bos_patch = [patchilizer.bos_token_id] * (PATCH_SIZE - 1) + [
+            patchilizer.eos_token_id
+        ]
+        eos_patch = [patchilizer.bos_token_id] + [patchilizer.eos_token_id] * (
+            PATCH_SIZE - 1
+        )
+        patches = [bos_patch, *patches, eos_patch]
+    if len(patches) > PATCH_LENGTH:
+        raise ValueError(
+            f"MelodyT5 prompt needs {len(patches)} patches; maximum is {PATCH_LENGTH}"
+        )
+    return patches
 
 
 class MelodyT5Runtime:
@@ -511,10 +606,17 @@ class MelodyT5Runtime:
             model = self._model
 
             patches = torch.tensor(
-                [patchilizer.encode(input_abc, add_special_patches=True)], device=self._device
+                [encode_prompt_losslessly(patchilizer, input_abc, add_special_patches=True)],
+                device=self._device,
             )
             decoder_patches = torch.tensor(
-                [patchilizer.encode(decoder_prompt, add_special_patches=True)[:-1]],
+                [
+                    encode_prompt_losslessly(
+                        patchilizer,
+                        decoder_prompt,
+                        add_special_patches=True,
+                    )[:-1]
+                ],
                 device=self._device,
             )
 

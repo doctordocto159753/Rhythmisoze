@@ -41,27 +41,25 @@ class TestRoundTrip:
 
     def test_on_grid_timing_survives_exactly(self) -> None:
         # 0.5 s is a quaver at 120 bpm, so it lands on the 16th-note unit and
-        # nothing is lost. Off-grid timing is a separate, documented case --
-        # see TestQuantisation.
+        # nothing is lost. Off-grid timing is transported fractionally below.
         notes, _, back = roundtrip([60, 62, 64, 65], duration=0.5, gap=0.0)
         for original, restored in zip(notes, back):
             assert restored.start_sec == pytest.approx(original.start_sec, abs=1e-6)
             assert restored.end_sec == pytest.approx(original.end_sec, abs=1e-6)
 
-    def test_off_grid_timing_is_snapped_to_the_unit_not_mangled(self) -> None:
-        """Quantisation is lossy, and it must be lossy *predictably*.
-
-        0.45 s is 3.6 sixteenths at 120 bpm, so it becomes 4 -- one unit, not a
-        fractional smear. Pitches and ordering are untouched; only durations
-        move, and only to the nearest unit.
-        """
-        notes, document, back = roundtrip([60, 62, 64, 65], duration=0.45, gap=0.0)
+    def test_off_grid_timing_is_not_snapped_to_the_unit(self) -> None:
+        """Expressive timing stays in seconds instead of becoming a beat grid."""
+        notes, document, back = roundtrip(
+            [60, 62, 64, 65], duration=0.37, gap=0.013
+        )
         assert [n.pitch for n in back] == [n.pitch for n in notes]
-        unit = 60.0 / 120.0 / 4
-        for restored in back:
-            units = restored.duration_sec / unit
-            assert units == pytest.approx(round(units), abs=1e-6)
-        assert document.quantisation_residual_sec > 0.0
+        for original, restored in zip(notes, back):
+            assert restored.start_sec == pytest.approx(original.start_sec, abs=2e-6)
+            assert restored.end_sec == pytest.approx(original.end_sec, abs=2e-6)
+        # Standard ABC fractional lengths carry the non-grid values while the
+        # familiar L:1/16 header stays model-compatible.
+        assert "/" in document.text.splitlines()[-1]
+        assert document.quantisation_residual_sec < 1e-5
 
     def test_rests_survive(self) -> None:
         # Dropping rests would hand MelodyT5 a melody with no breathing, and it
@@ -102,16 +100,36 @@ class TestRoundTrip:
         assert f"M:{numerator}/{denominator}" in document.text
 
 
-class TestQuantisation:
+class TestTimingTransport:
     def test_a_clean_grid_loses_nothing(self) -> None:
         _, document, _ = roundtrip([60, 62, 64, 65], duration=0.5, gap=0.0)
         assert document.quantisation_residual_sec == pytest.approx(0.0, abs=1e-9)
 
-    def test_off_grid_timing_is_reported_rather_than_hidden(self) -> None:
-        # Quantisation is lossy. The residual is recorded so a caller can see
-        # how much was lost instead of assuming none was.
+    def test_off_grid_transport_residual_is_bounded_and_microscopic(self) -> None:
+        # The exact rational may have zero residual; when approximation is
+        # needed, this entire phrase still loses only microseconds.
         _, document, _ = roundtrip([60, 62, 64], duration=0.37, gap=0.013)
-        assert document.quantisation_residual_sec > 0.0
+        assert document.quantisation_residual_sec >= 0.0
+        assert document.quantisation_residual_sec < 1e-5
+
+    @pytest.mark.parametrize("bpm", [40.0, 60.0, 88.5, 120.0, 160.0, 200.0])
+    def test_bpm_describes_off_grid_timing_without_moving_it(self, bpm: float) -> None:
+        notes = build_notes([60, 62, 64, 65], duration=0.37, gap=0.013, start=0.1)
+        document = to_abc(notes, meter=FOUR_FOUR, tempo_bpm=bpm)
+        restored = from_abc(document.text, tempo_bpm=bpm, start_sec=notes[0].start_sec)
+
+        for original, back in zip(notes, restored):
+            assert back.start_sec == pytest.approx(original.start_sec, abs=2e-6)
+            assert back.end_sec == pytest.approx(original.end_sec, abs=2e-6)
+
+    def test_a_gap_smaller_than_half_a_sixteenth_is_not_deleted(self) -> None:
+        # At 120 BPM a sixteenth is 125 ms. The old serializer silently removed
+        # this 20 ms articulation because it was below the 62.5 ms half-unit.
+        notes = build_notes([60, 62], duration=0.37, gap=0.02)
+        document = to_abc(notes, meter=FOUR_FOUR, tempo_bpm=120.0)
+        restored = from_abc(document.text, tempo_bpm=120.0)
+        restored_gap = restored[1].start_sec - restored[0].end_sec
+        assert restored_gap == pytest.approx(0.02, abs=2e-6)
 
 
 class TestAssumptions:

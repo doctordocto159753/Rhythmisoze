@@ -144,6 +144,46 @@ function ambiguousNoise(): MonoAudio {
   return mono(samples);
 }
 
+/**
+ * A lyric-like line whose vowel islands are short even though the phrase is
+ * continuous. The low-passed consonant bed keeps energy connected without
+ * pretending every frame has a single fundamental.
+ */
+function syllabicVocalPhrase(): MonoAudio {
+  const totalSec = 4;
+  const samples = new Float32Array(Math.round(totalSec * RATE));
+  let phase = 0;
+  let noiseState = 2468;
+  let breath = 0;
+  const pitches = [196, 220, 246.94, 261.63, 293.66, 261.63, 246.94, 220];
+
+  for (let index = 0; index < samples.length; index += 1) {
+    const time = index / RATE;
+    const phraseTime = time < 2 ? time : time - 2.15;
+    if (time >= 2 && time < 2.15) continue;
+
+    const note = pitches[Math.min(pitches.length - 1, Math.floor(time / 0.5))] as number;
+    phase += (2 * Math.PI * note) / RATE;
+    const cycle = ((phraseTime % 0.12) + 0.12) % 0.12;
+    const tonal = cycle < 0.072;
+    noiseState = (noiseState * 1103515245 + 12345) & 0x7fffffff;
+    const rawNoise = (noiseState / 0x7fffffff) * 2 - 1;
+    breath = breath * 0.94 + rawNoise * 0.06;
+
+    const source = tonal
+      ? Math.sin(phase) + 0.25 * Math.sin(2 * phase)
+      : breath * 7;
+    const stressedSyllable = (time >= 1 && time < 1.25) || (time >= 3 && time < 3.25);
+    samples[index] = (stressedSyllable ? 0.45 : 0.2) * source;
+  }
+  return mono(samples);
+}
+
+function scaled(audio: MonoAudio, gain: number): MonoAudio {
+  const samples = Float32Array.from(audio.samples, (sample) => sample * gain);
+  return { ...audio, samples };
+}
+
 describe('feature extraction', () => {
   it('finds a sung phrase highly voiced with long unbroken runs', () => {
     const features = extractIntentFeatures(sungPhrase());
@@ -231,6 +271,20 @@ describe('internal InputClassifier routing contract', () => {
     expect(result.type).toBe('melody');
     expect(result.confidence).toBeGreaterThan(0);
     expect(result.reasoning.length).toBeGreaterThan(1);
+  });
+
+  it('keeps a syllabic vocal phrase on the melody route despite short voiced runs', () => {
+    const audio = syllabicVocalPhrase();
+    const features = extractIntentFeatures(audio);
+    expect(features.meanVoicedRunSec).toBeLessThan(0.1);
+    expect(classifyInput(audio).type).toBe('melody');
+  });
+
+  it('classifies a faint valid performance from the same evidence as its full-level source', () => {
+    const source = pluckedPhrase();
+    const quiet = scaled(source, 0.025);
+    expect(classifyInput(quiet).type).toBe('polyphonic');
+    expect(classifyInput(quiet).type).toBe(classifyInput(source).type);
   });
 
   it('routes re-attacked pitched material through multipitch transcription', () => {

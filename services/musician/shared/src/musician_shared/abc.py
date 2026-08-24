@@ -19,19 +19,21 @@ music21 is still used, through :func:`validate_with_music21`, to check that what
 we produced is coherent notation. Validation cannot silently rewrite anything,
 because its result is a verdict rather than a score.
 
-## The rounding, stated plainly
+## Timing transport, stated plainly
 
-ABC is symbolic: durations are multiples of a unit note length. Seconds are not.
-Converting seconds to symbolic durations therefore quantises, and quantisation
-is lossy. The unit is a 16th at the detected tempo, and the residual is recorded
-on the result rather than discarded, so a caller can see how much was lost
-instead of assuming none was.
+ABC is symbolic, but its length suffixes are rational numbers rather than only
+integers. Rhythmisoze therefore keeps the familiar sixteenth-note unit that the
+model was trained on while writing off-grid durations and rests as fractions of
+that unit. BPM describes how those fractions map back to seconds; it does not
+snap the performance to a grid. The tiny rational-transport residual is recorded
+on the result rather than discarded, so a caller can verify the bound.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 
 from .contract import Key, Meter, Note, Phrase
 
@@ -41,6 +43,16 @@ _IS_SHARP = (False, True, False, True, False, False, True, False, True, False, T
 #: Sixteenth-note resolution. Finer buys nothing -- neither model works below
 #: it -- and coarser loses genuine performed detail.
 UNITS_PER_QUARTER = 4
+
+#: Maximum denominator for an ABC length suffix.
+#:
+#: This is transport precision, not a rhythmic grid. Even at the service's
+#: lowest accepted tempo (just above 10 BPM), the nearest fraction with this
+#: denominator moves one boundary by less than 12 microseconds; at the app's
+#: 40 BPM floor the bound is below 3 microseconds. Keeping a finite denominator
+#: also avoids handing the character-level model float-artifact strings with
+#: dozens of digits.
+MAX_LENGTH_DENOMINATOR = 65_536
 
 #: Semitone offset of each natural letter within an octave.
 _LETTER_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
@@ -119,8 +131,8 @@ def key_accidentals(key_field: str) -> dict[str, int]:
 @dataclass(frozen=True)
 class AbcDocument:
     text: str
-    #: Seconds of timing discarded by quantisation, summed over all notes. A
-    #: caller that cares can compare this against the melody's duration.
+    #: Absolute seconds lost to bounded rational transport, summed over all
+    #: notes and rests. This is not beat/grid quantisation.
     quantisation_residual_sec: float
     #: Notation assumptions that were not measured. Recorded in provenance so a
     #: guess never looks like a measurement (brief section 8).
@@ -189,6 +201,32 @@ def _abc_pitch_in_context(
     return f"{accidental}{written}{marks}"
 
 
+def _length_units(span_sec: float, seconds_per_unit: float) -> Fraction:
+    """Represent an absolute-second span as a bounded rational ABC length.
+
+    ``Fraction.limit_denominator`` chooses the closest rational value; it does
+    not prefer beats, subdivisions, or any other musical grid. The caller uses
+    the represented cursor for the next span, so approximation error cannot
+    accumulate across a phrase.
+    """
+    if span_sec <= 0.0:
+        return Fraction(0, 1)
+    return Fraction(span_sec / seconds_per_unit).limit_denominator(
+        MAX_LENGTH_DENOMINATOR
+    )
+
+
+def _length_suffix(units: Fraction) -> str:
+    """Write a positive ABC length suffix without changing its value."""
+    if units <= 0:
+        raise ValueError("ABC length must be positive")
+    if units.denominator == 1:
+        return str(units.numerator)
+    if units.numerator == 1:
+        return f"/{units.denominator}"
+    return f"{units.numerator}/{units.denominator}"
+
+
 
 def to_abc(
     notes: Sequence[Note],
@@ -216,7 +254,11 @@ def to_abc(
 
     residual = 0.0
     body: list[str] = []
-    cursor = notes[0].start_sec
+    # Track what the notation actually represents, not only the source cursor.
+    # Each following span is measured from this value, which prevents a few
+    # microseconds of rational approximation from accumulating into audible
+    # drift over a long phrase.
+    represented_cursor_sec = notes[0].start_sec
 
     key_field = "C" if key is None else f"{key.tonic}{'m' if key.mode.value == 'minor' else ''}"
     # The same map `from_abc` will build from this K: field. Spelling against it
@@ -232,13 +274,13 @@ def to_abc(
     # collapses to a single patch, which is nothing like the training
     # distribution and produces correspondingly poor output. Emitting real bars
     # is what makes the input look like music the model has seen.
-    units_per_bar = round(meter.beats_per_bar * UNITS_PER_QUARTER)
-    units_in_bar = 0
+    units_per_bar = Fraction(round(meter.beats_per_bar * UNITS_PER_QUARTER), 1)
+    units_in_bar = Fraction(0, 1)
 
     def close_bar() -> None:
         nonlocal units_in_bar
         body.append("|")
-        units_in_bar = 0
+        units_in_bar = Fraction(0, 1)
         # A barline ends every written accidental's scope, on both sides of the
         # conversion. Forgetting it here would make the reader and the writer
         # disagree about the bar they are in.
@@ -250,12 +292,17 @@ def to_abc(
         raise ValueError("phrase points past the last note")
 
     for note_index, note in enumerate(notes):
-        gap = note.start_sec - cursor
-        if gap > seconds_per_unit * 0.5:
-            rest_units = max(1, round(gap / seconds_per_unit))
-            residual += abs(gap - rest_units * seconds_per_unit)
-            body.append(f"z{rest_units}")
+        # Correct against the represented cursor, not the preceding source end.
+        # That keeps every absolute onset stable instead of allowing rounding
+        # error to walk forward through the phrase.
+        gap = note.start_sec - represented_cursor_sec
+        rest_units = _length_units(gap, seconds_per_unit)
+        if rest_units > 0:
+            represented_gap_sec = float(rest_units) * seconds_per_unit
+            residual += abs(gap - represented_gap_sec)
+            body.append(f"z{_length_suffix(rest_units)}")
             units_in_bar += rest_units
+            represented_cursor_sec += represented_gap_sec
             while units_per_bar > 0 and units_in_bar >= units_per_bar:
                 units_in_bar -= units_per_bar
                 if units_in_bar == 0:
@@ -265,9 +312,20 @@ def to_abc(
                     bar_state.clear()
                     units_in_bar = units_in_bar % units_per_bar
 
-        units = max(1, round(note.duration_sec / seconds_per_unit))
-        residual += abs(note.duration_sec - units * seconds_per_unit)
-        token = f"{_abc_pitch_in_context(note.pitch, key_map=key_map, bar_state=bar_state)}{units}"
+        # Aim at the source end from the represented start. This bounds both
+        # boundaries independently, even after an off-grid rest.
+        represented_duration_target_sec = note.end_sec - represented_cursor_sec
+        units = _length_units(represented_duration_target_sec, seconds_per_unit)
+        if units <= 0:
+            raise ValueError(
+                f"note at {note.start_sec:.6f}s cannot be represented with positive duration"
+            )
+        represented_duration_sec = float(units) * seconds_per_unit
+        residual += abs(represented_duration_target_sec - represented_duration_sec)
+        token = (
+            f"{_abc_pitch_in_context(note.pitch, key_map=key_map, bar_state=bar_state)}"
+            f"{_length_suffix(units)}"
+        )
         # ABC slurs carry the phrase gesture into MelodyT5 without changing a
         # note or a duration. Our parser already treats slurs as articulation,
         # so the representation remains lossless on round-trip.
@@ -277,7 +335,7 @@ def to_abc(
             token = f"{token})"
         body.append(token)
         units_in_bar += units
-        cursor = note.start_sec + note.duration_sec
+        represented_cursor_sec += represented_duration_sec
 
         # A note that fills or overruns the bar closes it. Overrun is left
         # rather than split with a tie: splitting would change the note count,

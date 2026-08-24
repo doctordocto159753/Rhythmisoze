@@ -235,11 +235,14 @@ test('an ambiguous pitched rhythm preserves both readings and can be corrected w
   // Classification is advice, not destructive authority. The same source can
   // be re-read from Review and the correction is recorded in diagnostics.
   await page.getByRole('button', { name: /Correct: rhythm/i }).click();
-  const correctedHits = page.getByText(/\d+ hits/i).first();
+  await expect(page.getByText(/Route corrected after review/i)).toBeVisible();
+  await expect(page.getByText(/\d+ notes/i)).toHaveCount(0);
+  // Wait for the corrected-only summary. The mixed summary is also matched by
+  // `/\d+ hits/` and remains visible for a render while the route changes; its
+  // first number is the note count, which made this assertion race itself.
+  const correctedHits = page.getByText(/^\d+ hits$/i);
   await expect(correctedHits).toBeVisible();
   expect(Number(/(\d+)/.exec((await correctedHits.textContent()) ?? '')?.[1] ?? 0)).toBeGreaterThan(140);
-  await expect(page.getByText(/\d+ notes/i)).toHaveCount(0);
-  await expect(page.getByText(/Route corrected after review/i)).toBeVisible();
 });
 
 function makeMidiFixture(): Uint8Array {

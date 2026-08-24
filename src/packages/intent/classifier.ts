@@ -36,7 +36,14 @@ import type {
   MonoAudio,
   NoteEvent,
 } from '@contracts';
-import { bandEnergyRatio, magnitudeSpectrum, rmsOf, spectralCentroid, zeroCrossingRate } from '@audio-core';
+import {
+  bandEnergyRatio,
+  magnitudeSpectrum,
+  peakNormalize,
+  rmsOf,
+  spectralCentroid,
+  zeroCrossingRate,
+} from '@audio-core';
 
 export type Intent = 'voice' | 'instrument' | 'beat';
 
@@ -87,7 +94,11 @@ const HOP_SIZE = 512;
  * Exported so a misclassification can be reported with its evidence.
  */
 export function extractIntentFeatures(audio: MonoAudio): IntentFeatures {
-  const { samples, sampleRate } = audio;
+  // Validation deliberately accepts faint performances, and every inference
+  // engine normalizes them before use. Classification must use the same
+  // level-invariant evidence or a quiet but valid take becomes `unknown` before
+  // it can reach those engines.
+  const { samples, sampleRate } = peakNormalize(audio);
   const frameCount = Math.max(0, Math.floor((samples.length - FRAME_SIZE) / HOP_SIZE) + 1);
 
   if (frameCount < 4) {
@@ -172,11 +183,15 @@ export function classifyIntent(audio: MonoAudio): IntentClassification {
   // short, which are two of the things a plucked string also does. Percussion
   // is not a quiet guitar, and the difference is that it has no pitch.
   const pitched = ramp(features.voicedRatio, 0.15, 0.55);
+  const voiceContinuity = Math.max(
+    ramp(features.meanVoicedRunSec, 0.12, 0.5),
+    syllabicVoiceEvidence(features),
+  );
 
   // A voice glides: long unbroken voiced runs, stable pitch, soft attacks.
   const voice =
     pitched *
-    (0.4 * ramp(features.meanVoicedRunSec, 0.12, 0.5) +
+    (0.4 * voiceContinuity +
       0.25 * features.pitchStability +
       0.2 * inverse(features.attackSharpness) +
       0.15 * inverse(ramp(features.centroidHz, 900, 3500)));
@@ -236,11 +251,13 @@ export class InputClassifier {
     const legacy = classifyIntent(audio);
     const pitched = legacy.scores.voice + legacy.scores.instrument;
     const pitchedEvidence = ramp(legacy.features.voicedRatio, 0.15, 0.55);
-    const voiceContinuity =
+    const voiceContinuity = Math.max(
       inverse(legacy.features.attackSharpness) *
-      ramp(legacy.features.meanVoicedRunSec, 0.1, 0.45);
+        ramp(legacy.features.meanVoicedRunSec, 0.1, 0.45),
+      syllabicVoiceEvidence(legacy.features),
+    );
     const instrumentAttacks =
-      legacy.features.attackSharpness *
+      ramp(legacy.features.attackSharpness, 0.18, 0.55) *
       inverse(ramp(legacy.features.meanVoicedRunSec, 0.18, 0.55));
     const onsetMixedEvidence =
       ramp(legacy.features.voicedRatio, 0.18, 0.55) *
@@ -618,6 +635,23 @@ function periodicityOf(frame: Float32Array): number {
     if (normalized > best) best = normalized;
   }
   return clamp01(best);
+}
+
+/**
+ * Syllabic singing contains short vowel islands separated by consonants. Soft
+ * attacks and stable periodicity distinguish those islands from re-attacked
+ * plucks even when their mean voiced run is only a few frames long.
+ */
+function syllabicVoiceEvidence(features: IntentFeatures): number {
+  return clamp01(
+    ramp(features.voicedRatio, 0.2, 0.5) *
+      features.pitchStability *
+      inverse(ramp(features.attackSharpness, 0.18, 0.45)) *
+      ramp(features.onsetRate, 0.12, 0.55) *
+      inverse(ramp(features.onsetRate, 1, 2)) *
+      inverse(ramp(features.highRatio, 0.1, 0.35)) *
+      2.2,
+  );
 }
 
 function voicedRuns(voiced: readonly boolean[]): number[] {

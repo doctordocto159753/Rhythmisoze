@@ -58,7 +58,7 @@ services/**/*.egg-info/
 # too: it is keyed to absolute paths on that machine and is not part of the
 # reproducible test suite.
 samples for tests/
-artifacts/eval/
+artifacts/
 .playwright-mcp/
 tests/eval/
 vitest.eval.config.mts

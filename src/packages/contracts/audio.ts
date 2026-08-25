@@ -117,6 +117,31 @@ export interface ProcessingDiagnostics {
   warnings: string[];
   /** How the source was routed. Absent on saved results produced before auto-routing. */
   classification?: InputClassification;
+  /**
+   * Per-note record of what the later stages changed about the candidate,
+   * bounded in length. Observability for the debug views; absent when the
+   * pipeline had nothing to report.
+   */
+  noteTransformations?: NoteTransformation[];
+}
+
+/**
+ * One mechanical change a pipeline stage made to the candidate note set.
+ *
+ * Deliberately dumb: a diff of two note lists with a stage label, not an
+ * interpretation. The debug views assemble the story; this only guarantees the
+ * facts survive to them.
+ */
+export interface NoteTransformation {
+  /** Stage that produced `after` from `before` — e.g. "judge", "teacher". */
+  stage: string;
+  kind: 'removed' | 'added' | 'pitch-shifted' | 'moved';
+  startSec: number;
+  endSec: number;
+  /** Absent for additions. */
+  fromPitch?: number;
+  /** Absent for removals. */
+  toPitch?: number;
 }
 
 /**

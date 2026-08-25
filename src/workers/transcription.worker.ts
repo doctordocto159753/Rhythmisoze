@@ -35,6 +35,7 @@ import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
 import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { detectOnsets } from '@/packages/audio-core/onsets';
+import { noteTransformations } from '@/packages/note-history';
 import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
 import { classifyInput, reconcileClassificationWithMaterial } from '@intent';
 import { mapMonotonicProgress, type ProgressWindow } from './transcription-progress';
@@ -414,6 +415,13 @@ function runVoiceMelody(
           ? [`octave_conflicts_total:${verdict.octaveConflicts.length}`]
           : []),
       ],
+      // The mechanical record of what the later stages did to the candidate,
+      // bounded, for the debug views: when a take comes out wrong, the first
+      // question is which stage changed what.
+      noteTransformations: [
+        ...noteTransformations('judge', extraction.notes, verdict.judgedNotes),
+        ...noteTransformations('interpretation', extraction.notes, phraseModel.interpretedNotes),
+      ].slice(0, 200),
     },
   };
 }

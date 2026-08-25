@@ -103,10 +103,25 @@ material is repaired rather than deleted.
 
 ### `correct-octaves`
 
-Tries ±12 and ±24 semitones per note, keeping whichever sits closest to the
-contour. Per-note rather than global, because a tracker slips on individual
-notes rather than on a whole take. A shift is applied only if it is a strict
-improvement, so a correct note is never moved.
+Tries ±12 and ±24 semitones per note. Two gates decide whether a shift may be
+applied at all, and together they encode where the Judge's authority ends.
+
+**The evidence gate.** A shift is applied only when the measured frames under
+the note explain the shifted register decisively — at least 60% of the span,
+within a 1.2-semitone window, and by at least 25 points over the support the
+note's current pitch has. This refuses both the fold driven by a noisy minority
+reading and the mirror mistake of moving notes away from what the audio says.
+
+**The authority gate.** The voice pipeline sets `respectCandidateRegister`:
+its candidate's register was itself chosen from measurement — segmentation
+votes with measured frames, and register folding uses phrase context the Judge
+does not see. Re-deciding that per-note from local frames alone makes the
+less-informed opinion win, which is how one confidently-tracked subharmonic
+became whole phrases flipped an octave between stages. Under this flag the
+corrector moves nothing; every register disagreement is instead listed in
+`JudgeResult.octaveConflicts` (and surfaced on `TranscriptionResult.judge`) with
+the support numbers that describe it. One octave authority — the extraction
+stage — and the uncertainty stays visible rather than being silently resolved.
 
 ### `merge-fragments`
 

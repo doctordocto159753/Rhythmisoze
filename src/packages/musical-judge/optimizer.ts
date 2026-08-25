@@ -27,10 +27,16 @@
  *   repair, which is what lets the product still offer the unprocessed version.
  */
 
-import type { NoteEvent } from '@contracts';
+import type { JudgeOctaveConflict, NoteEvent } from '@contracts';
 import type { JudgeFeatures } from './features';
 import { judgeNotes, type JudgeScore, type ScoringOptions } from './scoring';
-import { REPAIR_OPERATORS, type RepairOperatorId } from './repair';
+import {
+  DEFAULT_REPAIR_OPTIONS,
+  detectOctaveConflicts,
+  REPAIR_OPERATORS,
+  type RepairOperatorId,
+  type RepairOptions,
+} from './repair';
 
 export interface RepairStep {
   operator: RepairOperatorId;
@@ -52,6 +58,13 @@ export interface JudgeResult {
   repairs: RepairStep[];
   /** `judgedScore.overall - originalScore.overall`, never negative. */
   improvement: number;
+  /**
+   * Register disagreements observed on the final notes but deliberately not
+   * resolved. Populated when `repair.respectCandidateRegister` is set — the
+   * candidate's register is itself a measured decision — and empty otherwise,
+   * since a correcting Judge has by definition resolved what it could see.
+   */
+  octaveConflicts: JudgeOctaveConflict[];
 }
 
 export interface OptimizerOptions {
@@ -64,6 +77,8 @@ export interface OptimizerOptions {
   /** Smallest score gain worth another round. */
   minGain: number;
   scoring?: Partial<ScoringOptions>;
+  /** Tuning for the repair operators themselves. */
+  repair?: Partial<RepairOptions>;
 }
 
 export const DEFAULT_OPTIMIZER_OPTIONS: OptimizerOptions = {
@@ -94,6 +109,7 @@ export function judgeAndRepair(
   options: Partial<OptimizerOptions> = {},
 ): JudgeResult {
   const config = { ...DEFAULT_OPTIMIZER_OPTIONS, ...options };
+  const repairOptions = { ...DEFAULT_REPAIR_OPTIONS, ...config.repair };
   const originalNotes = candidate.map((note) => ({ ...note }));
   const originalScore = judgeNotes(originalNotes, features, config.scoring);
 
@@ -107,6 +123,7 @@ export function judgeAndRepair(
       judgedScore: originalScore,
       repairs: [],
       improvement: 0,
+      octaveConflicts: [],
     };
   }
 
@@ -126,7 +143,7 @@ export function judgeAndRepair(
         // cost time.
         if (entry.used.has(operator.id)) continue;
 
-        const notes = operator.apply(entry.notes, features);
+        const notes = operator.apply(entry.notes, features, repairOptions);
         // An operator that changed nothing is not a step worth recording.
         if (sameNotes(notes, entry.notes)) continue;
 
@@ -175,6 +192,11 @@ export function judgeAndRepair(
     judgedScore: improved ? best.score : originalScore,
     repairs: improved ? best.repairs : [],
     improvement: improved ? best.score.overall - originalScore.overall : 0,
+    // Only a deferring Judge has unresolved disagreements to report. One that
+    // corrected has, by construction, already acted on everything it saw.
+    octaveConflicts: repairOptions.respectCandidateRegister
+      ? detectOctaveConflicts(improved ? best.notes : originalNotes, features, repairOptions)
+      : [],
   };
 }
 

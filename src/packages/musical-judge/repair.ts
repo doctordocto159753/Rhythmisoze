@@ -18,7 +18,7 @@
  * understood the human.
  */
 
-import type { NoteEvent } from '@contracts';
+import type { JudgeOctaveConflict, NoteEvent } from '@contracts';
 import {
   medianOfSorted,
   referencePitchesDuring,
@@ -37,7 +37,7 @@ export interface RepairOperator {
   id: RepairOperatorId;
   /** Human-readable, used in the repair log shown in diagnostics. */
   describe(): string;
-  apply(notes: readonly NoteEvent[], features: JudgeFeatures): NoteEvent[];
+  apply(notes: readonly NoteEvent[], features: JudgeFeatures, options?: RepairOptions): NoteEvent[];
 }
 
 export interface RepairOptions {
@@ -49,6 +49,42 @@ export interface RepairOptions {
   minNoteSec: number;
   /** Octave shifts the corrector is allowed to try. */
   octaveCandidates: number[];
+  /**
+   * Frames under a note that must agree with a shifted pitch before the shift
+   * may be applied, as a fraction of the measured frames in the span.
+   *
+   * A correction the audio only half supports is a guess; this floor keeps
+   * guesses out of the repair.
+   */
+  minFoldSupport: number;
+  /**
+   * How far a frame may sit from a register and still count towards its
+   * support.
+   *
+   * Wider than {@link pitchToleranceSemitones} on purpose: intonation and
+   * vibrato routinely sit a semitone off the note name while unmistakably
+   * supporting its octave, and a support statistic that only counts
+   * dead-on frames would read a well-sung span as split evidence.
+   */
+  foldSupportToleranceSemitones: number;
+  /**
+   * How much more of the span the shifted pitch must explain than the note's
+   * current pitch, as a fraction. A fold that wins by one frame is rounding,
+   * not evidence.
+   */
+  foldSupportMargin: number;
+  /**
+   * The candidate's register is itself a measured decision.
+   *
+   * Set by callers whose notes were produced by the melody pipeline: there the
+   * register was chosen from these same frames *plus phrase context* the Judge
+   * does not have, so re-deciding it per-note from local frames alone sets up
+   * two competing octave authorities. Under this flag the corrector defers —
+   * it moves nothing — and `detectOctaveConflicts` reports every register
+   * disagreement it sees instead, so the uncertainty is visible rather than
+   * silently resolved either way.
+   */
+  respectCandidateRegister: boolean;
 }
 
 export const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
@@ -58,6 +94,10 @@ export const DEFAULT_REPAIR_OPTIONS: RepairOptions = {
   // One and two octaves either way: a tracker reports the second and fourth
   // harmonic far more often than anything else.
   octaveCandidates: [-24, -12, 12, 24],
+  minFoldSupport: 0.6,
+  foldSupportToleranceSemitones: 1.2,
+  foldSupportMargin: 0.25,
+  respectCandidateRegister: false,
 };
 
 /**
@@ -94,40 +134,141 @@ export function removeUnsupportedNotes(
 }
 
 /**
+ * Share of the measured frames under a span that sit within tolerance of
+ * `pitch`. The support statistic the fold guard decides on: it asks not
+ * "which octave is the median closer to" but "how much of the span does each
+ * register actually explain".
+ */
+function supportDuring(
+  features: JudgeFeatures,
+  startSec: number,
+  endSec: number,
+  pitch: number,
+  toleranceSemitones: number,
+): { support: number; frames: number } {
+  const reference = referencePitchesDuring(features, startSec, endSec);
+  if (reference.length === 0) return { support: 0, frames: 0 };
+  const agreeing = reference.filter((frame) => Math.abs(frame - pitch) <= toleranceSemitones).length;
+  return { support: agreeing / reference.length, frames: reference.length };
+}
+
+/**
  * Octave correction.
  *
- * For each note, try the allowed octave shifts and keep whichever sits closest
- * to the reference contour under that note. Per-note rather than global,
- * because a tracker slips on individual notes rather than on a whole take.
+ * For each note, try the allowed octave shifts and keep whichever the audio's
+ * measured frames actually support. Two gates stand between a note and a fold,
+ * and they encode where the Judge's authority ends:
  *
- * A shift is applied only if it is a real improvement, so a note already
- * agreeing with the contour is never moved.
+ * **The evidence gate.** A shift is applied only when the frames under the
+ * note explain the shifted pitch far better than the current one — at least
+ * `minFoldSupport` of the span, by at least `foldSupportMargin` over the
+ * incumbent. This is what stops a noisy minority reading from dragging a note
+ * that four frames out of five contradict. It also refuses the mirror mistake:
+ * moving notes *away* from what the audio says, which no median-distance rule
+ * alone prevents.
+ *
+ * **The authority gate.** When `respectCandidateRegister` is set, the caller is
+ * saying the candidate's register was itself decided from measurement — the
+ * melody pipeline votes with measured frames and folds registers with phrase
+ * context the Judge never sees. Re-deciding that per-note from local frames
+ * makes the second opinion win despite knowing less, which is how one
+ * confidently-tracked subharmonic becomes a whole phrase flipped an octave.
+ * Under this flag the corrector moves nothing; the disagreement is reported by
+ * {@link detectOctaveConflicts} instead.
  */
 export function correctOctaves(
   notes: readonly NoteEvent[],
   features: JudgeFeatures,
-  options: RepairOptions = DEFAULT_REPAIR_OPTIONS,
+  options: Partial<RepairOptions> = DEFAULT_REPAIR_OPTIONS,
 ): NoteEvent[] {
+  const config = { ...DEFAULT_REPAIR_OPTIONS, ...options };
+  if (config.respectCandidateRegister) return [...notes];
   return notes.map((note) => {
-    const reference = medianOfSorted(referencePitchesDuring(features, note.startSec, note.endSec));
-    if (reference === null) return note;
-
     let bestPitch = note.pitch;
-    let bestError = Math.abs(note.pitch - reference);
+    let bestSupport = supportDuring(
+      features,
+      note.startSec,
+      note.endSec,
+      note.pitch,
+      config.foldSupportToleranceSemitones,
+    );
 
-    for (const shift of options.octaveCandidates) {
+    for (const shift of config.octaveCandidates) {
       const candidate = note.pitch + shift;
       if (candidate < 0 || candidate > 127) continue;
-      const error = Math.abs(candidate - reference);
-      // Strictly better, by a margin, so rounding cannot cause a pointless move.
-      if (error < bestError - 0.01) {
-        bestError = error;
+      const supported = supportDuring(
+        features,
+        note.startSec,
+        note.endSec,
+        candidate,
+        config.foldSupportToleranceSemitones,
+      );
+      // Decisively better explained by the audio, or not moved at all.
+      if (
+        supported.support >= config.minFoldSupport &&
+        supported.support >= bestSupport.support + config.foldSupportMargin
+      ) {
+        bestSupport = supported;
         bestPitch = candidate;
       }
     }
 
     return bestPitch === note.pitch ? note : { ...note, pitch: bestPitch };
   });
+}
+
+/**
+ * Where the transcription's register and the measured audio disagree by an
+ * octave family.
+ *
+ * This is the reporting half of the authority gate: when the corrector defers
+ * to the candidate's register, the disagreements it would otherwise have
+ * resolved are listed here — with the support numbers that describe how split
+ * the evidence is — so a downstream stage or a human can see the uncertainty
+ * instead of discovering it as a phrase that will not stay in one octave
+ * between builds.
+ *
+ * Only genuine octave-family conflicts are listed, and only when the frames
+ * under the span have a real opinion (enough frames, mostly agreeing with the
+ * reference). A note the audio says nothing about is silence, not conflict.
+ */
+export function detectOctaveConflicts(
+  notes: readonly NoteEvent[],
+  features: JudgeFeatures,
+  options: Partial<RepairOptions> = DEFAULT_REPAIR_OPTIONS,
+): JudgeOctaveConflict[] {
+  const config = { ...DEFAULT_REPAIR_OPTIONS, ...options };
+  const conflicts: JudgeOctaveConflict[] = [];
+  for (const note of notes) {
+    const reference = medianOfSorted(referencePitchesDuring(features, note.startSec, note.endSec));
+    if (reference === null || !isOctaveApart(note.pitch, reference)) continue;
+    const noteSupported = supportDuring(
+      features,
+      note.startSec,
+      note.endSec,
+      note.pitch,
+      config.foldSupportToleranceSemitones,
+    );
+    const referenceSupported = supportDuring(
+      features,
+      note.startSec,
+      note.endSec,
+      reference,
+      config.foldSupportToleranceSemitones,
+    );
+    // The audio must speak clearly for its own register before this counts as
+    // a disagreement rather than tracker grit around the note.
+    if (referenceSupported.frames < 4 || referenceSupported.support < 0.6) continue;
+    conflicts.push({
+      startSec: Number(note.startSec.toFixed(3)),
+      endSec: Number(note.endSec.toFixed(3)),
+      notePitch: note.pitch,
+      referenceMedian: Number(reference.toFixed(2)),
+      noteSupport: Number(noteSupported.support.toFixed(3)),
+      referenceSupport: Number(referenceSupported.support.toFixed(3)),
+    });
+  }
+  return conflicts;
 }
 
 /**
@@ -206,22 +347,22 @@ export const REPAIR_OPERATORS: readonly RepairOperator[] = [
   {
     id: 'remove-unsupported',
     describe: () => 'removed notes with no support in the audio',
-    apply: (notes, features) => removeUnsupportedNotes(notes, features),
+    apply: (notes, features, options) => removeUnsupportedNotes(notes, features, options),
   },
   {
     id: 'correct-octaves',
     describe: () => 'moved notes to the octave the audio was actually in',
-    apply: (notes, features) => correctOctaves(notes, features),
+    apply: (notes, features, options) => correctOctaves(notes, features, options),
   },
   {
     id: 'merge-fragments',
     describe: () => 'merged split notes back into one',
-    apply: (notes, features) => mergeFragments(notes, features),
+    apply: (notes, features, options) => mergeFragments(notes, features, options),
   },
   {
     id: 'reconstruct-durations',
     describe: () => 'restored note lengths from the audio',
-    apply: (notes, features) => reconstructDurations(notes, features),
+    apply: (notes, features, options) => reconstructDurations(notes, features, options),
   },
 ];
 

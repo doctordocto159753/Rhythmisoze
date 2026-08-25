@@ -120,6 +120,28 @@ export interface ProcessingDiagnostics {
 }
 
 /**
+ * One place where the transcription's register and the measured audio disagree
+ * by an octave family, reported instead of silently repaired.
+ *
+ * Reported rather than folded because both readings claim the same evidence:
+ * the note's register was chosen by the extraction stage from these very
+ * frames plus phrase context, and a second stage re-deciding it from a subset
+ * of that information is how one wrong octave becomes two.
+ */
+export interface JudgeOctaveConflict {
+  startSec: number;
+  endSec: number;
+  /** The transcription's pitch — the register the extraction stage settled on. */
+  notePitch: number;
+  /** Median measured pitch under the note's span. */
+  referenceMedian: number;
+  /** Share of measured frames under the span agreeing with `notePitch`, 0..1. */
+  noteSupport: number;
+  /** Share of measured frames agreeing with `referenceMedian`, 0..1. */
+  referenceSupport: number;
+}
+
+/**
  * A faithfulness verdict, produced by `@musical-judge`.
  *
  * Deliberately structural rather than a bare number: a score with no account of
@@ -136,6 +158,12 @@ export interface JudgeVerdict {
   repairs: string[];
   unsupportedNotesRemoved: number;
   octaveErrorsCorrected: number;
+  /**
+   * Register disagreements the Judge observed and deliberately did not
+   * resolve, because the transcription's register is itself a measured
+   * decision. Empty when none were seen or when repair was allowed to act.
+   */
+  octaveConflicts?: JudgeOctaveConflict[];
 }
 
 export interface TranscriptionResult {

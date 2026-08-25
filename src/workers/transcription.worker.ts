@@ -27,7 +27,10 @@ import {
   type TranscriptionInputMode,
   type TranscriptionResult,
 } from '@contracts';
-import { peakNormalize, resample } from '@/packages/audio-core/normalize';
+import {
+  peakNormalize,
+  resample,
+} from '@/packages/audio-core/normalize';
 import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
 import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
@@ -339,7 +342,14 @@ function runVoiceMelody(
     audio.durationSec,
     onsetsSec,
   );
-  const verdict = judgeAndRepair(sourcePhrase.sourceEvidence.notes, judgeFeatures);
+  // The candidate's register is itself a measured decision — the melody
+  // engine voted with these frames and folded registers with phrase context
+  // the Judge does not see — so octave repair defers and reports instead of
+  // re-deciding. This is the single-octave-authority rule: one stage owns the
+  // register, and a second opinion with less information never overrules it.
+  const verdict = judgeAndRepair(sourcePhrase.sourceEvidence.notes, judgeFeatures, {
+    repair: { respectCandidateRegister: true },
+  });
   const phraseModel = buildMusicalPhraseModel(extraction.notes, {
     sourceKind: 'voice',
     interpretationNotes: verdict.judgedNotes,
@@ -370,6 +380,7 @@ function runVoiceMelody(
         verdict.originalScore.diagnostics.octaveMismatches -
           verdict.judgedScore.diagnostics.octaveMismatches,
       ),
+      ...(verdict.octaveConflicts.length > 0 ? { octaveConflicts: verdict.octaveConflicts } : {}),
     },
     durationSec: audio.durationSec,
     diagnostics: {
@@ -390,6 +401,18 @@ function runVoiceMelody(
           : []),
         `phrase_continuity:${phraseModel.metrics.connectedTransitions}:` +
           `${phraseModel.metrics.reconstructedGapSec.toFixed(3)}s`,
+        // A reported conflict is an unresolved question, not a repair: the
+        // transcription kept its measured register while the frames under it
+        // read an octave away. Surfaced here so downstream stages and the
+        // debug views can see exactly where the take is register-ambiguous.
+        ...verdict.octaveConflicts.slice(0, 12).map(
+          (conflict) =>
+            `octave_conflict:@${conflict.startSec.toFixed(2)}s note=${conflict.notePitch}` +
+            ` frames=${conflict.referenceMedian} support=${conflict.noteSupport}/${conflict.referenceSupport}`,
+        ),
+        ...(verdict.octaveConflicts.length > 12
+          ? [`octave_conflicts_total:${verdict.octaveConflicts.length}`]
+          : []),
       ],
     },
   };

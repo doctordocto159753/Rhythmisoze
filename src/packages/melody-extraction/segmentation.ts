@@ -1,4 +1,4 @@
-import type { PitchFrame } from './pitch-tracker';
+import { isMeasuredOrigin, type PitchFrame } from './pitch-tracker';
 
 export interface MelodySegment {
   startSec: number;
@@ -71,6 +71,24 @@ export function segmentPitchContour(
       continue;
     }
     lastVoicedIndex = index;
+    // An interpolated frame continues whatever is underway — it counts toward
+    // the gap backstop and the segment's time span, and nothing else. It can
+    // neither confirm nor disturb a pending pitch change: those decisions
+    // belong to measurement alone.
+    const inferred =
+      frame.origin === 'interpolated' || frame.origin === 'predicted';
+    if (inferred) {
+      if (current.length > 0) {
+        current.push(frame);
+        continue;
+      }
+      // Continuity with nothing underway yet cannot happen for a well-formed
+      // bridge (it needs two measured endpoints), but if degraded input ever
+      // produces one, holding it in `current` is still safe: buildSegment
+      // drops segments with no measured frames at all.
+      current = [frame];
+      continue;
+    }
     if (current.length === 0) {
       current = [frame];
       continue;
@@ -85,7 +103,9 @@ export function segmentPitchContour(
     // where it was three seconds ago. The window is long enough to contain a
     // whole slide, so a portamento still resolves to the pitch it left rather
     // than to the middle of the journey.
-    const currentPitch = settledPitch(current.slice(-CHANGE_REFERENCE_FRAMES));
+    const currentPitch = settledPitch(
+      current.slice(-CHANGE_REFERENCE_FRAMES).filter(isMeasuredOrigin),
+    );
     if (Math.abs(frame.midiPitch - currentPitch) < options.pitchChangeSemitones) {
       if (pending.length > 0) current.push(...pending);
       pending = [];
@@ -268,7 +288,11 @@ function buildSegment(
   startSec: number,
   endSec: number,
 ): MelodySegment | null {
-  const pitched = frames.filter((frame) => frame.midiPitch !== null);
+  // Only measurement votes on what a segment sounds like. Interpolated frames
+  // extend its span in time — that is their whole job — and are excluded from
+  // both the pitch vote and the confidence average, so a filled hole can never
+  // choose its own note or inflate how sure the extraction is about it.
+  const pitched = frames.filter((frame) => frame.midiPitch !== null && isMeasuredOrigin(frame));
   if (pitched.length === 0 || endSec <= startSec) return null;
   const confidenceWeight = pitched.reduce((sum, frame) => sum + frame.confidence, 0);
   return {

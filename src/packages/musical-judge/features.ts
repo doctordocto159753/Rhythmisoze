@@ -24,10 +24,30 @@
 import type { MonoAudio } from '@contracts';
 import { detectOnsets } from '@audio-core';
 import {
+  isMeasuredOrigin,
   smoothPitchContour,
   trackFundamentalPitch,
   type PitchFrame,
 } from '@/packages/melody-extraction';
+
+/**
+ * Strips accepted-pitch authority from inferred frames.
+ *
+ * A bridged frame keeps its time, its measured energy, and its measured
+ * candidate — all real observations — but its interpolated `midiPitch` is
+ * withdrawn before the Judge sees it. Every correctness question the Judge
+ * answers (is this note supported, where does it really end, what did the
+ * human actually sing) must be answerable from measurement alone; the
+ * candidate path in `voicedEndAfter` and the null reference in the pitch
+ * readers handle the rest honestly.
+ */
+function withoutInferredAuthority(frames: readonly PitchFrame[]): PitchFrame[] {
+  return frames.map((frame) =>
+    frame.midiPitch !== null && !isMeasuredOrigin(frame)
+      ? { ...frame, midiPitch: null, frequencyHz: null }
+      : frame,
+  );
+}
 
 export interface JudgeFeatures {
   /** Per-frame fundamental, `midiPitch === null` where unvoiced. */
@@ -80,7 +100,7 @@ export const JUDGE_CONFIDENCE_FLOOR = 0.5;
 export function extractJudgeFeatures(audio: MonoAudio): JudgeFeatures {
   const tracked = trackFundamentalPitch(audio.samples, audio.sampleRate);
   const contour = smoothPitchContour(tracked);
-  const frames = contour.frames;
+  const frames = withoutInferredAuthority(contour.frames);
 
   const hopSec =
     frames.length >= 2
@@ -112,17 +132,18 @@ export function judgeFeaturesFromFrames(
   durationSec: number,
   onsets: readonly number[],
 ): JudgeFeatures {
+  const safeFrames = withoutInferredAuthority(frames);
   const hopSec =
-    frames.length >= 2
-      ? (frames[1] as PitchFrame).timeSec - (frames[0] as PitchFrame).timeSec
+    safeFrames.length >= 2
+      ? (safeFrames[1] as PitchFrame).timeSec - (safeFrames[0] as PitchFrame).timeSec
       : 0.01;
 
   return {
-    frames: [...frames],
+    frames: safeFrames,
     hopSec: hopSec > 0 ? hopSec : 0.01,
     onsets: [...onsets].sort((a, b) => a - b),
     durationSec,
-    voicedFrames: frames.filter((frame) => frame.midiPitch !== null).length,
+    voicedFrames: safeFrames.filter((frame) => frame.midiPitch !== null).length,
   };
 }
 

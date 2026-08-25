@@ -1,4 +1,4 @@
-import { midiToFrequency, type PitchFrame } from './pitch-tracker';
+import { isMeasuredOrigin, midiToFrequency, type FrameOrigin, type PitchFrame } from './pitch-tracker';
 
 /**
  * How an uncertain gap is judged.
@@ -65,7 +65,12 @@ const MIN_RANGE_FRAMES = 8;
 /** Percentile range ignores phrase-edge flips instead of trusting extrema. */
 export function detectAdaptiveVocalRange(frames: readonly PitchFrame[]): VocalRange | null {
   const pitches = frames
-    .filter((frame) => frame.midiPitch !== null && frame.confidence >= 0.68)
+    .filter(
+      (frame) =>
+        frame.midiPitch !== null &&
+        frame.confidence >= 0.68 &&
+        isMeasuredOrigin(frame),
+    )
     .map((frame) => frame.midiPitch as number)
     .sort((a, b) => a - b);
   if (pitches.length < MIN_RANGE_FRAMES) return null;
@@ -96,7 +101,7 @@ export function smoothPitchContour(
     const local = weightedMedian(
       input
         .slice(Math.max(0, index - 10), Math.min(input.length, index + 11))
-        .filter((neighbor) => neighbor.midiPitch !== null)
+        .filter((neighbor) => neighbor.midiPitch !== null && isMeasuredOrigin(neighbor))
         .map((neighbor) => ({
           value: neighbor.midiPitch as number,
           weight: Math.max(0.01, neighbor.confidence ** 2),
@@ -108,7 +113,11 @@ export function smoothPitchContour(
     const useCorrected =
       Math.abs(frame.midiPitch - local) > 6 &&
       Math.abs(corrected - local) + 4 < Math.abs(frame.midiPitch - local);
-    return withMidi(frame, useCorrected ? corrected : frame.midiPitch);
+    // An untouched frame keeps its provenance verbatim; only a real rewrite
+    // becomes a correction.
+    return useCorrected && corrected !== frame.midiPitch
+      ? withMidi(frame, corrected, 'corrected')
+      : { ...frame };
   });
 
   const preliminaryRange = detectAdaptiveVocalRange(octaveRepaired);
@@ -140,13 +149,17 @@ export function smoothPitchContour(
     if (frame.midiPitch === null) return { ...frame };
     const neighbors = ranged
       .slice(Math.max(0, index - 2), Math.min(ranged.length, index + 3))
-      .filter((neighbor) => neighbor.midiPitch !== null)
+      .filter((neighbor) => neighbor.midiPitch !== null && isMeasuredOrigin(neighbor))
       .map((neighbor) => ({
         value: neighbor.midiPitch as number,
         weight: Math.max(0.01, neighbor.confidence),
       }));
     if (neighbors.length < 2) return { ...frame };
-    return withMidi(frame, weightedMedian(neighbors));
+    const median = weightedMedian(neighbors);
+    // Identity passes through untouched; a moved value is a correction of a
+    // measurement and keeps measurement's authority — smoothing never creates
+    // inference, it only refines what was already heard.
+    return median !== frame.midiPitch ? withMidi(frame, median, 'corrected') : { ...frame };
   });
 
   bridgeUncertainGaps(smoothed, hopSecOf(input), bridgeOptions);
@@ -175,11 +188,14 @@ export function smoothPitchContour(
  * later leaves frames reading 48, 60, 45, 55, 71, 43. Both look identical to a
  * frame-counting rule. They are not remotely alike here.
  *
- * Where the interior candidates agree they are used directly, so a bridged
- * region reports what was actually heard rather than a straight line drawn
- * across it. Bridged frames are marked with reduced confidence and stay
- * `voiced: false` in spirit — they are inference, not measurement — but they do
- * carry `midiPitch`, because that is what makes them one note downstream.
+ * What gets written is interpolation between the endpoint pitches — the
+ * endpoints own the register, always. Interior candidates, including ones
+ * sitting an octave flat of the truth, never become contour values: a
+ * forensic pass showed that letting them do so handed subharmonic readings
+ * segment authority and whole phrases landed an octave down. Bridged frames
+ * are stamped `'interpolated'`, which every downstream decision point treats
+ * as non-evidence: they extend duration and continuity, and influence nothing
+ * else.
  */
 function bridgeUncertainGaps(
   frames: PitchFrame[],
@@ -213,37 +229,50 @@ function bridgeUncertainGaps(
     const anchor = (before.midiPitch + after.midiPitch) / 2;
     const interior = frames.slice(start, end);
 
-    // True silence is a rest, not a dropout. Measured against the endpoints
-    // rather than an absolute level, so a quiet take is judged on its own terms.
+    // Continuity of energy, at every frame rather than just the loudest one:
+    // a tone that continues may dip, but it does not vanish. Measured against
+    // the quieter endpoint so a quiet take is judged on its own terms. This is
+    // what separates a tracking dropout inside one sustained note from the
+    // near-silent articulation between two repeated notes — the latter must
+    // stay two notes even when its candidates look agreeable.
     const edgeEnergy = Math.min(before.rms, after.rms);
-    const loudestInside = Math.max(...interior.map((frame) => frame.rms), 0);
-    if (edgeEnergy > 0 && loudestInside < edgeEnergy * options.silenceRatio) continue;
+    const floorEnergy = edgeEnergy * options.silenceRatio;
+    if (edgeEnergy > 0 && !interior.every((frame) => frame.rms >= floorEnergy)) continue;
+
+    /**
+     * Octave-family agreement decides whether the hole looks like the same
+     * note dropping out of tracking. On quiet material YIN reads the passing
+     * tone a register down without the tone having gone anywhere, so strict
+     * agreement would refuse holes the performer sang straight through. The
+     * family reading counts as evidence only — the written values come from
+     * the endpoints, so a bridge can close a hole without being able to move
+     * a register.
+     */
+    const agreesWithAnchor = (candidate: number): boolean =>
+      Math.abs(candidate - anchor) <= options.interiorSemitones ||
+      Math.abs(Math.abs(candidate - anchor) - 12 * Math.round(Math.abs(candidate - anchor) / 12)) <=
+        options.interiorSemitones;
 
     if (gapSec > options.shortGapSec) {
       const agreeing = interior.filter(
-        (frame) =>
-          frame.candidateMidi !== null &&
-          Math.abs(frame.candidateMidi - anchor) <= options.interiorSemitones,
+        (frame) => frame.candidateMidi !== null && agreesWithAnchor(frame.candidateMidi),
       ).length;
       if (agreeing / Math.max(1, interior.length) < options.interiorAgreement) continue;
     }
+
+    // Half the quieter endpoint's confidence, well under the range-detection
+    // floor, so inference cannot masquerade as confident listening even before
+    // provenance filtering applies.
+    const bridgedConfidence = Math.min(before.confidence, after.confidence) * 0.5;
 
     for (let cursor = start; cursor < end; cursor += 1) {
       const original = frames[cursor] as PitchFrame;
       const amount = (cursor - start + 1) / (end - start + 1);
       const interpolated = before.midiPitch + (after.midiPitch - before.midiPitch) * amount;
-      // The measurement where there is one, the interpolation where there is not.
-      const midi =
-        original.candidateMidi !== null &&
-        Math.abs(original.candidateMidi - anchor) <= options.interiorSemitones
-          ? original.candidateMidi
-          : interpolated;
       frames[cursor] = withMidi(
-        {
-          ...original,
-          confidence: Math.min(before.confidence, after.confidence) * 0.75,
-        },
-        midi,
+        { ...original, confidence: bridgedConfidence },
+        interpolated,
+        'interpolated',
       );
     }
   }
@@ -310,6 +339,12 @@ function repairSequentialOctaves(frames: PitchFrame[], range: VocalRange | null)
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index] as PitchFrame;
     if (frame.midiPitch === null) continue;
+    // Inferred values never anchor and are never folded here. A bridged frame
+    // carries the register its endpoints chose; feeding it into the running
+    // median would let one filled hole bias how every neighbouring measured
+    // frame is judged — the ratchet this function exists to prevent, rebuilt
+    // from the inside.
+    if (!isMeasuredOrigin(frame)) continue;
     if (recent.length > 0) {
       const anchor = medianOf(recent);
       const distance = Math.abs(frame.midiPitch - anchor);
@@ -319,7 +354,7 @@ function repairSequentialOctaves(frames: PitchFrame[], range: VocalRange | null)
         const insideRange =
           range === null || (folded >= range.lowMidi && folded <= range.highMidi);
         if (octaveLike && insideRange && Math.abs(folded - anchor) <= 4) {
-          frames[index] = withMidi(frame, folded);
+          frames[index] = withMidi(frame, folded, 'corrected');
         }
       }
     }
@@ -356,11 +391,15 @@ function closestOctave(pitch: number, target: number): number {
   return best;
 }
 
-function withMidi(frame: PitchFrame, midiPitch: number): PitchFrame {
+function withMidi(frame: PitchFrame, midiPitch: number, origin?: FrameOrigin): PitchFrame {
   return {
     ...frame,
     midiPitch,
     frequencyHz: midiToFrequency(midiPitch),
+    // A value rewrite on an existing measurement is a correction of that
+    // measurement and keeps its authority. Filling a previously empty frame
+    // creates inference; callers must say so explicitly via `origin`.
+    origin: origin ?? frame.origin ?? 'corrected',
   };
 }
 

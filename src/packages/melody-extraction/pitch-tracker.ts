@@ -83,6 +83,44 @@ export interface PitchFrame {
   rms: number;
   /** Whether this frame was accepted as part of a sung region. */
   voiced: boolean;
+  /**
+   * Where this frame's `midiPitch` value came from.
+   *
+   * - `measured` — an accepted YIN candidate. Full authority: it votes on
+   *   segment pitch, scores confidence, anchors octave repair, and counts as
+   *   evidence of musical correctness.
+   * - `corrected` — a measured frame whose value a contour stage transformed
+   *   (octave repair, smoothing, glitch removal). Still measurement-derived:
+   *   same authority as measured.
+   * - `interpolated` — a value derived from endpoint measurements across a
+   *   filled gap (or held from one endpoint). It preserves temporal continuity
+   *   and duration, and nothing else: it does not vote, does not score, does
+   *   not anchor repair, and is not evidence of musical correctness.
+   * - `predicted` — reserved for synthesis that is neither measurement nor
+   *   endpoint interpolation; same restrictions as interpolated.
+   *
+   * Absent means `measured` — the historical default, kept so fixtures and any
+   * external producer of frames keep their meaning.
+   */
+  origin?: FrameOrigin;
+}
+
+/** Provenance of a PitchFrame's accepted pitch value. See {@link PitchFrame.origin}. */
+export type FrameOrigin = 'measured' | 'corrected' | 'interpolated' | 'predicted';
+
+/**
+ * Frames whose values carry the authority of measurement.
+ *
+ * This is the single definition of "counts as evidence" for every consumer
+ * that decides something about pitch: segment voting, confidence scoring,
+ * octave-repair anchoring, register detection and the Judge's reference
+ * series all filter through it. Inferred frames (`interpolated`/`predicted`)
+ * may extend duration and continuity; they may never decide anything.
+ */
+export function isMeasuredOrigin(frame: {
+  origin?: FrameOrigin;
+}): boolean {
+  return frame.origin === undefined || frame.origin === 'measured' || frame.origin === 'corrected';
 }
 
 export interface PitchTrackerOptions {
@@ -446,6 +484,7 @@ export function decideVoicing(
     confidence: frame.confidence,
     rms: frame.rms,
     voiced: voiced[index] === true,
+    origin: 'measured' as const,
   }));
 }
 

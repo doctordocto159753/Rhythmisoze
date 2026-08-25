@@ -38,20 +38,48 @@ function frameAt(
 }
 
 describe('gap bridging register discipline', () => {
-  it('refuses to bridge when the interior read an octave flat', () => {
-    // Withdrawn behaviour, pinned as refused on purpose: a forensic pass on a
-    // quiet articulated take showed that accepting octave-family agreement in
-    // here let uncertain gap frames become pitch authority — segments merged
-    // across articulation boundaries and phrase registers flipped an octave
-    // flat downstream. Until a bridge design exists that cannot do that, an
-    // octave-displaced interior is treated exactly like any other
-    // disagreement.
+  it('fills an octave-flat dropout at the endpoint register, as inference only', () => {
+    // The withdrawn design failed here by writing the subharmonic into the
+    // contour. The safe design closes the hole using the ENDPOINTS' register:
+    // interior candidates are consulted for whether to fill, never for what
+    // to write.
     const frames: PitchFrame[] = [];
     for (let i = 0; i < 8; i += 1) frames.push(frameAt(i * 0.01, 57));
+    // Interior reads ~45 while both endpoints are 57: register slip, not rest,
+    // and the energy never drops — a sustained tone passing through weak
+    // tracking, not an articulation.
     for (let i = 8; i < 18; i += 1) {
       frames.push(frameAt(i * 0.01, null, { candidateMidi: 45, clarity: 0.7 }));
     }
     for (let i = 18; i < 26; i += 1) frames.push(frameAt(i * 0.01, 57));
+
+    const smoothed = smoothPitchContour(frames);
+    const hole = smoothed.frames.slice(8, 18);
+
+    expect(hole.every((frame) => frame.midiPitch !== null)).toBe(true);
+    expect(hole.every((frame) => Math.abs((frame.midiPitch as number) - 57) <= 1)).toBe(true);
+    expect(hole.every((frame) => frame.origin === 'interpolated')).toBe(true);
+  });
+
+  it('refuses a near-silent articulation even when candidates look agreeable', () => {
+    // Regression guard for the measured failure mode: repeated staccato notes
+    // whose articulation dips to digital silence must stay separate notes even
+    // though every interior candidate agrees with the endpoints up to an
+    // octave. Energy continuity, not candidate agreement, is what distinguishes
+    // a dropout inside one note from the space between two.
+    const frames: PitchFrame[] = [];
+    for (let i = 0; i < 8; i += 1) frames.push(frameAt(i * 0.01, 60));
+    for (let i = 8; i < 18; i += 1) {
+      const silentArticulation = i >= 11 && i <= 13;
+      frames.push(
+        frameAt(i * 0.01, null, {
+          candidateMidi: 48,
+          clarity: 0.7,
+          rms: silentArticulation ? 0.0002 : 0.05,
+        }),
+      );
+    }
+    for (let i = 18; i < 26; i += 1) frames.push(frameAt(i * 0.01, 60));
 
     const smoothed = smoothPitchContour(frames);
     const hole = smoothed.frames.slice(8, 18);
@@ -70,6 +98,22 @@ describe('gap bridging register discipline', () => {
 
     const smoothed = smoothPitchContour(frames);
     const hole = smoothed.frames.slice(8, 18);
+
+    expect(hole.every((frame) => frame.midiPitch === null)).toBe(true);
+  });
+
+  it('never bridges across an octave leap', () => {
+    // Endpoints an octave apart are a real melodic event, whatever the
+    // interior sounds like: endpoint agreement gates everything else.
+    const frames: PitchFrame[] = [];
+    for (let i = 0; i < 8; i += 1) frames.push(frameAt(i * 0.01, 57));
+    for (let i = 8; i < 14; i += 1) {
+      frames.push(frameAt(i * 0.01, null, { candidateMidi: 63, clarity: 0.7 }));
+    }
+    for (let i = 14; i < 22; i += 1) frames.push(frameAt(i * 0.01, 69));
+
+    const smoothed = smoothPitchContour(frames);
+    const hole = smoothed.frames.slice(8, 14);
 
     expect(hole.every((frame) => frame.midiPitch === null)).toBe(true);
   });

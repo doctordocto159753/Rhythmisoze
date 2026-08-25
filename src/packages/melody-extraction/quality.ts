@@ -1,6 +1,6 @@
 import type { MelodyConfidence, NoteEvent } from '@contracts';
 import type { VocalRange } from './contour';
-import type { PitchFrame } from './pitch-tracker';
+import { isMeasuredOrigin, type PitchFrame } from './pitch-tracker';
 
 export const MELODY_CONFIDENCE_THRESHOLD = 0.55;
 
@@ -10,7 +10,10 @@ export function calculateMelodyConfidence(
   range: VocalRange | null,
 ): MelodyConfidence {
   if (frames.length === 0) return emptyAssessment();
-  const voiced = frames.filter((frame) => frame.midiPitch !== null);
+  // Confidence describes how well *measurement* went. Interpolated frames are
+  // perfectly continuous by construction and would flatter every term here,
+  // so they count as neither voiced coverage nor continuity evidence.
+  const voiced = frames.filter((frame) => frame.midiPitch !== null && isMeasuredOrigin(frame));
   const voicedFramePercentage = voiced.length / frames.length;
 
   let continuityComparisons = 0;

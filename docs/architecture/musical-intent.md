@@ -131,6 +131,26 @@ Both were added after the first version misclassified real signals:
   are. Without it, anything unpitched scores as a beat — tape hiss, a fan, a
   held breath — purely for lacking a fundamental.
 
+### The mouth-melody override
+
+A third correction, added after real recordings failed the other way: sung
+syllables with hard consonants ("da-ba-li-da") raise attack statistics into
+plucked-instrument territory, and the take was routed to multipitch
+transcription, which scattered it across registers nobody sang.
+
+The override is deliberately narrow. It fires only when **all** of these hold:
+
+- `polyphonic` is currently the winning route — `rhythm` and `mixed` wins stand,
+  so layered material still reaches both engines;
+- at least 45% of frames are voiced, with pitch periodicity staying consistent;
+- attack sharpness never reaches struck-string levels;
+- percussion is not itself a competing lead (beat share under 30%).
+
+When it fires, melody's raw score overtakes polyphonic proportionally to the
+mouth evidence, and the reasoning records `mouth_melody_guard` so the decision
+is auditable in Review diagnostics. Real plucks fail the attack factor outright,
+and faint takes fail the voicing factor — neither gets redirected.
+
 ### Confidence and abstention
 
 Confidence combines the **margin** over the runner-up with the **absolute** score

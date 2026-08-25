@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { MonoAudio } from '@contracts';
 import {
   InputClassifier,
@@ -334,5 +336,78 @@ describe('internal InputClassifier routing contract', () => {
     const reconciled = reconcileClassificationWithMaterial(mixed, 0, 12);
     expect(reconciled.type).toBe('rhythm');
     expect(reconciled.reasoning.at(-1)).toMatch(/pitch_branch_empty/);
+  });
+});
+
+describe('mouth-melody routing guard', () => {
+  const MOUTH_FIXTURES = join(process.cwd(), 'tests/fixtures/audio');
+
+  /**
+   * Real recordings, pinned for the same reason Recording (8) and test22 are:
+   * synthesised vowels cannot reproduce what consonant articulation does to
+   * attack statistics. Both of these are mouth-recorded melodies whose
+   * consonants ("da-ba-li-da"-style syllables) pushed the pre-guard classifier
+   * into the multipitch route, which scattered them across registers.
+   */
+  function mouthFixture(name: string): MonoAudio {
+    const bytes = readFileSync(join(MOUTH_FIXTURES, `${name}.wav`));
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let offset = 12;
+    let channels = 0;
+    let sampleRate = 0;
+    let dataOffset = 0;
+    let dataLength = 0;
+    while (offset + 8 <= bytes.length) {
+      const id = bytes.toString('ascii', offset, offset + 4);
+      const length = view.getUint32(offset + 4, true);
+      const body = offset + 8;
+      if (id === 'fmt ') {
+        channels = view.getUint16(body + 2, true);
+        sampleRate = view.getUint32(body + 4, true);
+      } else if (id === 'data') {
+        dataOffset = body;
+        dataLength = length;
+        break;
+      }
+      offset = body + length + (length % 2);
+    }
+    const frameCount = Math.floor(dataLength / (channels * 2));
+    const samples = new Float32Array(frameCount);
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      samples[frame] = view.getInt16(dataOffset + frame * channels * 2, true) / 32768;
+    }
+    return { samples, sampleRate, durationSec: frameCount / sampleRate };
+  }
+
+  it('keeps a consonant-articulated mouth recording on the melody route', () => {
+    const result = classifyInput(mouthFixture('mouth-test3'));
+    expect(result.type).toBe('melody');
+    // The guard, not an accident of scoring, is what holds the route.
+    expect(result.reasoning.join(' ')).toMatch(/mouth_melody_guard/);
+  });
+
+  it('holds a clean mouth recording on the melody route without losing confidence', () => {
+    const result = classifyInput(mouthFixture('mouth-test2'));
+    expect(result.type).toBe('melody');
+    expect(result.confidence).toBeGreaterThan(0.3);
+  });
+
+  it('does not give plucked instruments the guard treatment', () => {
+    // The guard may only fire when attacks stay soft. A real re-attacked
+    // phrase must still reach multipitch transcription.
+    const result = classifyInput(pluckedPhrase());
+    expect(result.type).toBe('polyphonic');
+    expect(result.reasoning.join(' ')).not.toMatch(/mouth_melody_guard/);
+  });
+
+  it('does not fire when percussion is a competing lead', () => {
+    // Voice plus drums is a layered take, not a solo melody: it keeps both.
+    const result = classifyInput(mixedPhrase());
+    expect(result.type).toBe('mixed');
+    expect(result.reasoning.join(' ')).not.toMatch(/mouth_melody_guard/);
+  });
+
+  it('leaves transient material on the rhythm route', () => {
+    expect(classifyInput(beatPattern()).type).toBe('rhythm');
   });
 });

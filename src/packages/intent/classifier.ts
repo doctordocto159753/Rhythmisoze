@@ -285,6 +285,42 @@ export class InputClassifier {
       rhythm: legacy.scores.beat,
       mixed: mixedEvidence,
     };
+
+    /**
+     * A mouth is not a pluck.
+     *
+     * Sharp consonant articulation ("da-ba-li-da") raises a sung phrase's
+     * attack statistics into plucked-instrument territory, and the multipitch
+     * route then scatters the take across registers nobody sang. The features
+     * that survive consonants are the voice's own: a large share of voiced
+     * frames, periodicity that stays consistent across the vowel islands, and
+     * attacks that never reach a struck-string's sharpness. When all three
+     * hold AND percussion is not a competing lead, the multipitch win is
+     * treated as an articulation artefact rather than an instrument.
+     *
+     * Deliberately narrow: it only overrides a `polyphonic` recommendation,
+     * never `rhythm` or `mixed`, so genuine percussion keeps its routes and a
+     * layered take still reaches both engines. Real plucks fail the third
+     * factor outright — their attack sharpness saturates the ramp — and quiet
+     * or breathy takes fail the first, which is correct: faint material has
+     * not earned a route override.
+     */
+    const mouthMelodyEvidence =
+      ramp(legacy.features.voicedRatio, 0.45, 0.65) *
+      ramp(legacy.features.pitchStability, 0.5, 0.75) *
+      inverse(ramp(legacy.features.attackSharpness, 0.45, 0.85));
+    let mouthGuardApplied = false;
+    if (
+      raw.polyphonic > raw.melody &&
+      raw.polyphonic > raw.rhythm &&
+      raw.polyphonic > raw.mixed &&
+      mouthMelodyEvidence >= 0.35 &&
+      legacy.scores.beat < 0.3
+    ) {
+      raw.melody = raw.polyphonic * (1 + mouthMelodyEvidence);
+      mouthGuardApplied = true;
+    }
+
     const total = Object.values(raw).reduce((sum, value) => sum + value, 0) || 1;
     const scores: Record<InputType, number> = {
       melody: raw.melody / total,
@@ -324,7 +360,12 @@ export class InputClassifier {
     return {
       type,
       confidence,
-      reasoning: audioReasoning(type, legacy.features, scores),
+      reasoning: mouthGuardApplied
+        ? [
+            ...audioReasoning(type, legacy.features, scores),
+            'mouth_melody_guard: voiced, stable pitch with soft attacks overrides the multipitch route',
+          ]
+        : audioReasoning(type, legacy.features, scores),
       scores,
       features: { ...legacy.features },
       method: 'automatic',

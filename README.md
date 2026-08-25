@@ -97,25 +97,37 @@ src/
   server/              config, database, publish security, rate limiting
   app/                 routes — two root layouts, creation and share
 docs/                  ADRs, design decisions, benchmarks, licences, runbooks
+evaluation/            production evaluation corpus, metrics and baseline
 reference/humtool.py   the Python source the retouch engine was ported from
-tests/                 574 unit tests, golden fixtures, E2E specs
+tests/                 816 tests: unit, golden fixtures, evaluation gate, E2E specs
 ```
 
 ## The pipeline
 
 ```
-microphone ─► MonoAudio ─► voice melody engine ─► NoteEvent[] ─► refine() ─► synth ─► WAV
-                (mono float PCM)      │                         │            │
-                                      │                         │            └─ OfflineAudioContext
-                                      │                         └─ pure, deterministic, 181 parity tests
-                                      └─ YIN → contour → segmentation → monophonic notes
+microphone ─► MonoAudio ─► intent classification ─┬─► voice melody engine ─┐
+                (mono float PCM)                  │      YIN → contour →   │
+                on-device only                    ├─► Basic Pitch (multi)  │
+                                                  ├─► rhythm path          │
+                                                  │                        ▼
+                              synth ◄─ versions ◄─ Musician ◄─ Teacher ◄─ Judge
+                                │        developed / expanded / shaped
+                                ▼
+                          OfflineAudioContext ─► WAV + MIDI + source ZIP
 ```
 
 The user does not choose a mode. `InputClassifier` internally routes melody to
 the existing YIN engine, pitched re-attacked/polyphonic audio to Basic Pitch,
 rhythm to its fidelity path, and mixed input to both pitched and rhythm streams.
-The route, confidence and reasoning remain visible in Review diagnostics. See
-[`docs/architecture/musical-intent.md`](docs/architecture/musical-intent.md).
+A mouth-melody guard keeps consonant-articulated singing out of the multipitch
+engine. The route, confidence and reasoning remain visible in Review diagnostics.
+See [`docs/architecture/musical-intent.md`](docs/architecture/musical-intent.md).
+
+Downstream, the candidate is never silently overwritten: the **Judge** scores it
+against measured frame evidence and repairs only what that evidence decisively
+supports (its octave authority is bounded — see
+[`docs/musical-judge.md`](docs/musical-judge.md)), the **Teacher** suggests, and
+every stage's mechanical changes are recorded in per-note transformation history.
 
 Rhythm remains a separate path, not melody with the pitch discarded:
 
@@ -168,6 +180,7 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 | [docs/adr/](docs/adr/) | Why the architecture is shaped this way |
 | [docs/design-decisions/](docs/design-decisions/) | The visual thesis, the 3D role map |
 | [docs/benchmarks/](docs/benchmarks/) | What has been measured, and what has not |
+| [evaluation/](evaluation/README.md) | The production evaluation corpus, metrics and regression baseline |
 | [docs/licenses/](docs/licenses/) | Every sound and every dependency |
 | [docs/runbooks/](docs/runbooks/) | Deploying, rolling back, moderating |
 | [docs/architecture/musical-intent.md](docs/architecture/musical-intent.md) | Intent routing, tempo detection and versions |
@@ -178,8 +191,21 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 ## Known gaps
 
 Stated here rather than left to be discovered. The full list with detail is in
-`docs/product-decisions.md`.
+`docs/product-decisions.md`; measured quality numbers live in
+[`evaluation/`](evaluation/README.md) and are gated in CI.
 
+- **Pitch octave ambiguity is the largest open quality issue.** The YIN tracker
+  can lock onto a confident subharmonic on certain voices and articulations;
+  the pipeline contains the damage (measured-register authority, judge guard,
+  conflict reporting) but does not yet resolve it at the source. On a synthetic
+  octave-leap case the corpus measures 33% octave-error frames. A pitch-engine
+  benchmark (CREPE and alternatives behind a `PitchEngine` adapter) is the next
+  milestone.
+- **Continuous glides (glissando) transcribe frame-perfectly but produce no
+  usable note** — segmentation assumes stepped pitches.
+- **Whisper-level captures** (peaks below roughly −30 dBFS) remain marginal;
+  bounded capture gain helps but routing and tracking degrade gracefully
+  rather than excellently.
 - **The complete architecture quality gate has not been run** (ADR-001). The
   checked-in human regressions cover the known failures, but the corpus is still
   too small for a general accuracy claim or a blinded listening result.

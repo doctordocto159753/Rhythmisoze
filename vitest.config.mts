@@ -13,6 +13,7 @@ export default defineConfig({
       'tests/musical-judge/**/*.test.ts',
       'tests/music-teacher/**/*.test.ts',
       'tests/musician/**/*.test.ts',
+      'tests/evaluation/**/*.test.ts',
     ],
     coverage: { provider: 'v8', reporter: ['text', 'lcov'], reportsDirectory: 'coverage' },
   },

@@ -9,6 +9,7 @@ number, because it stops anyone from measuring it.
 
 | Document | Covers | State |
 |---|---|---|
+| [production-corpus.md](production-corpus.md) | end-to-end voice pipeline vs synthesised ground truth + pinned real takes | **Measured and gated.** Runs in `npm test`; baseline committed at `evaluation/expected/baseline.json`. |
 | [architecture-quality-gate.md](architecture-quality-gate.md) | US-0005, the browser-vs-server comparison | **Not run.** Method and corpus definition only. |
 | [audio-validation-thresholds.md](audio-validation-thresholds.md) | Silence, clipping and "too short" gates | Derived, with the reasoning; not calibrated on human recordings |
 | [metronome-drift.md](metronome-drift.md) | US-0203 drift tolerance | Design and unit-test bound; not measured on device |

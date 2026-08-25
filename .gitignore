@@ -62,3 +62,10 @@ artifacts/eval/
 .playwright-mcp/
 tests/eval/
 vitest.eval.config.mts
+
+# --- Evaluation reports (generated) ---
+evaluation/reports/*
+!evaluation/reports/.gitkeep
+
+# Machine-generated compose overlay with absolute paths; regenerated locally.
+/compose-final.yml

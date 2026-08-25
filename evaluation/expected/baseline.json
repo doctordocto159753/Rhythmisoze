@@ -1,0 +1,128 @@
+{
+  "note": "Measured behaviour of the current pipeline with slack applied. Floors are lower bounds for higher-is-better metrics, ceilings upper bounds for error metrics. Regenerate only with EVAL_WRITE_BASELINE=1 after reviewing the underlying change.",
+  "cases": {
+    "voice-steady-hum": {
+      "rawPitchAccuracy": 0.9600497512437811,
+      "rawChromaAccuracy": 0.9600497512437811,
+      "voicingRecall": 0.9400497512437811,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.029950248756218906,
+      "medianAbsoluteErrorCents": 15.2266420088759,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0
+    },
+    "voice-scale-legato": {
+      "rawPitchAccuracy": 0.9421115537848606,
+      "rawChromaAccuracy": 0.9421115537848606,
+      "voicingRecall": 0.9221115537848605,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.04788844621513944,
+      "medianAbsoluteErrorCents": 15.161307241251052,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 55.00000000000003,
+      "intervalDirectionAgreement": 0.9
+    },
+    "voice-vibrato": {
+      "rawPitchAccuracy": 0.9654751131221719,
+      "rawChromaAccuracy": 0.9654751131221719,
+      "voicingRecall": 0.9454751131221719,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.024524886877828056,
+      "medianAbsoluteErrorCents": 38.404904127306736,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 55,
+      "intervalDirectionAgreement": 0
+    },
+    "voice-glissando": {
+      "rawPitchAccuracy": 0.9633333333333333,
+      "rawChromaAccuracy": 0.9633333333333333,
+      "voicingRecall": 0.9433333333333332,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.02666666666666667,
+      "medianAbsoluteErrorCents": 23.588348782186017,
+      "notes.f1": 0,
+      "notes.medianOnsetErrorMs": 25,
+      "intervalDirectionAgreement": 0
+    },
+    "diff-octave-leap": {
+      "rawPitchAccuracy": 0.6219337016574585,
+      "rawChromaAccuracy": 0.9479005524861878,
+      "voicingRecall": 0.9279005524861877,
+      "octaveErrorRate": 0.3459668508287293,
+      "grossErrorRate": 0.04209944751381216,
+      "medianAbsoluteErrorCents": 15.22835301056574,
+      "notes.f1": 0.5866666666666667,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0
+    },
+    "diff-low-register": {
+      "rawPitchAccuracy": 0.95,
+      "rawChromaAccuracy": 0.95,
+      "voicingRecall": 0.9299999999999999,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.04,
+      "medianAbsoluteErrorCents": 15.02412073222473,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0.9
+    },
+    "diff-quiet-whisper": {
+      "rawPitchAccuracy": 0.95,
+      "rawChromaAccuracy": 0.95,
+      "voicingRecall": 0.9299999999999999,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.04,
+      "medianAbsoluteErrorCents": 15.359999038091985,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0.9
+    },
+    "diff-noisy-room": {
+      "rawPitchAccuracy": 0.95,
+      "rawChromaAccuracy": 0.95,
+      "voicingRecall": 0.9299999999999999,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.04,
+      "medianAbsoluteErrorCents": 15.268420904712485,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0.9
+    },
+    "diff-harmonic-heavy": {
+      "rawPitchAccuracy": 0.9479005524861878,
+      "rawChromaAccuracy": 0.9479005524861878,
+      "voicingRecall": 0.9279005524861877,
+      "octaveErrorRate": 0.02,
+      "grossErrorRate": 0.04209944751381216,
+      "medianAbsoluteErrorCents": 15.095445333856503,
+      "notes.f1": 0.92,
+      "notes.medianOnsetErrorMs": 45.000000000000014,
+      "intervalDirectionAgreement": 0.9
+    },
+    "rhythm-beatbox-pattern": {
+      "onsetF1": 0.5560606060606059,
+      "medianDeviationMs": 32.573696145124714
+    },
+    "rhythm-finger-taps": {
+      "onsetF1": 0.95,
+      "medianDeviationMs": 32.47165532879812
+    },
+    "real-mouth-test2": {
+      "noteCountFloor": 15,
+      "noteCountCeiling": 27
+    },
+    "real-mouth-test3": {
+      "noteCountFloor": 14.25,
+      "noteCountCeiling": 25.65
+    },
+    "real-test22": {
+      "noteCountFloor": 6.75,
+      "noteCountCeiling": 13
+    },
+    "real-recording-8": {
+      "noteCountFloor": 18.75,
+      "noteCountCeiling": 33.75
+    }
+  }
+}

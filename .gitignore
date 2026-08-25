@@ -51,3 +51,14 @@ __pycache__/
 .venv/
 .ruff_cache/
 services/**/*.egg-info/
+
+# --- Local evaluation workspace (never committed) ---
+# Private recordings, external KPI references and forensic dumps live only on
+# the development machine. The evaluation tooling that reads them stays local
+# too: it is keyed to absolute paths on that machine and is not part of the
+# reproducible test suite.
+samples for tests/
+artifacts/eval/
+.playwright-mcp/
+tests/eval/
+vitest.eval.config.mts

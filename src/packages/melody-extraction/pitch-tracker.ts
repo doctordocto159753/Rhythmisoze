@@ -140,6 +140,19 @@ export interface PitchTrackerOptions {
    * at 3.36 s ended up anchoring a two-and-a-half second note over silence.
    */
   minVoicedRunFrames: number;
+  /**
+   * How many agreeing frames of natural decay a held region may ride below the
+   * sustain-energy ratio before the region is allowed to end.
+   *
+   * A hummed note does not stop when its loudness crosses a threshold; it fades
+   * while the pitch stays put. Ending the region at the threshold cut every
+   * tail early — audibly so on phrase-final notes. The hold is bounded, and it
+   * still requires the evidence that matters (clarity plus an agreeing
+   * candidate above the grace floor), so a true rest — where no candidate
+   * exists, or the level has sunk into the take's floor — ends the note exactly
+   * where it did before.
+   */
+  tailHoldFrames: number;
 }
 
 export const DEFAULT_PITCH_TRACKER_OPTIONS: PitchTrackerOptions = {
@@ -156,7 +169,18 @@ export const DEFAULT_PITCH_TRACKER_OPTIONS: PitchTrackerOptions = {
   sustainEnergyRatio: 0.62,
   attackLookbackFrames: 8,
   minVoicedRunFrames: 3,
+  tailHoldFrames: 22,
 };
+
+/**
+ * How far below the sustain ratio the two bounded graces may still reach.
+ *
+ * The sustain ratio is 0.62 of the gate, so a grace that reached only to the
+ * gate would govern an empty band and never fire. This sits far enough under
+ * both to describe a real decay — while staying clear of the silence floor,
+ * which on takes with room tone is what set the gate in the first place.
+ */
+const GRACE_ENERGY_FACTOR = 0.45;
 
 export interface PreparedAudio {
   samples: Float32Array;
@@ -188,7 +212,12 @@ export function prepareVoiceAudio(
     previousOutput = output;
     peak = Math.max(peak, Math.abs(output));
   }
-  const gain = peak > 1e-5 ? Math.min(8, 0.92 / peak) : 1;
+  // Two gains of headroom, not eight: on a take recorded at whisper level the
+  // 8x cap left the signal close enough to the 16-bit floor that quantization
+  // noise, not the voice, set the adaptive gate, and notes fragmented. The cap
+  // only ever engages below a -25 dBFS peak, where every extra multiple of two
+  // is pure signal.
+  const gain = peak > 1e-5 ? Math.min(16, 0.92 / peak) : 1;
   if (Math.abs(gain - 1) > 1e-6) {
     for (let index = 0; index < filtered.length; index += 1) {
       filtered[index] = (filtered[index] ?? 0) * gain;
@@ -294,6 +323,12 @@ export function trackVoiceEvidence(
  *                 already sounding
  * ```
  *
+ * One bounded grace extends the hold without weakening what starts a note:
+ *
+ * - a decaying tail (clarity held, agreeing candidate, level still above the
+ *   grace floor) rides below the sustain ratio for up to `tailHoldFrames`, so
+ *   notes no longer stop where their loudness crossed a threshold.
+ *
  * The continuity test is what makes the low sustain threshold safe. A weak
  * frame is only accepted if it *agrees with what is already there*, so noise —
  * which by definition does not — cannot ride a region open. That is the
@@ -317,11 +352,14 @@ export function decideVoicing(
   // frame: a single bad frame inside a note must not drag the reference with it
   // and let the note wander an octave.
   let sounding: number | null = null;
+  // How long the current region has been riding on decay grace.
+  let tailHold = 0;
 
   for (let index = 0; index < evidence.length; index += 1) {
     const frame = evidence[index] as FrameEvidence;
     if (frame.candidateMidi === null) {
       sounding = null;
+      tailHold = 0;
       continue;
     }
 
@@ -329,6 +367,7 @@ export function decideVoicing(
       if (frame.clarity >= options.onsetClarity && frame.rms >= onsetEnergy) {
         voiced[index] = true;
         sounding = frame.candidateMidi;
+        tailHold = 0;
         // Reach back for the attack. Continuation evidence, not onset evidence:
         // these frames are corroborated by the confirmed onset ahead of them.
         for (let back = index - 1; back >= Math.max(0, index - options.attackLookbackFrames); back -= 1) {
@@ -347,12 +386,38 @@ export function decideVoicing(
       continue;
     }
 
-    const agrees = Math.abs(frame.candidateMidi - sounding) <= options.continuitySemitones;
+    const delta = frame.candidateMidi - sounding;
+    const agrees = Math.abs(delta) <= options.continuitySemitones;
+    // The decay grace reaches below the sustain ratio — that is its purpose —
+    // but never below this fraction of the take's own floor. A true rest sinks
+    // beneath it immediately; a decaying note crosses it slowly.
+    const graceEnergy = energyGate * GRACE_ENERGY_FACTOR;
+
     if (frame.clarity >= options.sustainClarity && frame.rms >= sustainEnergy && agrees) {
       voiced[index] = true;
       // A gentle follower, so vibrato and portamento move the reference while a
       // one-frame excursion does not.
-      sounding += (frame.candidateMidi - sounding) * 0.25;
+      sounding += delta * 0.25;
+      tailHold = 0;
+      continue;
+    }
+
+    if (
+      frame.clarity >= options.sustainClarity &&
+      agrees &&
+      frame.rms >= graceEnergy &&
+      tailHold < options.tailHoldFrames
+    ) {
+      // The note is decaying, not finished: pitch still locked, level sinking
+      // toward the floor of the take. Hold the region open while the decay
+      // stays real. An octave-displaced reading does NOT qualify: a held
+      // region spanning subharmonic stretches lets downstream segment-octave
+      // repair flip whole phrases into the wrong register — measured, not
+      // theorised, on a quiet articulated take whose opening phrase landed an
+      // octave flat under exactly this grace.
+      voiced[index] = true;
+      sounding += delta * 0.25;
+      tailHold += 1;
       continue;
     }
 
@@ -362,9 +427,11 @@ export function decideVoicing(
     if (frame.clarity >= options.onsetClarity && frame.rms >= onsetEnergy) {
       voiced[index] = true;
       sounding = frame.candidateMidi;
+      tailHold = 0;
       continue;
     }
     sounding = null;
+    tailHold = 0;
   }
 
   dropIsolatedRuns(voiced, options.minVoicedRunFrames);

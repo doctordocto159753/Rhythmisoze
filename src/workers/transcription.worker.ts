@@ -188,6 +188,25 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
           ? await runMixed(request, audio)
           : await runInstrument(request, audio);
 
+    /**
+     * A multipitch result on material that barely used its second voice is
+     * worth saying out loud. Sharp-articulated solo humming lands here: the
+     * classifier reads the attacks as an instrument, the model obliges, and the
+     * output scatters across registers the performer never sang. The review
+     * screen offers a one-tap route correction; this warning is what makes the
+     * offer discoverable instead of the user simply meeting a worse
+     * transcription. Deliberately narrow: layered music routinely spans more
+     * than two octaves *and* sustains real chords, and must never be nagged.
+     */
+    if (classification?.type === 'polyphonic' && result.notes.length > 0) {
+      const pitches = result.notes.map((note) => note.pitch);
+      const span = Math.max(...pitches) - Math.min(...pitches);
+      const simultaneous = maximumSimultaneity(result.notes);
+      if (span >= 26 && simultaneous <= 4) {
+        result.diagnostics.warnings.push('multipitch_route_sparse_register_signature');
+      }
+    }
+
     if (classification) {
       classification = reconcileClassificationWithMaterial(
         classification,
@@ -598,6 +617,21 @@ function prepareWorkerGlobalsForTensorflow(): void {
 
 /** Basic Pitch emits one frame every 256 samples at 22.05 kHz. */
 const MODEL_FRAME_SEC = 256 / MODEL_SAMPLE_RATE;
+
+/** How many voices ever sound at once in a candidate set. */
+function maximumSimultaneity(notes: readonly NoteEvent[]): number {
+  const points = notes.flatMap((note) => [
+    { time: note.startSec, delta: 1 },
+    { time: note.endSec, delta: -1 },
+  ]).sort((a, b) => a.time - b.time || a.delta - b.delta);
+  let active = 0;
+  let maximum = 0;
+  for (const point of points) {
+    active += point.delta;
+    maximum = Math.max(maximum, active);
+  }
+  return maximum;
+}
 
 /**
  * Rejects if `work` has not settled in time.

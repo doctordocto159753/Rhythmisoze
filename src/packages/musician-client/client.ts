@@ -31,6 +31,7 @@ import {
   type MusicianJobStatus,
   type MusicianResult,
 } from './schema';
+import { serializeTeacherNotes } from './wire';
 
 export interface MusicianRequest {
   /** Identifies the sketch, so a result can be matched to it on return. */
@@ -119,16 +120,11 @@ export class MusicianClient {
     const body = {
       teacher: {
         sourceId: request.sourceId,
-        // NoteEvent already uses the contract's field names, so this is a
-        // clamp rather than a translation. The clamps are not paranoia: a
-        // velocity of 0 or a pitch of 128 is refused by the service, and
-        // failing here with a clear reason beats a 422 from across a network.
-        notes: request.notes.map((note) => ({
-          pitch: Math.max(0, Math.min(127, Math.round(note.pitch))),
-          startSec: note.startSec,
-          endSec: note.endSec,
-          velocity: Math.max(1, Math.min(127, Math.round(note.velocity))),
-        })),
+        // serializeTeacherNotes clamps values the contract refuses and trims
+        // millisecond-scale overlaps the Teacher's refinement passes can leave
+        // behind — see wire.ts. Normalising at this boundary keeps true
+        // polyphony rejectable without turning valid Teacher output into a 422.
+        notes: serializeTeacherNotes(request.notes),
         phrases: (request.phrases ?? []).map((phrase) => ({
           startIndex: phrase.startIndex,
           endIndex: phrase.endIndex,

@@ -20,6 +20,13 @@ const FAKE_MEDIA_ARGS = [
   '--autoplay-policy=no-user-gesture-required',
 ];
 
+const ORDINARY_PROJECT_IGNORES = /(?:capture|instruments|source-import|musician)\.spec\.ts/;
+const LIVE_MUSICIAN_SPEC = /musician-real-chain\.spec\.ts/;
+const STANDARD_PROJECT_IGNORES =
+  process.env.E2E_REAL_MUSICIAN === '1'
+    ? ORDINARY_PROJECT_IGNORES
+    : [ORDINARY_PROJECT_IGNORES, LIVE_MUSICIAN_SPEC];
+
 /**
  * US-1203 - the browser matrix, and the E2E suite that runs across it.
  *
@@ -83,13 +90,16 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      testIgnore: /(?:capture|instruments|source-import|musician)\.spec\.ts/,
+      // The live-service chain has its own runner and environment. Keeping it
+      // out of the ordinary matrix preserves the lightweight browser suite;
+      // the dedicated CI step still makes the regression a required check.
+      testIgnore: STANDARD_PROJECT_IGNORES,
       use: { ...devices['Desktop Chrome'] },
     },
-    { name: 'firefox', testIgnore: /(?:capture|instruments|source-import|musician)\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', testIgnore: /(?:capture|instruments|source-import|musician)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chrome', testIgnore: /(?:capture|instruments|source-import|musician)\.spec\.ts/, use: { ...devices['Pixel 7'] } },
-    { name: 'mobile-safari', testIgnore: /(?:capture|instruments|source-import|musician)\.spec\.ts/, use: { ...devices['iPhone 14'] } },
+    { name: 'firefox', testIgnore: STANDARD_PROJECT_IGNORES, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', testIgnore: STANDARD_PROJECT_IGNORES, use: { ...devices['Desktop Safari'] } },
+    { name: 'mobile-chrome', testIgnore: STANDARD_PROJECT_IGNORES, use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-safari', testIgnore: STANDARD_PROJECT_IGNORES, use: { ...devices['iPhone 14'] } },
   ],
 
   webServer: process.env.E2E_BASE_URL

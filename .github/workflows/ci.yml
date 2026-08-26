@@ -103,7 +103,7 @@ jobs:
           retention-days: 7
 
   musician:
-    name: AI Musician service
+    name: AI Musician service and frontend chain
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +113,11 @@ jobs:
           # The orchestrator's runtime. The model workers pin their own older
           # interpreters inside their images; nothing here imports them.
           python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
       - name: Install
         working-directory: services/musician
@@ -128,6 +133,20 @@ jobs:
         # without downloading 1.43 GB (AC-09). The real-model suite is opt-in
         # via MUSICIAN_REAL_MODELS=1 and is skipped by this run.
         run: python -m pytest -q
+
+      - name: Install web dependencies and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build the production web app
+        run: npm run build
+
+      - name: Prove the frontend-to-service Musician chain
+        # Uses the real Next routes and FastAPI service with deterministic fake
+        # model adapters. This catches deployment/status and wire-contract drift
+        # without downloading model weights.
+        run: npm run test:e2e:musician
 
       - name: No weights were downloaded
         # Asserted rather than trusted. The guarantee that CI never pulls

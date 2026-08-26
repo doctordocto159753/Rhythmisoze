@@ -91,8 +91,10 @@ test.describe('capability handling', () => {
 
     if (support.supported) {
       await expect(unsupportedPanel).toHaveCount(0);
-      // And the creation screen really is usable.
-      await expect(page.getByRole('slider').first()).toBeVisible();
+      // And the creation screen really is usable. This used to look for the BPM
+      // slider, which was the only control on the entry screen; the entry screen
+      // now offers the thing the product is for.
+      await expect(page.getByRole('button', { name: /Start a sketch/i })).toBeVisible();
     } else {
       await expect(unsupportedPanel).toBeVisible({ timeout: HYDRATION_TIMEOUT });
     }

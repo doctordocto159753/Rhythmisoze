@@ -9,8 +9,10 @@ test('audio upload follows the real transcription path and packages the untouche
   page,
 }) => {
   await page.goto('/en');
+  // Enabled on arrival. It used to be disabled until a tempo had been set,
+  // which was the product asking for a fact about music it was about to listen
+  // to itself.
   const audioInput = page.getByLabel('Choose a recording to upload');
-  await expect(audioInput).toBeDisabled();
   await expect(audioInput).toBeEnabled();
   await audioInput.setInputFiles(AUDIO_FIXTURE);
 

@@ -139,15 +139,35 @@ export interface VersionRecipe {
 
 export interface TempoResolutionInput {
   rhythm: PerformanceRhythm | null;
+  /**
+   * A tempo the *source* stated about itself, if it stated one.
+   *
+   * Only a symbolic import can. A MIDI file carries a tempo map, and that is a
+   * fact the file asserts about the music rather than a number somebody set on
+   * a click track before performing — which is the distinction the whole of
+   * this module now turns on.
+   *
+   * It outranks the measured pulse, and only here. Estimating a tempo from an
+   * imported file's own note starts is deriving a worse answer to a question the
+   * file has already answered exactly: on a 126 BPM file the estimator returned
+   * 120, and the exported MIDI came back stamped with a tempo the source never
+   * had. Detection exists for performances, where nothing states anything.
+   */
+  statedBpm?: number | null;
 }
 
 /**
  * What the performance says its tempo is.
  *
  * ```
+ * the source stated its own tempo           -> that tempo, with certainty
  * a pulse was measured (at any confidence)  -> that pulse
  * no pulse could be measured at all         -> free timing
  * ```
+ *
+ * Only an imported file can take the first branch, and only because it holds a
+ * tempo map. Nothing a *person* does can reach it: there is no control that
+ * sets a tempo, which is the point of the whole change.
  *
  * `measured`, not `reliable`, decides. A measured-but-uncertain estimate is
  * still this performance's tempo; the only case where there is no performance
@@ -155,8 +175,13 @@ export interface TempoResolutionInput {
  * the number so the interface can hedge, which is a different job from choosing.
  */
 export function resolveVersionTempo(input: TempoResolutionInput): PerformanceTempo {
-  const { rhythm } = input;
+  const { rhythm, statedBpm } = input;
   const confidence = rhythm?.tempo.confidence ?? 0;
+
+  if (statedBpm !== undefined && statedBpm !== null && Number.isFinite(statedBpm)) {
+    // Certain, because it was not inferred. The file said so.
+    return { bpm: statedBpm, confidence: 1, reliable: true, freeTiming: false };
+  }
 
   if (rhythm !== null && rhythm.measured) {
     return { bpm: rhythm.tempo.bpm, confidence, reliable: rhythm.reliable, freeTiming: false };
@@ -167,6 +192,8 @@ export function resolveVersionTempo(input: TempoResolutionInput): PerformanceTem
 
 export interface VersionPlanInput {
   rhythm: PerformanceRhythm;
+  /** A tempo the source stated about itself. See `TempoResolutionInput`. */
+  statedBpm?: number | null;
   mode: CreationMode;
   /** The user's cleanup position, which still scales every version. */
   amount: number;
@@ -188,11 +215,11 @@ export interface VersionPlanInput {
  * what makes the whole thing testable.
  */
 export function planVersions(input: VersionPlanInput): VersionRecipe[] {
-  const { rhythm, amount, mode, generated = [] } = input;
+  const { rhythm, statedBpm, amount, mode, generated = [] } = input;
   // One rule, resolved once, applied to every version. Previously each recipe
   // read `rhythm.reliable` through a local ternary, which is how the tempo the
   // Musician was asked for and the tempo the versions played at could differ.
-  const tempo = resolveVersionTempo({ rhythm });
+  const tempo = resolveVersionTempo({ rhythm, statedBpm });
   const performanceBpm = tempo.bpm;
   const tempoConfidence = tempo.confidence;
   const tempoReliable = tempo.reliable;

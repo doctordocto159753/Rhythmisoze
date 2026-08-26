@@ -168,8 +168,8 @@ export function useCreationFlow(locale: Locale) {
    * did before they made a sound can reach this.
    */
   const performanceTempo = useMemo<PerformanceTempo>(
-    () => resolveVersionTempo({ rhythm }),
-    [rhythm],
+    () => resolveVersionTempo({ rhythm, statedBpm: state.sourceTempoBpm }),
+    [rhythm, state.sourceTempoBpm],
   );
 
   /**
@@ -303,13 +303,16 @@ export function useCreationFlow(locale: Locale) {
     if (rhythm === null) return [];
     return planVersions({
       rhythm,
+      // Passed through rather than resolved here: `planVersions` and
+      // `performanceTempo` must agree, and they agree by calling the same rule.
+      statedBpm: state.sourceTempoBpm,
       mode: state.mode,
       amount: state.retouchAmount,
       // Only versions whose notes actually exist are offered, so the picker can
       // never show something that cannot be played.
       generated: Object.keys(offeredGenerated) as MusicalVersionId[],
     });
-  }, [rhythm, state.mode, state.retouchAmount, offeredGenerated]);
+  }, [rhythm, state.sourceTempoBpm, state.mode, state.retouchAmount, offeredGenerated]);
 
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {

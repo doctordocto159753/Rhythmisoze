@@ -169,6 +169,51 @@ describe('a measured but uncertain tempo', () => {
   });
 });
 
+describe('a source that states its own tempo', () => {
+  // A MIDI file carries a tempo map. That is the file asserting a fact about
+  // the music, which is a different kind of thing from a number somebody set on
+  // a click track before performing — and it is the only way a tempo can enter
+  // the pipeline other than by being measured.
+  const notes = looselyHummedNotes();
+  const rhythm = analyzeMelodyRhythm(notes, SOURCE_DURATION_SEC);
+  const STATED_BPM = 126;
+
+  it('uses the stated tempo rather than re-deriving one from the notes', () => {
+    // The regression: estimating from an imported file's own note starts is
+    // deriving a worse answer to a question the file already answered exactly.
+    // A 126 BPM file measured 120, and the exported MIDI came back stamped with
+    // a tempo the source never had.
+    const tempo = resolveVersionTempo({ rhythm, statedBpm: STATED_BPM });
+    expect(tempo.bpm).toBe(STATED_BPM);
+    expect(tempo.freeTiming).toBe(false);
+    expect(encodingBpm(tempo)).toBe(STATED_BPM);
+  });
+
+  it('is certain about it, because it was not inferred', () => {
+    const tempo = resolveVersionTempo({ rhythm, statedBpm: STATED_BPM });
+    expect(tempo.confidence).toBe(1);
+    expect(tempo.reliable).toBe(true);
+  });
+
+  it('carries it to every version', () => {
+    const plan = planVersions({ rhythm, statedBpm: STATED_BPM, mode: 'melody', amount: 55 });
+    expect(plan.length).toBeGreaterThan(0);
+    for (const version of plan) {
+      expect(version.bpm).toBe(STATED_BPM);
+      expect(version.freeTiming).toBe(false);
+    }
+  });
+
+  it('ignores a stated tempo that is not a number', () => {
+    // Absent, null and NaN are all "the source said nothing", which is the
+    // normal case: everything recorded or uploaded as audio states no tempo.
+    for (const stated of [undefined, null, Number.NaN]) {
+      const tempo = resolveVersionTempo({ rhythm, statedBpm: stated });
+      expect({ stated, bpm: tempo.bpm }).toEqual({ stated, bpm: rhythm.tempo.bpm });
+    }
+  });
+});
+
 describe('a take with no measurable pulse', () => {
   const rhythm = analyzeMelodyRhythm(almostNothing(), 3.5);
 

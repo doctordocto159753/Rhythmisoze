@@ -30,14 +30,27 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | US-0104 state machine | Done | `features/state/machine.ts`, 26 tests including the full reachability graph |
 | US-0105 capability detection | Done | `capabilities.ts` + `useCapabilities` via `useSyncExternalStore`; missing pieces named to the user |
 
-## WP-02 — Tempo, metronome, recording
+## WP-02 — Recording
+
+**US-0201 to US-0204 are withdrawn, not unfinished.** Tap tempo, the tempo
+slider, the metronome and the count-in were built, tested and shipped, and then
+removed along with the premise behind them: that a person must establish a tempo
+before they are allowed to make a sound. A user reported the cost — the app
+saying *"heard at 85, but you selected 120"* and the same melody coming out
+worse — and a setup choice that could reach the interpretation of a performance
+is a design error rather than a feature to tune. See
+[`architecture/evidence.md`](architecture/evidence.md) and
+`tests/unit/tempo-independence.test.ts`.
+
+Tempo is now measured from the take, or reported as free timing when there is no
+pulse to measure. `measureDrift` went with the metronome.
 
 | Story | State | Where |
 |---|---|---|
-| US-0201 tap tempo | Done | Pure and tested: outlier rejection, phrase reset, rolling window |
-| US-0202 tempo slider | Done | Keyboard and touch; stays in sync with taps |
-| US-0203 low-drift metronome | Built, unverified | Web Audio lookahead scheduler; `measureDrift` tested; not measured on device |
-| US-0204 count-in | Done | One measure at the selected meter; recording starts on the audio clock |
+| US-0201 tap tempo | **Withdrawn** | Removed with the tempo step |
+| US-0202 tempo slider | **Withdrawn** | Removed with the tempo step |
+| US-0203 low-drift metronome | **Withdrawn** | Removed; it was also audible in headphone-less recordings |
+| US-0204 count-in | **Withdrawn** | Recording begins when the microphone opens |
 | US-0205 capture constraints | Built, unverified | EC/NS/AGC off with documented reasoning; granted settings recorded; needs device testing |
 | US-0206 60 s lifecycle | Built, unverified | Hard cap in the recorder; empty capture rejected; needs device testing |
 | US-0207 live waveform | Done | Throttled to 30 Hz; text equivalent for AT |
@@ -170,7 +183,8 @@ Story-by-story state against `02_ENGINEERING_WORK_PACKAGE.md` and
 | D-0003 sensory mappings | Done — DD-002 mapping table |
 | D-0101…D-0105 type, colour, space, shape, motion | Done — `tokens.css` |
 | D-0201…D-0203 IA, onboarding, mode | Done |
-| D-0301…D-0304 tempo, count-in, recording, guidance | Done |
+| D-0301…D-0302 tempo, count-in | **Withdrawn** — see WP-02 |
+| D-0303…D-0304 recording, guidance | Done |
 | D-0401…D-0403 processing, raw-to-clean, piano roll | Done |
 | D-0501…D-0502 gallery, sonic identity | Done — spectral figures from the voice recipes |
 | D-0601…D-0604 workspace, export, publish, share | Done |

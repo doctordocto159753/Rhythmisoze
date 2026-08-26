@@ -66,6 +66,17 @@ for older callers, but the current UI does not use them.
 monophonic voice tracker; a beatbox take was asked for its fundamental
 frequency. Both produce nonsense, and neither is the user's fault.
 
+> **Superseded in part.** The metronome and the tapped tempo described below no
+> longer exist: the product does not ask for a tempo and has no control that
+> sets one. What survives is the *detection* — the estimator, its phase search
+> and its resonance curve are unchanged and are now the only source of a tempo.
+> The version table's "tapped" column is gone with the tap.
+> See [`evidence.md`](evidence.md) for the architecture that replaced it, and
+> [`../status.md`](../status.md) for what was withdrawn.
+>
+> The history below is kept because it explains why the estimator is built the
+> way it is.
+
 **2. The metronome was treated as the source of truth.** A user tapped 120, sang
 at 83, and the result was forced onto a 120 grid. That inverts the product: the
 metronome exists to help someone perform steadily, not to state what music they

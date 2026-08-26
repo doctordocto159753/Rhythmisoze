@@ -17,6 +17,21 @@
  * The fallback is honest, not silent: the result carries `transcriberId`, the
  * UI shows which engine produced it, and a `model_unavailable` warning is
  * attached to the diagnostics.
+ *
+ * ## The voice path now asks a second engine one question
+ *
+ * `melody-extraction` owns the voice transcription and still does. What it
+ * cannot do is hear an octave leap: YIN locks onto the subharmonic, and on the
+ * corpus case built for exactly this it reads C4→C5→C4 as C4→C4→C4 with 32.6%
+ * octave error and complete confidence. No amount of reasoning over its own
+ * output recovers information it never had.
+ *
+ * So Basic Pitch is run a second time on voice material — not as a competing
+ * transcription, which it would be bad at, but as a *register witness*. It is
+ * measured at 0% octave error on that case and at 0.08 note F1 on a held tone,
+ * and `@evidence` uses exactly the half it is good at. When it is unavailable,
+ * disabled, slow or wrong, the path is the one that shipped before it: the
+ * candidate keeps its own register and the disagreement is reported.
  */
 
 import {
@@ -37,6 +52,7 @@ import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { detectOnsets } from '@/packages/audio-core/onsets';
 import { noteTransformations } from '@/packages/note-history';
 import { judgeAndRepair, judgeFeaturesFromFrames } from '@musical-judge';
+import { arbitrateRegister, notableDecisions, type EvidenceSource } from '@evidence';
 import { classifyInput, reconcileClassificationWithMaterial } from '@intent';
 import { mapMonotonicProgress, type ProgressWindow } from './transcription-progress';
 
@@ -187,7 +203,7 @@ async function handleTranscribe(request: TranscribeRequest): Promise<void> {
     const result = route === 'rhythm'
       ? await runRhythm(request, audio)
       : route === 'melody' || route === 'voice'
-        ? runVoiceMelody(request, audio)
+        ? await runVoiceMelody(request, audio)
         : route === 'mixed'
           ? await runMixed(request, audio)
           : await runInstrument(request, audio);
@@ -314,17 +330,95 @@ function modelBudgetMs(durationSec: number): number {
   return Math.max(20_000, durationSec * 8_000);
 }
 
-function runVoiceMelody(
+/**
+ * How long the register witness gets before the take proceeds without it.
+ *
+ * Deliberately tighter than `modelBudgetMs`. That budget covers the model the
+ * instrument path *needs*, where a timeout means failing the request. This one
+ * covers a second opinion the voice path can do without, so the right response
+ * to it running long is to stop waiting rather than to lose the take.
+ */
+function witnessBudgetMs(durationSec: number): number {
+  return Math.max(10_000, durationSec * 3_000);
+}
+
+/**
+ * Basic Pitch's reading of a voice take, for the one question it is good at.
+ *
+ * Never throws. Every reason this can fail — the model is disabled, the weights
+ * are not cached and the device is offline, TensorFlow cannot start in this
+ * browser, inference runs long — is a reason to continue without a second
+ * opinion, not a reason to lose a recording. The caller gets `null` and the
+ * warning says which.
+ */
+async function registerWitness(
+  request: TranscribeRequest,
+  audio: MonoAudio,
+  warnings: string[],
+): Promise<EvidenceSource | null> {
+  if (!request.allowModel) {
+    warnings.push('register_witness_skipped:model_disabled');
+    return null;
+  }
+
+  const started = now();
+  try {
+    const escapable = new Promise<never>((_, reject) => {
+      modelAttempt = { reject };
+    });
+    const run = await withTimeout(
+      Promise.race([
+        basicPitchCandidates(request, audio, { load: 0.3, inferFrom: 0.35, inferSpan: 0.45 }),
+        escapable,
+      ]),
+      witnessBudgetMs(audio.durationSec),
+      'witness_timeout',
+    );
+    return {
+      engineId: 'basic-pitch',
+      view: 'original',
+      notes: run.notes,
+      elapsedMs: now() - started,
+    };
+  } catch (error) {
+    // A cancelled request is not a witness failure; let the caller's own
+    // cancellation check end the job.
+    if (cancelled.has(request.id)) throw error;
+    const detail = error instanceof AppError ? error.detail ?? error.code : 'unavailable';
+    warnings.push(`register_witness_unavailable:${String(detail).slice(0, 40)}`);
+    return null;
+  } finally {
+    modelAttempt = null;
+  }
+}
+
+async function runVoiceMelody(
   request: TranscribeRequest,
   audio: MonoAudio,
   warnings: string[] = [],
   started = now(),
-): TranscriptionResult {
+): Promise<TranscriptionResult> {
   reportProgress(request.id, 'preparing_audio', 0.08);
   const extraction = extractHumanMelody(audio, {
     segmentation: { minDurationSec: request.minNoteLengthSec },
   });
   throwIfCancelled(request.id);
+
+  /**
+   * The register decision, taken once, before anything reads the candidate.
+   *
+   * Order matters here. The contour engine's boundaries, voicing and pitch
+   * classes are kept exactly as measured — it is the best engine in the corpus
+   * at all three — and only the octave is reconsidered, against an engine
+   * measured at 0% octave error on the case this one fails. Everything
+   * downstream then reads a single settled register, which is what lets the
+   * Judge keep deferring to it.
+   */
+  const witness = await registerWitness(request, audio, warnings);
+  throwIfCancelled(request.id);
+  const register = arbitrateRegister(extraction.notes, witness ? [witness] : []);
+  const candidateNotes = register.notes;
+
   reportProgress(request.id, 'collecting', 0.86);
 
   // The Judge runs here, in the worker, and reuses the contour the melody
@@ -333,7 +427,7 @@ function runVoiceMelody(
   const onsetsSec = detectOnsets(audio.samples, audio.sampleRate).onsets.map(
     (onset) => onset.timeSec,
   );
-  const sourcePhrase = buildMusicalPhraseModel(extraction.notes, {
+  const sourcePhrase = buildMusicalPhraseModel(candidateNotes, {
     sourceKind: 'voice',
     frames: extraction.frames,
     onsetsSec,
@@ -343,15 +437,18 @@ function runVoiceMelody(
     audio.durationSec,
     onsetsSec,
   );
-  // The candidate's register is itself a measured decision — the melody
-  // engine voted with these frames and folded registers with phrase context
-  // the Judge does not see — so octave repair defers and reports instead of
-  // re-deciding. This is the single-octave-authority rule: one stage owns the
-  // register, and a second opinion with less information never overrules it.
+  // The candidate's register is itself a measured decision — the melody engine
+  // voted with these frames, and where a second engine had better evidence
+  // `arbitrateRegister` has already applied it — so octave repair defers and
+  // reports instead of re-deciding. This is the single-octave-authority rule:
+  // one stage owns the register, and a second opinion with less information
+  // never overrules it. What changed is not the rule but who that stage is: it
+  // is now an arbitration over independent measurements rather than one
+  // engine's unchecked reading, which is why it can be trusted with more.
   const verdict = judgeAndRepair(sourcePhrase.sourceEvidence.notes, judgeFeatures, {
     repair: { respectCandidateRegister: true },
   });
-  const phraseModel = buildMusicalPhraseModel(extraction.notes, {
+  const phraseModel = buildMusicalPhraseModel(candidateNotes, {
     sourceKind: 'voice',
     interpretationNotes: verdict.judgedNotes,
     frames: extraction.frames,
@@ -362,9 +459,9 @@ function runVoiceMelody(
   reportProgress(request.id, 'done', 1);
   return {
     // The candidate is returned untouched; the repair travels beside it.
-    notes: extraction.notes,
+    notes: candidateNotes,
     phraseModel,
-    referenceNotes: extraction.notes.map((note) => ({ ...note })),
+    referenceNotes: candidateNotes.map((note) => ({ ...note })),
     melodyQuality: extraction.quality,
     judge: {
       notes: verdict.judgedNotes,
@@ -391,9 +488,27 @@ function runVoiceMelody(
       modelLoadMs: 0,
       modelFromCache: true,
       notesBeforeFilter: extraction.frames.filter((frame) => frame.midiPitch !== null).length,
-      notesAfterFilter: extraction.notes.length,
+      notesAfterFilter: candidateNotes.length,
       warnings: [
         ...warnings,
+        // What the second engine was asked, and what came back. Present even
+        // when nothing moved: "a witness ran and agreed" and "no witness ran"
+        // are different facts about how much the register can be trusted.
+        ...(witness === null
+          ? []
+          : [
+              `register_witness:${witness.engineId}:${witness.notes.length}notes:` +
+                `${Math.round(witness.elapsedMs ?? 0)}ms`,
+              `register_corrected:${register.corrected}`,
+              ...(register.unresolved > 0 ? [`register_unresolved:${register.unresolved}`] : []),
+              ...notableDecisions(register)
+                .slice(0, 8)
+                .map(
+                  (decision) =>
+                    `register_${decision.outcome}:@${decision.startSec.toFixed(2)}s ` +
+                    `${decision.fromPitch}->${decision.toPitch} ${decision.reason}`,
+                ),
+            ]),
         ...(extraction.range
           ? [`adaptive_vocal_range:${extraction.range.lowMidi.toFixed(1)}-${extraction.range.highMidi.toFixed(1)}`]
           : []),
@@ -419,8 +534,12 @@ function runVoiceMelody(
       // bounded, for the debug views: when a take comes out wrong, the first
       // question is which stage changed what.
       noteTransformations: [
-        ...noteTransformations('judge', extraction.notes, verdict.judgedNotes),
-        ...noteTransformations('interpretation', extraction.notes, phraseModel.interpretedNotes),
+        // The register arbitration is a stage that moves notes, so it is
+        // recorded as one. Leaving it out would make the Judge look responsible
+        // for octave changes it did not make.
+        ...noteTransformations('register', extraction.notes, candidateNotes),
+        ...noteTransformations('judge', candidateNotes, verdict.judgedNotes),
+        ...noteTransformations('interpretation', candidateNotes, phraseModel.interpretedNotes),
       ].slice(0, 200),
     },
   };
@@ -490,12 +609,28 @@ interface BasicPitchModule {
   }>;
 }
 
-async function runBasicPitch(
+/**
+ * One Basic Pitch inference, without deciding what the answer is *for*.
+ *
+ * Split out of `runBasicPitch` because the voice path needs the same notes for
+ * an entirely different purpose — a register witness rather than a
+ * transcription — and running two subtly different copies of a model call is
+ * how the two would eventually disagree about something nobody tested.
+ */
+interface BasicPitchRun {
+  notes: NoteEvent[];
+  /** Before the empty-note filter, for the diagnostics count. */
+  rawCount: number;
+  modelLoadMs: number;
+  fromCache: boolean;
+}
+
+async function basicPitchCandidates(
   request: TranscribeRequest,
   audio: MonoAudio,
-  started: number,
-): Promise<TranscriptionResult> {
-  reportProgress(request.id, 'loading_model', 0.02);
+  progress: { load: number; inferFrom: number; inferSpan: number },
+): Promise<BasicPitchRun> {
+  reportProgress(request.id, 'loading_model', progress.load);
 
   const modelLoadStart = now();
   prepareWorkerGlobalsForTensorflow();
@@ -523,7 +658,7 @@ async function runBasicPitch(
   }
   const modelLoadMs = fromCache ? 0 : now() - modelLoadStart;
 
-  reportProgress(request.id, 'preparing_audio', 0.12);
+  reportProgress(request.id, 'preparing_audio', progress.inferFrom);
   // The model has a fixed input rate. Resampling here, visibly, beats letting
   // the wrapper do it invisibly and then wondering why timings drifted.
   const prepared = peakNormalize(resample(audio, MODEL_SAMPLE_RATE));
@@ -545,8 +680,7 @@ async function runBasicPitch(
         reportProgress(
           request.id,
           'inferring',
-          // The model's own percentage covers 15%..85% of the whole job.
-          0.15 + Math.max(0, Math.min(1, percent)) * 0.7,
+          progress.inferFrom + Math.max(0, Math.min(1, percent)) * progress.inferSpan,
         );
       },
     );
@@ -554,8 +688,6 @@ async function runBasicPitch(
     throw new AppError('transcription_failed', 'retry', 'inference', { cause: error });
   }
   throwIfCancelled(request.id);
-
-  reportProgress(request.id, 'collecting', 0.9);
 
   const raw = basicPitch.outputToNotesPoly(
     frames,
@@ -582,17 +714,32 @@ async function runBasicPitch(
     }))
     .filter((note) => note.endSec > note.startSec)
     .sort((a, b) => a.startSec - b.startSec);
-  const notes = candidates;
+  return { notes: candidates, rawCount: timed.length, modelLoadMs, fromCache };
+}
 
+async function runBasicPitch(
+  request: TranscribeRequest,
+  audio: MonoAudio,
+  started: number,
+): Promise<TranscriptionResult> {
+  const run = await basicPitchCandidates(request, audio, {
+    load: 0.02,
+    // The model's own percentage covers 15%..85% of the whole job.
+    inferFrom: 0.15,
+    inferSpan: 0.7,
+  });
+  const notes = run.notes;
+
+  reportProgress(request.id, 'collecting', 0.9);
   reportProgress(request.id, 'done', 1);
 
   const diagnostics: ProcessingDiagnostics = {
     transcriberId: 'basic-pitch',
     backend: 'browser',
     elapsedMs: now() - started,
-    modelLoadMs,
-    modelFromCache: fromCache,
-    notesBeforeFilter: timed.length,
+    modelLoadMs: run.modelLoadMs,
+    modelFromCache: run.fromCache,
+    notesBeforeFilter: run.rawCount,
     notesAfterFilter: notes.length,
     warnings: [],
   };

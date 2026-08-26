@@ -1,0 +1,625 @@
+{
+  "diff-harmonic-heavy": [
+    {
+      "startSec": 0.21,
+      "endSec": 0.91,
+      "pitch": 57.03
+    },
+    {
+      "startSec": 0.91,
+      "endSec": 1.61,
+      "pitch": 59.99
+    },
+    {
+      "startSec": 1.61,
+      "endSec": 2.21,
+      "pitch": 64
+    }
+  ],
+  "diff-low-register": [
+    {
+      "startSec": 0.23,
+      "endSec": 0.66,
+      "pitch": 39.88
+    },
+    {
+      "startSec": 0.83,
+      "endSec": 1.26,
+      "pitch": 43.07
+    },
+    {
+      "startSec": 1.42,
+      "endSec": 1.92,
+      "pitch": 45.05
+    }
+  ],
+  "diff-noisy-room": [
+    {
+      "startSec": 0.21,
+      "endSec": 0.81,
+      "pitch": 59.98
+    },
+    {
+      "startSec": 0.81,
+      "endSec": 1.41,
+      "pitch": 63
+    },
+    {
+      "startSec": 1.41,
+      "endSec": 1.92,
+      "pitch": 65.01
+    }
+  ],
+  "diff-octave-leap": [
+    {
+      "startSec": 0.22,
+      "endSec": 0.92,
+      "pitch": 59.99
+    },
+    {
+      "startSec": 0.92,
+      "endSec": 1.62,
+      "pitch": 72
+    },
+    {
+      "startSec": 1.62,
+      "endSec": 2.21,
+      "pitch": 59.99
+    }
+  ],
+  "diff-quiet-whisper": [
+    {
+      "startSec": 0.22,
+      "endSec": 0.81,
+      "pitch": 62.03
+    },
+    {
+      "startSec": 0.81,
+      "endSec": 1.41,
+      "pitch": 64.99
+    },
+    {
+      "startSec": 1.41,
+      "endSec": 1.91,
+      "pitch": 66.99
+    }
+  ],
+  "instrument-plucked-line": [
+    {
+      "startSec": 0.15,
+      "endSec": 0.61,
+      "pitch": 55.03
+    },
+    {
+      "startSec": 0.61,
+      "endSec": 1.06,
+      "pitch": 58.98
+    },
+    {
+      "startSec": 1.06,
+      "endSec": 1.97,
+      "pitch": 62
+    },
+    {
+      "startSec": 1.97,
+      "endSec": 2.42,
+      "pitch": 55.01
+    }
+  ],
+  "voice-glissando": [
+    {
+      "startSec": 0.23,
+      "endSec": 1.71,
+      "pitch": 60.55
+    }
+  ],
+  "voice-scale-legato": [
+    {
+      "startSec": 0.22,
+      "endSec": 0.8,
+      "pitch": 57.02
+    },
+    {
+      "startSec": 0.8,
+      "endSec": 1.38,
+      "pitch": 58.98
+    },
+    {
+      "startSec": 1.38,
+      "endSec": 1.96,
+      "pitch": 60.02
+    },
+    {
+      "startSec": 1.96,
+      "endSec": 2.54,
+      "pitch": 62.02
+    },
+    {
+      "startSec": 2.54,
+      "endSec": 3.03,
+      "pitch": 63.99
+    }
+  ],
+  "voice-steady-hum": [
+    {
+      "startSec": 0.22,
+      "endSec": 2.21,
+      "pitch": 60
+    }
+  ],
+  "voice-vibrato": [
+    {
+      "startSec": 0.21,
+      "endSec": 2.42,
+      "pitch": 64.01
+    }
+  ],
+  "real-mouth-test2": [
+    {
+      "startSec": 0.62,
+      "endSec": 1.36,
+      "pitch": 51
+    },
+    {
+      "startSec": 1.36,
+      "endSec": 1.61,
+      "pitch": 53
+    },
+    {
+      "startSec": 1.61,
+      "endSec": 2.33,
+      "pitch": 55
+    },
+    {
+      "startSec": 2.33,
+      "endSec": 2.57,
+      "pitch": 52
+    },
+    {
+      "startSec": 2.57,
+      "endSec": 2.79,
+      "pitch": 55
+    },
+    {
+      "startSec": 2.79,
+      "endSec": 3.02,
+      "pitch": 55
+    },
+    {
+      "startSec": 3.02,
+      "endSec": 3.26,
+      "pitch": 54
+    },
+    {
+      "startSec": 3.26,
+      "endSec": 3.53,
+      "pitch": 52
+    },
+    {
+      "startSec": 3.53,
+      "endSec": 4.02,
+      "pitch": 54
+    },
+    {
+      "startSec": 4.02,
+      "endSec": 4.24,
+      "pitch": 52
+    },
+    {
+      "startSec": 4.49,
+      "endSec": 5.19,
+      "pitch": 53
+    },
+    {
+      "startSec": 5.19,
+      "endSec": 5.45,
+      "pitch": 55
+    },
+    {
+      "startSec": 5.45,
+      "endSec": 6.14,
+      "pitch": 57
+    },
+    {
+      "startSec": 6.14,
+      "endSec": 6.38,
+      "pitch": 53
+    },
+    {
+      "startSec": 6.38,
+      "endSec": 6.63,
+      "pitch": 57
+    },
+    {
+      "startSec": 6.63,
+      "endSec": 6.85,
+      "pitch": 57
+    },
+    {
+      "startSec": 6.85,
+      "endSec": 7.09,
+      "pitch": 56
+    },
+    {
+      "startSec": 7.09,
+      "endSec": 7.33,
+      "pitch": 54
+    },
+    {
+      "startSec": 7.33,
+      "endSec": 8.04,
+      "pitch": 56
+    },
+    {
+      "startSec": 8.39,
+      "endSec": 9.12,
+      "pitch": 56
+    },
+    {
+      "startSec": 9.12,
+      "endSec": 9.38,
+      "pitch": 58
+    },
+    {
+      "startSec": 9.38,
+      "endSec": 9.99,
+      "pitch": 59
+    }
+  ],
+  "real-mouth-test3": [
+    {
+      "startSec": 0.74,
+      "endSec": 1.07,
+      "pitch": 48
+    },
+    {
+      "startSec": 1.07,
+      "endSec": 1.28,
+      "pitch": 48
+    },
+    {
+      "startSec": 1.28,
+      "endSec": 1.47,
+      "pitch": 57
+    },
+    {
+      "startSec": 1.47,
+      "endSec": 1.77,
+      "pitch": 58
+    },
+    {
+      "startSec": 1.77,
+      "endSec": 2,
+      "pitch": 57
+    },
+    {
+      "startSec": 2.09,
+      "endSec": 3.06,
+      "pitch": 57
+    },
+    {
+      "startSec": 3.19,
+      "endSec": 3.41,
+      "pitch": 49
+    },
+    {
+      "startSec": 3.41,
+      "endSec": 3.59,
+      "pitch": 58
+    },
+    {
+      "startSec": 3.59,
+      "endSec": 3.89,
+      "pitch": 58
+    },
+    {
+      "startSec": 3.89,
+      "endSec": 4.07,
+      "pitch": 58
+    },
+    {
+      "startSec": 5,
+      "endSec": 5.32,
+      "pitch": 48
+    },
+    {
+      "startSec": 5.32,
+      "endSec": 5.53,
+      "pitch": 48
+    },
+    {
+      "startSec": 5.53,
+      "endSec": 5.68,
+      "pitch": 55
+    },
+    {
+      "startSec": 5.68,
+      "endSec": 6,
+      "pitch": 57
+    },
+    {
+      "startSec": 6,
+      "endSec": 6.24,
+      "pitch": 57
+    },
+    {
+      "startSec": 6.35,
+      "endSec": 6.59,
+      "pitch": 57
+    },
+    {
+      "startSec": 6.59,
+      "endSec": 7.1,
+      "pitch": 57
+    },
+    {
+      "startSec": 7.1,
+      "endSec": 7.42,
+      "pitch": 51
+    },
+    {
+      "startSec": 7.42,
+      "endSec": 7.64,
+      "pitch": 56
+    },
+    {
+      "startSec": 7.64,
+      "endSec": 7.81,
+      "pitch": 53
+    },
+    {
+      "startSec": 7.81,
+      "endSec": 8.13,
+      "pitch": 49
+    },
+    {
+      "startSec": 8.13,
+      "endSec": 8.22,
+      "pitch": 48
+    },
+    {
+      "startSec": 8.22,
+      "endSec": 8.38,
+      "pitch": 47
+    },
+    {
+      "startSec": 8.64,
+      "endSec": 9.18,
+      "pitch": 47
+    },
+    {
+      "startSec": 9.18,
+      "endSec": 9.5,
+      "pitch": 47
+    },
+    {
+      "startSec": 9.5,
+      "endSec": 9.7,
+      "pitch": 52
+    },
+    {
+      "startSec": 9.7,
+      "endSec": 9.99,
+      "pitch": 57
+    }
+  ],
+  "real-test22": [
+    {
+      "startSec": 0.86,
+      "endSec": 1.27,
+      "pitch": 50
+    },
+    {
+      "startSec": 1.27,
+      "endSec": 1.67,
+      "pitch": 53
+    },
+    {
+      "startSec": 1.67,
+      "endSec": 2.08,
+      "pitch": 60
+    },
+    {
+      "startSec": 2.08,
+      "endSec": 2.56,
+      "pitch": 64
+    },
+    {
+      "startSec": 2.56,
+      "endSec": 4.84,
+      "pitch": 66
+    }
+  ],
+  "real-recording-8": [
+    {
+      "startSec": 2.48,
+      "endSec": 2.66,
+      "pitch": 60
+    },
+    {
+      "startSec": 2.66,
+      "endSec": 2.85,
+      "pitch": 59
+    },
+    {
+      "startSec": 2.85,
+      "endSec": 3.28,
+      "pitch": 60
+    },
+    {
+      "startSec": 3.84,
+      "endSec": 4.02,
+      "pitch": 61
+    },
+    {
+      "startSec": 4.02,
+      "endSec": 4.15,
+      "pitch": 62
+    },
+    {
+      "startSec": 4.15,
+      "endSec": 4.31,
+      "pitch": 60
+    },
+    {
+      "startSec": 4.31,
+      "endSec": 4.47,
+      "pitch": 59
+    },
+    {
+      "startSec": 4.47,
+      "endSec": 4.66,
+      "pitch": 60
+    },
+    {
+      "startSec": 4.66,
+      "endSec": 4.98,
+      "pitch": 60
+    },
+    {
+      "startSec": 5.61,
+      "endSec": 5.8,
+      "pitch": 60
+    },
+    {
+      "startSec": 5.8,
+      "endSec": 5.95,
+      "pitch": 60
+    },
+    {
+      "startSec": 5.95,
+      "endSec": 6.13,
+      "pitch": 62
+    },
+    {
+      "startSec": 6.13,
+      "endSec": 6.29,
+      "pitch": 62
+    },
+    {
+      "startSec": 6.29,
+      "endSec": 6.46,
+      "pitch": 64
+    },
+    {
+      "startSec": 6.46,
+      "endSec": 6.67,
+      "pitch": 64
+    },
+    {
+      "startSec": 6.67,
+      "endSec": 7.16,
+      "pitch": 65
+    },
+    {
+      "startSec": 7.42,
+      "endSec": 8.22,
+      "pitch": 66
+    },
+    {
+      "startSec": 8.22,
+      "endSec": 8.4,
+      "pitch": 56
+    },
+    {
+      "startSec": 8.4,
+      "endSec": 8.56,
+      "pitch": 54
+    },
+    {
+      "startSec": 8.56,
+      "endSec": 9.56,
+      "pitch": 56
+    },
+    {
+      "startSec": 9.56,
+      "endSec": 9.74,
+      "pitch": 57
+    },
+    {
+      "startSec": 9.74,
+      "endSec": 9.89,
+      "pitch": 58
+    },
+    {
+      "startSec": 9.89,
+      "endSec": 10.04,
+      "pitch": 55
+    },
+    {
+      "startSec": 10.04,
+      "endSec": 10.19,
+      "pitch": 53
+    },
+    {
+      "startSec": 10.19,
+      "endSec": 10.48,
+      "pitch": 56
+    },
+    {
+      "startSec": 11.67,
+      "endSec": 11.98,
+      "pitch": 60
+    },
+    {
+      "startSec": 11.98,
+      "endSec": 12.32,
+      "pitch": 57
+    },
+    {
+      "startSec": 12.32,
+      "endSec": 12.66,
+      "pitch": 55
+    },
+    {
+      "startSec": 12.66,
+      "endSec": 13.38,
+      "pitch": 52
+    },
+    {
+      "startSec": 13.38,
+      "endSec": 14.1,
+      "pitch": 52
+    },
+    {
+      "startSec": 14.1,
+      "endSec": 14.26,
+      "pitch": 50
+    },
+    {
+      "startSec": 14.26,
+      "endSec": 14.41,
+      "pitch": 50
+    },
+    {
+      "startSec": 14.41,
+      "endSec": 15.51,
+      "pitch": 51
+    },
+    {
+      "startSec": 15.51,
+      "endSec": 15.68,
+      "pitch": 51
+    },
+    {
+      "startSec": 15.68,
+      "endSec": 15.84,
+      "pitch": 54
+    },
+    {
+      "startSec": 15.84,
+      "endSec": 16,
+      "pitch": 51
+    },
+    {
+      "startSec": 16,
+      "endSec": 16.18,
+      "pitch": 50
+    },
+    {
+      "startSec": 16.18,
+      "endSec": 16.94,
+      "pitch": 52
+    }
+  ]
+}

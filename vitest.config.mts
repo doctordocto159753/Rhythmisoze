@@ -28,6 +28,7 @@ export default defineConfig({
       '@rhythm-extraction': r('./src/packages/rhythm-extraction/index.ts'),
       '@intent': r('./src/packages/intent/index.ts'),
       '@musical-judge': r('./src/packages/musical-judge/index.ts'),
+      '@evidence': r('./src/packages/evidence/index.ts'),
       '@music-teacher': r('./src/packages/music-teacher/index.ts'),
       '@audio-core': r('./src/packages/audio-core/index.ts'),
       '@versions': r('./src/packages/versions/index.ts'),

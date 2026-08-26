@@ -8,6 +8,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.029950248756218906,
       "medianAbsoluteErrorCents": 15.2266420088759,
+      "delivered.rawPitchAccuracy": 0.9650248756218905,
+      "delivered.rawChromaAccuracy": 0.9650248756218905,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0
@@ -19,6 +22,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.04788844621513944,
       "medianAbsoluteErrorCents": 15.161307241251052,
+      "delivered.rawPitchAccuracy": 0.9022709163346613,
+      "delivered.rawChromaAccuracy": 0.9022709163346613,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 55.00000000000003,
       "intervalDirectionAgreement": 0.9
@@ -30,6 +36,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.024524886877828056,
       "medianAbsoluteErrorCents": 38.404904127306736,
+      "delivered.rawPitchAccuracy": 0.97,
+      "delivered.rawChromaAccuracy": 0.97,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 55,
       "intervalDirectionAgreement": 0
@@ -41,6 +50,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.02666666666666667,
       "medianAbsoluteErrorCents": 23.588348782186017,
+      "delivered.rawPitchAccuracy": 0.53,
+      "delivered.rawChromaAccuracy": 0.53,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0,
       "notes.medianOnsetErrorMs": 25,
       "intervalDirectionAgreement": 0
@@ -52,6 +64,9 @@
       "octaveErrorRate": 0.3459668508287293,
       "grossErrorRate": 0.04209944751381216,
       "medianAbsoluteErrorCents": 15.22835301056574,
+      "delivered.rawPitchAccuracy": 0.6329834254143646,
+      "delivered.rawChromaAccuracy": 0.9589502762430939,
+      "delivered.octaveErrorRate": 0.3459668508287293,
       "notes.f1": 0.5866666666666667,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0
@@ -63,6 +78,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.04,
       "medianAbsoluteErrorCents": 15.02412073222473,
+      "delivered.rawPitchAccuracy": 0.9566666666666667,
+      "delivered.rawChromaAccuracy": 0.9566666666666667,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0.9
@@ -74,6 +92,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.04,
       "medianAbsoluteErrorCents": 15.359999038091985,
+      "delivered.rawPitchAccuracy": 0.9566666666666667,
+      "delivered.rawChromaAccuracy": 0.9566666666666667,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0.9
@@ -85,6 +106,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.04,
       "medianAbsoluteErrorCents": 15.268420904712485,
+      "delivered.rawPitchAccuracy": 0.9566666666666667,
+      "delivered.rawChromaAccuracy": 0.9566666666666667,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0.9
@@ -96,6 +120,9 @@
       "octaveErrorRate": 0.02,
       "grossErrorRate": 0.04209944751381216,
       "medianAbsoluteErrorCents": 15.095445333856503,
+      "delivered.rawPitchAccuracy": 0.9534254143646409,
+      "delivered.rawChromaAccuracy": 0.9534254143646409,
+      "delivered.octaveErrorRate": 0.02,
       "notes.f1": 0.92,
       "notes.medianOnsetErrorMs": 45.000000000000014,
       "intervalDirectionAgreement": 0.9

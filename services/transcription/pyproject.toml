@@ -1,0 +1,37 @@
+[project]
+name = "rhythmisoze-transcription"
+version = "0.1.0"
+description = "Optional register-witness service. Wraps GAME as a second opinion about which octave a note is in."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+# The model runtime, kept out of the base install so the service can be built,
+# imported and unit-tested without a 700 MB download. `/ready` reports 503 when
+# it is absent, which is the same answer it gives when the weights are missing.
+real = [
+  "torch>=2.4",
+  "torchaudio>=2.4",
+  "numpy<2.0.0",
+  "librosa>=0.10",
+  "einops>=0.7.0",
+  "omegaconf>=2.3",
+  "lightning>=2.3",
+  "loguru>=0.7",
+  "click>=8.1",
+  "resampy>=0.4",
+  "scipy>=1.10.0",
+  "torchmetrics>=1.4",
+  "tqdm>=4.66",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -27,6 +27,14 @@ export interface TranscribeOptions {
   mode: TranscriptionInputMode;
   /** `false` forces the built-in tracker. */
   allowModel?: boolean;
+  /**
+   * Where the worker may ask for a second opinion about register.
+   *
+   * Supplied by the caller rather than resolved here, because whether to ask is
+   * a decision about the user's recording leaving their machine, and that
+   * decision belongs with the code that told them it would.
+   */
+  remoteWitnessUrl?: string;
   noteThreshold?: number;
   onsetThreshold?: number;
   minNoteLengthSec?: number;
@@ -145,6 +153,9 @@ export async function transcribe(
       durationSec: audio.durationSec,
       modelUrl: MODEL_URL,
       allowModel: options.allowModel !== false,
+      ...(options.remoteWitnessUrl === undefined
+        ? {}
+        : { remoteWitnessUrl: options.remoteWitnessUrl }),
       noteThreshold: options.noteThreshold ?? DEFAULTS.noteThreshold,
       onsetThreshold: options.onsetThreshold ?? DEFAULTS.onsetThreshold,
       minNoteLengthSec: options.minNoteLengthSec ?? DEFAULTS.minNoteLengthSec,

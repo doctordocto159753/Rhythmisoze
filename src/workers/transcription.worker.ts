@@ -46,6 +46,7 @@ import {
   peakNormalize,
   resample,
 } from '@/packages/audio-core/normalize';
+import { encodeWav } from '@/packages/audio-core/wav';
 import { RhythmTranscriber } from '@/packages/audio-core/transcribers';
 import { extractHumanMelody } from '@/packages/melody-extraction';
 import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
@@ -67,6 +68,16 @@ export interface TranscribeRequest {
   modelUrl: string;
   /** `false` forces the local monophonic fallback in Instrument Mode. */
   allowModel: boolean;
+  /**
+   * Where to ask for a second opinion about register, if this deployment has
+   * somewhere to ask.
+   *
+   * Absent is the normal case and means the voice path runs entirely on this
+   * device. Present means the operator has stood up the optional service *and*
+   * accepted that a take is sent to it — the decision is made before the request
+   * is built, so the worker has no policy of its own to get wrong.
+   */
+  remoteWitnessUrl?: string;
   noteThreshold: number;
   onsetThreshold: number;
   minNoteLengthSec: number;
@@ -351,6 +362,53 @@ function witnessBudgetMs(durationSec: number): number {
  * opinion, not a reason to lose a recording. The caller gets `null` and the
  * warning says which.
  */
+/**
+ * The optional service's reading of the take.
+ *
+ * Never throws, for the same reason the local witness never throws: every way
+ * this can fail is a reason to continue without a second opinion. The route
+ * answers 204 for all of them, so there is exactly one shape to handle.
+ */
+async function remoteRegisterWitness(
+  request: TranscribeRequest,
+  audio: MonoAudio,
+  warnings: string[],
+): Promise<EvidenceSource | null> {
+  const url = request.remoteWitnessUrl;
+  if (url === undefined) return null;
+
+  const started = now();
+  try {
+    // Encoded here rather than on the main thread: the samples are already in
+    // this worker, and sending 10 MB back across the boundary to encode it and
+    // then forward it would double the copy for nothing.
+    const wav = encodeWav([audio.samples], { sampleRate: audio.sampleRate });
+    const body = new FormData();
+    body.append('audio', new Blob([wav], { type: 'audio/wav' }), 'take.wav');
+
+    const response = await withTimeout(
+      fetch(url, { method: 'POST', body, cache: 'no-store' }),
+      witnessBudgetMs(audio.durationSec) * 2,
+      'remote_witness_timeout',
+    );
+    // 204 is the route's "no opinion", and is not a failure worth naming: the
+    // service being off is the default state of this product.
+    if (response.status === 204) return null;
+    if (!response.ok) {
+      warnings.push(`remote_witness_unavailable:http_${response.status}`);
+      return null;
+    }
+
+    const payload = (await response.json()) as { notes?: Array<{ startSec: number; endSec: number; pitch: number }> };
+    const notes = Array.isArray(payload.notes) ? payload.notes : [];
+    return { engineId: 'game', view: 'original', notes, elapsedMs: now() - started };
+  } catch (error) {
+    if (cancelled.has(request.id)) throw error;
+    warnings.push('remote_witness_unavailable:unreachable');
+    return null;
+  }
+}
+
 async function registerWitness(
   request: TranscribeRequest,
   audio: MonoAudio,
@@ -414,9 +472,18 @@ async function runVoiceMelody(
    * downstream then reads a single settled register, which is what lets the
    * Judge keep deferring to it.
    */
-  const witness = await registerWitness(request, audio, warnings);
+  //
+  // Sequentially, not in parallel. Both are model inferences on a CPU-only
+  // deployment, and running them at once on the same machine makes each of them
+  // slower without finishing sooner — the guide's "run heavy evidence engines
+  // sequentially" is a measurement about this hardware, not a style preference.
+  const local = await registerWitness(request, audio, warnings);
   throwIfCancelled(request.id);
-  const register = arbitrateRegister(extraction.notes, witness ? [witness] : []);
+  const remote = await remoteRegisterWitness(request, audio, warnings);
+  throwIfCancelled(request.id);
+
+  const witnesses = [local, remote].filter((source): source is EvidenceSource => source !== null);
+  const register = arbitrateRegister(extraction.notes, witnesses);
   const candidateNotes = register.notes;
 
   reportProgress(request.id, 'collecting', 0.86);
@@ -494,11 +561,14 @@ async function runVoiceMelody(
         // What the second engine was asked, and what came back. Present even
         // when nothing moved: "a witness ran and agreed" and "no witness ran"
         // are different facts about how much the register can be trusted.
-        ...(witness === null
+        ...(witnesses.length === 0
           ? []
           : [
-              `register_witness:${witness.engineId}:${witness.notes.length}notes:` +
-                `${Math.round(witness.elapsedMs ?? 0)}ms`,
+              ...witnesses.map(
+                (source) =>
+                  `register_witness:${source.engineId}:${source.notes.length}notes:` +
+                  `${Math.round(source.elapsedMs ?? 0)}ms`,
+              ),
               `register_corrected:${register.corrected}`,
               ...(register.unresolved > 0 ? [`register_unresolved:${register.unresolved}`] : []),
               ...notableDecisions(register)

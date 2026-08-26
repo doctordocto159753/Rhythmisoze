@@ -86,6 +86,7 @@ import {
   type PlaybackHandle,
 } from '@synthesis';
 import { transcribe } from '@/features/transcription/client';
+import { witnessAvailability, WITNESS_URL } from '@/features/transcription/witness';
 import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { track } from '@/features/analytics/track';
 import {
@@ -607,6 +608,11 @@ export function useCreationFlow(locale: Locale) {
       track('processing_started', { route: correction?.type ?? 'auto' });
 
       try {
+        // Asked at the moment of processing rather than cached in state: it is
+        // deployment configuration, the answer is memoised in the module, and
+        // reading it here keeps the decision to send audio next to the request
+        // that sends it.
+        const witness = await witnessAvailability();
         const result = await transcribe(audio, {
           mode: correction?.type === 'melody'
             ? 'voice'
@@ -615,6 +621,7 @@ export function useCreationFlow(locale: Locale) {
               : 'auto',
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
+          ...(witness.available ? { remoteWitnessUrl: WITNESS_URL } : {}),
         });
         if (correction) {
           result.diagnostics.classification = correctClassification(

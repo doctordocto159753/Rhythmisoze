@@ -43,6 +43,13 @@ export const en = {
     // is still true and is specific about the exception rather than hedging --
     // vague privacy copy is worse than none, because it cannot be checked.
     body: 'Your recording is processed on your device. Only note data leaves it, and only if you ask the musician for extra versions.',
+    // The same sentence, made true for a deployment that has switched the
+    // second transcription engine on. It is a different claim, so it is a
+    // different string rather than the first one with a caveat bolted on:
+    // "processed on your device" and "sent to a service" cannot both describe
+    // the same recording, and the interface must not imply they do.
+    bodyWithWitness:
+      'Your recording is sent to the transcription service this site runs, so a second engine can check it, and is deleted there once it has been read. Note data goes to the musician only if you ask for extra versions.',
     start: 'Start a sketch',
     howItWorks: 'How it works',
     steps: {

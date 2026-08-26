@@ -1,14 +1,16 @@
 {
   "$comment": [
-    "Operational record of every model artifact the AI Musician needs.",
+    "Operational record of every model artifact this deployment can use.",
     "Weights are NEVER committed to this repository -- see third_party/MANIFEST.md rule 5.",
     "Fetch with scripts/models/bootstrap.sh or scripts/models/bootstrap.ps1.",
-    "Every sha256 below was computed from the real downloaded artifact on 2026-08-21,",
-    "not copied from an upstream README. Verify on every fetch; a mismatch is fatal."
+    "Every sha256 below was computed from the real downloaded artifact, not copied",
+    "from an upstream README. Verify on every fetch; a mismatch is fatal.",
+    "Artifacts marked optional:true are not fetched by default. Read their licence",
+    "block before you fetch one: not every model here is usable on every project."
   ],
   "version": 1,
-  "generatedAt": "2026-08-21",
-  "totalBytes": 1427971475,
+  "generatedAt": "2026-08-26",
+  "totalBytes": 1474857600,
   "models": [
     {
       "name": "melodyt5",
@@ -73,6 +75,57 @@
       "notes": [
         "Inference runtime is upstream RWKV/rwkv.cpp, NOT the personal fork MIDI-RWKV pins. See third_party/MANIFEST.md.",
         "MIDIMetrics is excluded: no detected licence, and it is an evaluation dependency the pipeline does not need."
+      ]
+    },
+    {
+      "name": "game",
+      "role": "Optional register witness. A second opinion about which octave a note is in, used only where it corroborates another engine.",
+      "optional": true,
+      "upstream": {
+        "kind": "github-release",
+        "repo": "openvpi/GAME",
+        "revision": "v1.0.0",
+        "url": "https://github.com/openvpi/GAME/releases/tag/v1.0.0"
+      },
+      "code": {
+        "repo": "https://github.com/openvpi/GAME",
+        "revision": "4ad815c90dfe2442730f3fdc866fd23e737cbc97",
+        "license": "MIT"
+      },
+      "artifact": {
+        "filename": "GAME-1.0-small.zip",
+        "destination": "game/",
+        "unpack": "zip",
+        "unpackStrip": "GAME-1.0-small/",
+        "expectedBytes": 46886125,
+        "sha256": "3d3e1ac0a83234b2a163a3d43043455d15670765eaa25ef6285c399da1ccc576",
+        "downloadUrl": "https://github.com/openvpi/GAME/releases/download/v1.0.0/GAME-1.0-small.zip",
+        "contains": {
+          "model.pt": {
+            "expectedBytes": 50905591,
+            "sha256": "7dd10022a4011938843249a31d9527691376c493d13687a7fc1dec88786b9691"
+          }
+        }
+      },
+      "license": {
+        "code": "MIT",
+        "weights": "CC-BY-NC-SA-4.0",
+        "$comment": [
+          "The two differ, and the difference is the reason this artifact is optional.",
+          "The repository is MIT. The release notes for v1.0.0 state plainly: 'The model",
+          "files apply CC BY-NC-SA 4.0 license.' Non-commercial, attribution, share-alike.",
+          "Rhythmisoze itself is MIT, so these weights are NOT redistributable with it and",
+          "are never baked into an image. Fetching them is an operator's decision, and a",
+          "deployment that uses them is a non-commercial one.",
+          "This is why the default configuration does not use this model, and why the",
+          "product is fully functional without it -- see docs/architecture/evidence.md."
+        ]
+      },
+      "runtimeAdapterVersion": "transcription/0.1.0",
+      "notes": [
+        "~47 MB zipped, ~51 MB unpacked. The small model; medium and large exist upstream and are unmeasured here.",
+        "v1.0.3 publishes ONNX exports which would remove the PyTorch dependency from the image. Not adopted: this project has measured the v1.0.0 PyTorch model and has not measured the ONNX one, and an unmeasured substitution in a transcription engine is exactly the change that looks like a quality regression later.",
+        "Sending audio to this service changes what the product can promise about the recording staying on the device. It is off unless TRANSCRIPTION_ENABLED is set."
       ]
     }
   ]

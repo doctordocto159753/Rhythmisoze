@@ -15,6 +15,7 @@ import { ReviewStage } from '@/features/review/ReviewStage';
 import { canExport, hasResult, isRecordingPhase, stageOf } from '@/features/state/machine';
 import { useCoreSupport } from '@/features/shell/useCapabilities';
 import { warmModel } from '@/features/transcription/client';
+import { useWitnessAvailability } from '@/features/transcription/witness';
 import { ProcessStage } from '@/features/transcription/ProcessStage';
 import { ResonantBody } from '@/features/visual/ResonantBody';
 import { useLocale } from '@/i18n/provider';
@@ -60,6 +61,15 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
   } =
     useCreationFlow(locale);
   const support = useCoreSupport();
+  /**
+   * Whether a recording made here leaves this device.
+   *
+   * Read on the entry screen, not after the fact. The landing copy states what
+   * happens to a recording, and it has to state the true one *before* the user
+   * makes one — a privacy notice that appears once the audio has already been
+   * sent is not a notice.
+   */
+  const witness = useWitnessAvailability();
 
   useEffect(() => {
     track('landing_viewed');
@@ -137,7 +147,9 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             <Text variant="display" as="h1">
               {t.landing.lead}
             </Text>
-            <Text muted>{t.landing.body}</Text>
+            <Text muted>
+              {witness.available ? t.landing.bodyWithWitness : t.landing.body}
+            </Text>
           </header>
         ) : null}
 

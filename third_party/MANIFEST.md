@@ -19,7 +19,49 @@ re-resolve silently.
 Existing dependency provenance lives in
 [`../docs/licenses/dependencies.md`](../docs/licenses/dependencies.md) and
 [`../docs/licenses/instruments.md`](../docs/licenses/instruments.md). This file
-covers only the Musician foundation.
+covers the Musician foundation and the optional transcription engine.
+
+---
+
+## GAME (optional register witness)
+
+| | |
+|---|---|
+| Upstream | `openvpi/GAME` |
+| Pinned commit | `4ad815c90dfe2442730f3fdc866fd23e737cbc97` |
+| Default branch | `main` |
+| Licence (code) | MIT |
+| Licence (**weights**) | **CC BY-NC-SA 4.0** |
+| Role | A second opinion about which octave a note is in. Never a transcription in its own right. |
+| Integration | Cloned at the pinned SHA inside the `transcription` container image and driven through its own `infer.py`. Never a package dependency of the app, and not a `vendor/` submodule — see rule 7 below. |
+| Model artifact | `GAME-1.0-small.zip`, release `v1.0.0`, 46,886,125 bytes |
+| Checksum (zip) | `3d3e1ac0a83234b2a163a3d43043455d15670765eaa25ef6285c399da1ccc576` |
+| Checksum (`model.pt`) | `7dd10022a4011938843249a31d9527691376c493d13687a7fc1dec88786b9691` |
+
+**The licence split is the important line in this table.** The repository is MIT
+and can be built into an image. The v1.0.0 release notes state plainly: *"The
+model files apply CC BY-NC-SA 4.0 license."* Non-commercial, attribution,
+share-alike — which is not Rhythmisoze's MIT, and does not become it by being
+downloaded into a container.
+
+Consequences, all of them deliberate:
+
+- the weights are never committed and never baked into the image (rule 5);
+- `scripts/models/bootstrap.sh` skips this artifact unless it is named, and
+  prints the licence before fetching it;
+- **a deployment that enables this service is a non-commercial deployment**, and
+  that is the operator's decision to make knowingly;
+- the product is complete without it. A register correction requires two
+  agreeing engines, so a deployment without this one reports disagreements
+  instead of acting on them.
+
+**Rejected: Dynamic HumTrans** (`shubham-gupta-30/humming_transcription`).
+Evaluated because humming is a core use case. Not adopted, on two independent
+grounds verified against the upstream repository: it states **no licence at
+all**, and its checkpoints are not reproducibly obtainable — the README says the
+authors are "having some trouble uploading our model checkpoints through GIT
+LFS" and asks users to contact them for access. Rule 3 disposes of the first on
+its own. Recorded here rather than worked around.
 
 ---
 
@@ -223,3 +265,15 @@ here.
 7. **If vendoring deviates from "whole repository at the pinned SHA"**, say so
    here and say why. A partial vendor that is not documented is indistinguishable
    from a copy-paste.
+
+   GAME deviates. It is not a `vendor/` submodule: it is cloned at the pinned
+   SHA during the `transcription` image build and lives only inside that image.
+   The reason is that it is optional, its runtime is a PyTorch stack no other
+   part of this repository wants, and a submodule would put it in every clone in
+   exchange for nothing. The pin is `GAME_REVISION`, a build argument, and it is
+   the same SHA recorded above.
+
+8. **A model's weights are licensed separately from its code, and the difference
+   decides whether it can be a default.** Recording both is not paperwork: GAME
+   is MIT code with CC BY-NC-SA weights, and that single fact is why its service
+   is off unless an operator turns it on.

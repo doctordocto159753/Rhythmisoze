@@ -40,6 +40,14 @@ services:
       # /api/musician/*, which proxies here.
       MUSICIAN_API_URL: http://musician-api:8080
       MUSICIAN_REQUEST_TIMEOUT_MS: ${MUSICIAN_REQUEST_TIMEOUT_MS:-180000}
+      # The optional register witness. Off unless an operator turns it on, and
+      # deliberately so: enabling it sends the user's recording to the
+      # transcription container, which changes what the app tells them about
+      # their audio. The landing copy switches to the truthful sentence when it
+      # is on. See services/transcription/README.md.
+      TRANSCRIPTION_ENABLED: ${TRANSCRIPTION_ENABLED:-false}
+      TRANSCRIPTION_API_URL: http://transcription:8083
+      TRANSCRIPTION_REQUEST_TIMEOUT_MS: ${TRANSCRIPTION_REQUEST_TIMEOUT_MS:-30000}
       PUBLISH_SECRET: ${PUBLISH_SECRET:-}
       MAINTENANCE_TOKEN: ${MAINTENANCE_TOKEN:-}
     ports:
@@ -117,6 +125,38 @@ services:
       resources:
         limits:
           memory: ${RWKV_MEMORY_LIMIT:-4g}
+
+  # The optional register witness.
+  #
+  # Always built and always started, because a container that is up and honestly
+  # reporting 503 is easier to diagnose than one that is absent. It does nothing
+  # at all until TRANSCRIPTION_ENABLED is true *and* the weights are present:
+  # `scripts/models/bootstrap.sh game` fetches them, and will tell you their
+  # licence is CC BY-NC-SA 4.0 before it does.
+  transcription:
+    build:
+      context: ./services/transcription
+      dockerfile: Dockerfile
+      args:
+        GAME_REVISION: ${GAME_REVISION:-4ad815c90dfe2442730f3fdc866fd23e737cbc97}
+    environment:
+      TRANSCRIPTION_MODEL_DIR: /models/game
+      TRANSCRIPTION_GAME_DIR: /opt/game
+      TRANSCRIPTION_MAX_DURATION_SEC: ${TRANSCRIPTION_MAX_DURATION_SEC:-60}
+      TRANSCRIPTION_LOG_LEVEL: ${TRANSCRIPTION_LOG_LEVEL:-INFO}
+    expose: ["8083"]
+    volumes:
+      # Read-only, like the model workers: an inference container has no
+      # business writing to the weight store.
+      - ./models:/models:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # The small model is ~51 MB of weights; the ceiling is for PyTorch's
+          # allocator and one clip's activations, not for the checkpoint.
+          memory: ${TRANSCRIPTION_MEMORY_LIMIT:-4g}
 
   redis:
     image: redis:7-alpine

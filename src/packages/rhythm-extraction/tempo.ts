@@ -5,13 +5,15 @@
  *
  * The first version treated the metronome as the source of truth: the user
  * tapped 120, and the grid became 120 regardless of what they actually sang.
- * That inverts the product. The metronome is there to help someone perform
+ * That inverts the product. A click track is there to help someone perform
  * steadily; it is not a statement about the music they made. If a person taps
  * 120 and then sings at 83 because 83 is what the idea wanted, forcing the
  * result onto a 120 grid destroys the idea rather than tidying it.
  *
- * So tempo is *detected* here, and the tapped value becomes one option among
- * several rather than the law. See `versions.ts`.
+ * This module is now the *only* source of a tempo. The metronome, the tap pad
+ * and the whole setup step they lived in are gone, so what is measured here is
+ * not one option among several — it is the answer, and when there is nothing to
+ * measure the answer is that the material has no pulse. See `versions.ts`.
  *
  * ## Why not the humtool estimator
  *
@@ -53,7 +55,8 @@ export interface TempoEstimate {
    * pulse and are only somewhat sure of the number" and "there was nothing to
    * measure" are different facts with different correct responses, and folding
    * them into one low number is how the second answer — fall back to the
-   * metronome — silently got applied to the first.
+   * metronome — silently got applied to the first. The second answer is now
+   * "this material is timed freely", which is a reading rather than a fallback.
    *
    * `false` means `bpm` is a placeholder, not a reading.
    */
@@ -74,13 +77,14 @@ export interface TempoEstimate {
 
 /**
  * Below this, the detected tempo is not certain enough to *present* as what the
- * app heard, so the UI hedges and offers the tapped value as an alternative.
+ * app definitely heard, so the interface says "about" rather than stating it
+ * flatly.
  *
- * It is deliberately not a switch that swaps in the tapped tempo. The metronome
- * is a recording guide; a performance hummed at 88 is at 88 whether or not the
- * estimator is sure of it, and imposing 103 because the estimator scored 0.43
- * instead of 0.45 would make the metronome the musical truth by accident. See
- * `resolveVersionTempo` in `versions.ts` for the rule that replaced it.
+ * A presentation threshold and nothing more. It was once a switch that swapped
+ * in the tapped tempo — a take measured at 88.5 with confidence 0.432 was
+ * played, exported and modelled at the tapped 103 because 0.432 missed 0.45 —
+ * and there is no longer any second number for it to switch to. A performance
+ * hummed at 88 is at 88 whether or not the estimator is sure of it.
  */
 export const TEMPO_CONFIDENCE_FLOOR = 0.45;
 

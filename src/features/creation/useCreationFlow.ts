@@ -8,9 +8,9 @@
  * audio state, which is what stops the "unrelated booleans" failure mode the
  * playbook warns about.
  *
- * Effects that are genuinely imperative - opening the microphone, scheduling
- * the metronome, running the worker, rendering offline - live in refs rather
- * than state, because they are resources with lifetimes rather than values.
+ * Effects that are genuinely imperative - opening the microphone, running the
+ * worker, rendering offline - live in refs rather than state, because they are
+ * resources with lifetimes rather than values.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
@@ -37,30 +37,24 @@ import {
   decodeToMono,
   getAudioContext,
   openMicrophone,
-  startMetronome,
   startRecording,
-  tapTempo,
   unlockAudio,
   validateAudio,
   type ActiveRecording,
-  type BeatInfo,
   type CaptureStream,
   type LevelSnapshot,
-  type MetronomeHandle,
 } from '@audio-core';
 import { refine, RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
 import { teach, type TeacherResult } from '@music-teacher';
 import {
   analyzeDrumRhythm,
   analyzeMelodyRhythm,
-  compareTempos,
   defaultVersion,
+  encodingBpm,
   planVersions,
   resolveVersionTempo,
   type PerformanceRhythm,
   type PerformanceTempo,
-  type TempoChoice,
-  type TempoDisagreement,
   type VersionId,
   type VersionRecipe,
 } from '@rhythm-extraction';
@@ -106,8 +100,6 @@ import { newSketchId, saveSketch } from '@/features/workspace/db';
 export const MAX_RECORDING_SEC = 60;
 export const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_MIDI_UPLOAD_BYTES = 5 * 1024 * 1024;
-/** PRD R-04: one measure. */
-export const COUNT_IN_BARS = 1;
 
 /**
  * The state, the reducer and the source-isolation rule all live in `state.ts`.
@@ -125,7 +117,6 @@ export function useCreationFlow(locale: Locale) {
 
   const captureRef = useRef<CaptureStream | null>(null);
   const recorderRef = useRef<ActiveRecording | null>(null);
-  const metronomeRef = useRef<MetronomeHandle | null>(null);
   const playbackRef = useRef<PlaybackHandle | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const startTimerRef = useRef<number | null>(null);
@@ -146,7 +137,7 @@ export function useCreationFlow(locale: Locale) {
   /**
    * What the performance itself says about tempo, meter and groove.
    *
-   * Derived from the take, not from the metronome. Recomputed only when the
+   * Derived from the take, and now from nothing else. Recomputed only when the
    * transcription changes, because it describes the recording rather than any
    * of the choices made about it afterwards.
    */
@@ -164,7 +155,7 @@ export function useCreationFlow(locale: Locale) {
   }, [state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
 
   /**
-   * The tempo the music is interpreted at, and where it came from.
+   * The tempo the music is interpreted at, if it has one.
    *
    * The single answer to "what tempo is this?", resolved once here and used by
    * every consumer — the version recipes, the Musician request, the exported
@@ -172,25 +163,31 @@ export function useCreationFlow(locale: Locale) {
    * `rhythm.reliable`, which is how the Musician could be asked for one tempo
    * while the picker displayed another.
    *
-   * `resolveVersionTempo` owns the rule; this only supplies the inputs. In
-   * particular the tapped value reaches it as an explicit *choice*, never as a
-   * fallback triggered by low confidence.
+   * There is exactly one input now, and it is the recording. Nothing the user
+   * did before they made a sound can reach this.
    */
-  const performanceTempo = useMemo<PerformanceTempo | null>(() => {
-    if (state.bpm === null) return null;
-    return resolveVersionTempo({
-      rhythm,
-      tappedBpm: state.bpm,
-      tempoChoice: state.tempoChoice,
-    });
-  }, [rhythm, state.bpm, state.tempoChoice]);
+  const performanceTempo = useMemo<PerformanceTempo>(
+    () => resolveVersionTempo({ rhythm }),
+    [rhythm],
+  );
+
+  /**
+   * The BPM to *write down* — MIDI tempo, bar rulers, the synthesis grid.
+   *
+   * Separate from `performanceTempo.bpm` because those consumers need a number
+   * even when the performance had no pulse, and a constant stand-in is the only
+   * honest way to give them one. Nothing musical follows from it: with
+   * `freeTiming` set, every version's quantization strength is zero, so no note
+   * is moved toward the grid this implies.
+   */
+  const encodedBpm = useMemo(() => encodingBpm(performanceTempo), [performanceTempo]);
 
   /**
    * What a teacher would suggest, computed from the Judge's reading.
    *
    * Derived rather than stored, and keyed only on the judged notes, so it runs
-   * once per take. It deliberately receives no tempo: the Teacher must work
-   * from the performance's own pulse, never from the tapped one.
+   * once per take. It deliberately receives no tempo at all: the Teacher works
+   * from the performance's own timing.
    */
   const lesson = useMemo<TeacherResult | null>(() => {
     if (state.mode !== 'melody') return null;
@@ -302,20 +299,16 @@ export function useCreationFlow(locale: Locale) {
 
   /** The versions on offer. The original performance is always one of them. */
   const versions = useMemo<VersionRecipe[]>(() => {
-    if (rhythm === null || state.bpm === null) return [];
+    if (rhythm === null) return [];
     return planVersions({
       rhythm,
-      tappedBpm: state.bpm,
-      // Passed through rather than resolved here: `planVersions` and
-      // `performanceTempo` must agree, and they agree by calling the same rule.
-      tempoChoice: state.tempoChoice,
       mode: state.mode,
       amount: state.retouchAmount,
       // Only versions whose notes actually exist are offered, so the picker can
       // never show something that cannot be played.
       generated: Object.keys(offeredGenerated) as MusicalVersionId[],
     });
-  }, [rhythm, state.bpm, state.tempoChoice, state.mode, state.retouchAmount, offeredGenerated]);
+  }, [rhythm, state.mode, state.retouchAmount, offeredGenerated]);
 
   /** The version in effect: the user's choice, or the honest default. */
   const activeVersion = useMemo<VersionRecipe | null>(() => {
@@ -340,17 +333,6 @@ export function useCreationFlow(locale: Locale) {
       null
     );
   }, [versions, state.versionId, rhythm, state.mode]);
-
-  /**
-   * Whether the tapped tempo and the heard tempo disagree, and how.
-   * Surfaced rather than silently resolved: a half-or-double gap usually means
-   * the user tapped eighths while singing quarters, and saying so is more
-   * useful than picking one for them.
-   */
-  const tempoDisagreement = useMemo<TempoDisagreement | null>(
-    () => (rhythm && state.bpm !== null ? compareTempos(rhythm, state.bpm) : null),
-    [rhythm, state.bpm],
-  );
 
   /**
    * Every version's notes, in one place.
@@ -396,11 +378,9 @@ export function useCreationFlow(locale: Locale) {
   const refinedRef = useRef<RefineResult | null>(null);
 
   const buildMusicianRequest = useCallback((): MusicianRequest | null => {
-    if (state.bpm === null) return null;
     // Resolved once, in one place, and handed over already decided. The builder
-    // has no access to the tapped tempo, so the substitution this bug was made
+    // has no access to any other tempo, so the substitution this bug was made
     // of cannot be reintroduced there.
-    const tempo = performanceTempo ?? resolveVersionTempo({ rhythm, tappedBpm: state.bpm });
     const analysis = refinedRef.current?.analysis ?? null;
     return assembleMusicianRequest({
       // The evidence, not the sketch: two takes of one sketch are two different
@@ -411,7 +391,13 @@ export function useCreationFlow(locale: Locale) {
         startIndex: phrase.startNoteIndex,
         endIndex: phrase.endNoteIndex,
       })) ?? [],
-      tempo: { bpm: tempo.bpm, confidence: tempo.confidence },
+      // The service needs a number to condition on. A free-timed take supplies
+      // the encoding constant with a confidence of zero, which is the truthful
+      // pair: here is what to write down, and here is how much it means.
+      tempo: {
+        bpm: encodedBpm,
+        confidence: performanceTempo.freeTiming ? 0 : performanceTempo.confidence,
+      },
       meter: { beatsPerBar: state.meter.beatsPerBar, beatUnit: state.meter.beatUnit },
       key: analysis
         ? {
@@ -428,17 +414,15 @@ export function useCreationFlow(locale: Locale) {
   }, [
     versionNoteSources,
     state.phraseModel,
-    state.bpm,
     state.sourceId,
     state.meter,
     state.durationSec,
-    rhythm,
+    encodedBpm,
     performanceTempo,
   ]);
 
   /** The refined result. Pure and cheap, so it is derived rather than stored. */
   const refined = useMemo<RefineResult | null>(() => {
-    if (state.bpm === null) return null;
     if (state.rawNotes.length === 0 && state.rawDrums.length === 0) return null;
     const instrument = resolveInstrument(state.instrumentId, state.mode);
     try {
@@ -458,9 +442,10 @@ export function useCreationFlow(locale: Locale) {
       return refine(
         { notes: sourceNotes, drums: state.rawDrums },
         {
-          // The version decides the tempo, which may be the one that was heard
-          // rather than the one that was tapped.
-          bpm: activeVersion?.bpm ?? state.bpm,
+          // The grid this implies is only ever applied when the performance
+          // actually had a pulse; a free-timed version carries zero timing
+          // strength, so the encoding constant moves nothing.
+          bpm: activeVersion?.bpm ?? encodedBpm,
           mode: state.mode,
           amount: activeVersion?.amount ?? state.retouchAmount,
           paramOverrides: activeVersion?.paramOverrides,
@@ -482,7 +467,7 @@ export function useCreationFlow(locale: Locale) {
       return null;
     }
   }, [
-    state.bpm,
+    encodedBpm,
     state.rawNotes,
     state.referenceNotes,
     state.rawDrums,
@@ -535,11 +520,11 @@ export function useCreationFlow(locale: Locale) {
    * is current" — see `renderedAudio` below, where null never matches.
    */
   const renderKey = useMemo<string | null>(() => {
-    if (!refined || state.bpm === null) return null;
+    if (!refined) return null;
     return [
       renderCacheKey(activeVersion?.id ?? 'unprocessed', versionNoteSources, {
         instrumentId: state.instrumentId,
-        bpm: activeVersion?.bpm ?? state.bpm,
+        bpm: activeVersion?.bpm ?? encodedBpm,
         retouchAmount: activeVersion?.amount ?? state.retouchAmount,
       }),
       // The rendered length, not the recorded one: two versions of one take
@@ -554,7 +539,7 @@ export function useCreationFlow(locale: Locale) {
     activeVersion,
     versionNoteSources,
     state.instrumentId,
-    state.bpm,
+    encodedBpm,
     state.retouchAmount,
     musicalDuration,
     state.master,
@@ -598,39 +583,9 @@ export function useCreationFlow(locale: Locale) {
     return out;
   }, [offeredGenerated]);
 
-  // --- Tempo -------------------------------------------------------------
-
-  const tap = useCallback(() => {
-    const context = getAudioContext();
-    const { history, result } = tapTempo(state.tapHistory, context.currentTime);
-    dispatch({ type: 'tap', history, bpm: result.bpm, tapCount: result.tapCount });
-    if (result.bpm !== null) {
-      send('TEMPO_SET');
-      track('tempo_set', { method: 'tap', bpm: result.bpm });
-    }
-  }, [state.tapHistory, send]);
-
-  const setBpm = useCallback(
-    (bpm: number) => {
-      dispatch({ type: 'setBpm', bpm });
-      send('TEMPO_SET');
-      track('tempo_set', { method: 'slider', bpm });
-    },
-    [send],
-  );
-
-  const setMeter = useCallback((meter: Meter) => dispatch({ type: 'setMeter', meter }), []);
-  const toggleMetronome = useCallback(() => dispatch({ type: 'toggleMetronome' }), []);
-
   // --- Recording ---------------------------------------------------------
 
   const stopEverything = useCallback(() => {
-    if (startTimerRef.current !== null) {
-      clearTimeout(startTimerRef.current);
-      startTimerRef.current = null;
-    }
-    metronomeRef.current?.stop();
-    metronomeRef.current = null;
     recorderRef.current?.cancel();
     recorderRef.current = null;
     if (captureRef.current) {
@@ -741,8 +696,6 @@ export function useCreationFlow(locale: Locale) {
     const recorder = recorderRef.current;
     if (!recorder) return;
     recorderRef.current = null;
-    metronomeRef.current?.stop();
-    metronomeRef.current = null;
 
     try {
       const blob = await recorder.stop();
@@ -769,10 +722,9 @@ export function useCreationFlow(locale: Locale) {
 
   const uploadAudio = useCallback(
     async (file: File) => {
-      if (state.bpm === null) return;
       dispatch({ type: 'clearError' });
       // A picker remains visible while the take is armed. Choosing a file must
-      // release that microphone/count-in before file processing takes over.
+      // release that microphone before file processing takes over.
       stopEverything();
       try {
         if (!isLikelyAudioFile(file)) {
@@ -797,7 +749,7 @@ export function useCreationFlow(locale: Locale) {
         fail(mapped);
       }
     },
-    [state.bpm, ingestAudioBlob, fail, stopEverything],
+    [ingestAudioBlob, fail, stopEverything],
   );
 
   const applyMidiImport = useCallback(
@@ -882,8 +834,21 @@ export function useCreationFlow(locale: Locale) {
     [applyMidiImport, fail, stopEverything],
   );
 
+  /**
+   * Opens the microphone and starts recording, in that order and nothing else.
+   *
+   * There used to be a count-in between the two: one bar of metronome, with
+   * recording scheduled on the audio clock so the user's first note would land
+   * on a beat. It is gone with the rest of the tempo premise, and its removal
+   * fixes something the click track was quietly doing to the evidence — on a
+   * laptop without headphones the metronome is *in the recording*, four
+   * periodic transients at the top of the take that the onset detector and the
+   * tempo estimator then had to see.
+   *
+   * `ARM` and `RECORDING_STARTED` are still two events rather than one because
+   * they mark two real moments: permission granted, and capture live.
+   */
   const arm = useCallback(async () => {
-    if (state.bpm === null) return;
     dispatch({ type: 'clearError' });
     try {
       await unlockAudio();
@@ -892,49 +857,19 @@ export function useCreationFlow(locale: Locale) {
       send('ARM');
 
       const context = getAudioContext();
-      const metronome = startMetronome(
-        context,
-        context.destination,
-        {
-          bpm: state.bpm,
-          beatsPerBar: state.meter.beatsPerBar,
-          countInBars: COUNT_IN_BARS,
-          muted: state.metronomeMuted,
-        },
-        (beat) => dispatch({ type: 'beat', beat }),
-      );
-      metronomeRef.current = metronome;
-      send('COUNT_IN_STARTED');
-
-      // Recording starts on the audio clock, not on a UI timer: the count-in
-      // has to end exactly on the beat the user is about to sing on.
-      const delayMs = Math.max(0, (metronome.startTimeSec - context.currentTime) * 1000);
-      startTimerRef.current = window.setTimeout(() => {
-        startTimerRef.current = null;
-        if (!captureRef.current) return;
-        recorderRef.current = startRecording(context, captureRef.current, {
-          maxDurationSec: MAX_RECORDING_SEC,
-          onLevel: (level) => dispatch({ type: 'level', level }),
-          onDurationChange: (seconds) => dispatch({ type: 'elapsed', seconds }),
-          onAutoStop: () => void finishRecording(),
-        });
-        send('RECORDING_STARTED');
-        track('recording_started', { mode: state.mode, bpm: state.bpm ?? 0 });
-      }, delayMs);
+      recorderRef.current = startRecording(context, capture, {
+        maxDurationSec: MAX_RECORDING_SEC,
+        onLevel: (level) => dispatch({ type: 'level', level }),
+        onDurationChange: (seconds) => dispatch({ type: 'elapsed', seconds }),
+        onAutoStop: () => void finishRecording(),
+      });
+      send('RECORDING_STARTED');
+      track('recording_started', { mode: state.mode });
     } catch (error) {
       stopEverything();
       fail(error);
     }
-  }, [
-    state.bpm,
-    state.meter.beatsPerBar,
-    state.metronomeMuted,
-    state.mode,
-    send,
-    fail,
-    stopEverything,
-    finishRecording,
-  ]);
+  }, [state.mode, send, fail, stopEverything, finishRecording]);
 
   const cancelRecording = useCallback(() => {
     stopEverything();
@@ -1090,7 +1025,6 @@ export function useCreationFlow(locale: Locale) {
    * data").
    */
   useEffect(() => {
-    if (state.bpm === null) return;
     if (!['review', 'rendering', 'ready', 'publishing', 'published'].includes(state.machine.state)) {
       return;
     }
@@ -1100,7 +1034,8 @@ export function useCreationFlow(locale: Locale) {
         id: state.sketchId,
         title: state.title,
         locale,
-        bpm: state.bpm as number,
+        bpm: encodedBpm,
+        freeTiming: performanceTempo.freeTiming,
         meter: state.meter,
         mode: state.mode,
         instrumentId: state.instrumentId,
@@ -1164,7 +1099,8 @@ export function useCreationFlow(locale: Locale) {
     state.machine.state,
     state.sketchId,
     state.title,
-    state.bpm,
+    encodedBpm,
+    performanceTempo,
     state.retouchAmount,
     state.instrumentId,
     state.rawNotes,
@@ -1208,12 +1144,12 @@ export function useCreationFlow(locale: Locale) {
     /** What the performance itself said about tempo, meter and groove. */
     rhythm,
     /**
-     * The tempo the music is interpreted at, and where that tempo came from.
+     * The tempo the music was performed at, or free timing when it had none.
      *
-     * Read by everything that needs *the music's* tempo rather than the
-     * metronome's: the exported MIDI's tempo map, the piano roll's bar lines,
-     * the published metadata. `state.bpm` remains the metronome value and keeps
-     * driving the metronome, the count-in and the tempo controls.
+     * Read by everything that needs the music's tempo: the exported MIDI's
+     * tempo map, the piano roll's bar lines, the published metadata. There is
+     * no second tempo for it to be distinguished from any more — the only input
+     * is the recording.
      */
     performanceTempo,
     /**
@@ -1267,13 +1203,7 @@ export function useCreationFlow(locale: Locale) {
     },
     /** What a teacher would suggest, and why. Null outside the pitched path. */
     lesson,
-    /** Set when the heard tempo and the tapped tempo disagree. */
-    tempoDisagreement,
     actions: {
-      tap,
-      setBpm,
-      setMeter,
-      toggleMetronome,
       arm,
       uploadAudio,
       uploadMidi,
@@ -1284,16 +1214,6 @@ export function useCreationFlow(locale: Locale) {
       correctInputRoute,
       setRetouch,
       setVersion: (versionId: VersionId) => dispatch({ type: 'setVersion', versionId }),
-      /**
-       * The user overruling which tempo the versions are built on.
-       *
-       * The only route by which the tapped value can become the musical tempo of
-       * a take that had a measurable pulse of its own.
-       */
-      setTempoChoice: (choice: TempoChoice) => {
-        dispatch({ type: 'setTempoChoice', choice });
-        track('tempo_set', { method: choice === 'metronome' ? 'metronome-choice' : 'performance-choice', bpm: state.bpm ?? 0 });
-      },
       setKey: (key: FlowState['keyOverride']) => dispatch({ type: 'setKey', key }),
       setInstrument,
       setMaster: (master: Partial<MasterSettings>) => dispatch({ type: 'setMaster', master }),

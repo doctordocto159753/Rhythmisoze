@@ -75,7 +75,14 @@ function mapGetUserMediaError(error: unknown): AppError {
 export interface RecorderOptions {
   /** Hard cap on take length. Stops the recorder rather than trusting the UI. */
   maxDurationSec: number;
-  /** Context time at which the take is considered to begin (count-in end). */
+  /**
+   * Context time at which the take is considered to begin.
+   *
+   * Existed for the count-in, which is gone: capture now starts when the
+   * microphone opens, so callers leave this unset and the take begins where the
+   * recorder does. Kept because "the take starts later than the stream" is a
+   * real distinction a caller may need again, and it costs one optional field.
+   */
   startAtSec?: number;
   onLevel?: (level: LevelSnapshot) => void;
   onDurationChange?: (seconds: number) => void;

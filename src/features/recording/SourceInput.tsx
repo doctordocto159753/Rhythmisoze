@@ -10,7 +10,6 @@ const AUDIO_ACCEPT = 'audio/*,.wav,.mp3,.m4a,.aac,.ogg,.webm,.flac';
 const MIDI_ACCEPT = '.mid,.midi,audio/midi,audio/x-midi';
 
 export interface SourceInputProps {
-  tempoReady: boolean;
   onUploadAudio(file: File): Promise<void>;
   onUploadMidi(file: File): Promise<void>;
 }
@@ -23,11 +22,7 @@ export interface SourceInputProps {
  * stage can read. The full input covers its tactile label, so focus and disabled
  * semantics still belong to the native control rather than a simulated button.
  */
-export function SourceInput({
-  tempoReady,
-  onUploadAudio,
-  onUploadMidi,
-}: SourceInputProps) {
+export function SourceInput({ onUploadAudio, onUploadMidi }: SourceInputProps) {
   const { t } = useLocale();
   const [busy, setBusy] = useState<'audio' | 'midi' | null>(null);
 
@@ -51,7 +46,11 @@ export function SourceInput({
     }
   };
 
-  const audioDisabled = !tempoReady || busy !== null;
+  // Nothing gates an upload any more. It used to require a tempo, which is the
+  // premise this product no longer holds: a file is material, and asking for a
+  // BPM before agreeing to read one was asking the user to describe music the
+  // app was about to listen to itself.
+  const audioDisabled = busy !== null;
   const midiDisabled = busy !== null;
 
   return (
@@ -80,9 +79,7 @@ export function SourceInput({
             <span className={styles.actionTitle}>
               {busy === 'audio' ? t.sourceInput.reading : t.sourceInput.audio}
             </span>
-            <span className={styles.actionHint}>
-              {tempoReady ? t.sourceInput.audioReadyHint : t.sourceInput.audioNeedsTempo}
-            </span>
+            <span className={styles.actionHint}>{t.sourceInput.audioReadyHint}</span>
           </label>
 
           <label

@@ -14,27 +14,6 @@
   padding-block: var(--space-6);
 }
 
-.countIn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.countNumber {
-  font-family: var(--font-numeric);
-  font-size: 7rem;
-  font-weight: var(--weight-strong);
-  line-height: 1;
-  color: var(--color-accent);
-  direction: ltr;
-}
-
-.countLabel {
-  font-size: var(--text-label);
-  color: var(--color-text-muted);
-}
-
 /* --- The record control --- */
 
 .recordButton {

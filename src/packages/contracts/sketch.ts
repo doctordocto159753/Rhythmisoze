@@ -75,7 +75,22 @@ export interface LocalSketch {
   id: string;
   title: string;
   locale: Locale;
+  /**
+   * The tempo this sketch's music is written down at.
+   *
+   * The pulse measured from the performance whenever there was one. When there
+   * was not, it is `FREE_TIMING_ENCODING_BPM` and `freeTiming` says so — a MIDI
+   * file has to declare a tempo and a bar ruler has to space its lines, and
+   * those are encoding requirements rather than claims about the music.
+   *
+   * It was previously whatever the user set on the metronome before recording.
+   * Sketches saved then still load: the field has the same type and the same
+   * position in the record, it is simply no longer something anyone chose, and
+   * nothing reads it back into an interpretation decision.
+   */
   bpm: number;
+  /** `true` when the performance had no measurable pulse. Absent on old records. */
+  freeTiming?: boolean;
   meter: Meter;
   mode: CreationMode;
   instrumentId: string;
@@ -171,7 +186,10 @@ export interface StoredMusicianVersion {
 export interface PublishedSketch {
   id: string;
   title: string;
+  /** The encoding tempo. See `LocalSketch.bpm`, and `freeTiming` beside it. */
   bpm: number;
+  /** `true` when the performance had no measurable pulse. */
+  freeTiming: boolean;
   mode: CreationMode;
   keyRoot: PitchClassName | null;
   keyMode: KeyMode | null;

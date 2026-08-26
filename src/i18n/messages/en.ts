@@ -46,33 +46,17 @@ export const en = {
     start: 'Start a sketch',
     howItWorks: 'How it works',
     steps: {
-      tempo: { title: 'Set the pulse', body: 'Tap along at the speed you have in mind.' },
-      record: { title: 'Record', body: 'You get a count-in, then up to sixty seconds.' },
+      start: { title: 'Record or upload', body: 'Hum, sing, beatbox or bring a file. No setup.' },
+      record: { title: 'Record', body: 'Up to sixty seconds, at whatever speed the idea wants.' },
       hear: { title: 'Hear it back', body: 'Pick an instrument and adjust how tidy it sounds.' },
     },
-  },
-
-  tempo: {
-    label: 'Speed',
-    tapPrompt: 'Tap four times at your speed',
-    tapMore: (remaining: number) => `${remaining} more`,
-    tapAgain: 'Tap again',
-    unit: 'BPM',
-    sliderLabel: 'Beats per minute',
-    notSet: 'Not set yet',
-    metronome: 'Click',
-    metronomeOn: 'Click on',
-    metronomeOff: 'Click off',
-    meter: 'Beats in a bar',
-    why: 'The click keeps your timing steady. It makes everything after this work.',
   },
 
   sourceInput: {
     title: 'Or begin with a file',
     audio: 'Upload a recording',
     audioInputLabel: 'Choose a recording to upload',
-    audioNeedsTempo: 'Move the slider or tap four times to set tempo first.',
-    audioReadyHint: 'Uses the tempo you set above.',
+    audioReadyHint: 'Any hum, sung line, beat or instrument take.',
     midi: 'Import MIDI',
     midiInputLabel: 'Choose a MIDI file to import',
     midiHint: 'Its embedded tempo is imported with the notes.',
@@ -81,8 +65,7 @@ export const en = {
 
   record: {
     arm: 'Record',
-    countdown: 'Get ready',
-    countIn: (beat: number) => `${beat}`,
+    opening: 'Opening the microphone',
     recording: 'Recording',
     stop: 'Stop',
     cancel: 'Cancel',
@@ -170,15 +153,12 @@ export const en = {
     // performance is the performance — but it says so rather than either
     // claiming certainty or quietly swapping in the metronome.
     heardTempoUncertain: (bpm: number) => `heard at about ${bpm} BPM`,
-    tappedTempo: (bpm: number) => `your ${bpm} BPM`,
+    // Not "no tempo". The take has timing — it has the timing it was performed
+    // with. What it does not have is a pulse, and saying so is the difference
+    // between describing the material and calling it deficient.
+    freeTiming: 'timed freely',
     // Only shown when there was genuinely nothing to measure.
-    tempoNotHeard: 'No pulse could be heard in this take, so your tapped speed is used.',
-    useTappedTempo: (bpm: number) => `Use my ${bpm} BPM instead`,
-    usePerformanceTempo: (bpm: number) => `Back to the ${bpm} BPM heard here`,
-    halfOrDouble: (heard: number, tapped: number) =>
-      `You tapped ${tapped} BPM and this sounds like ${heard} BPM — likely counted twice as fast or twice as slow.`,
-    different: (heard: number, tapped: number) =>
-      `You tapped ${tapped} BPM; this sounds like ${heard} BPM.`,
+    tempoNotHeard: 'No steady pulse here, so the timing is kept exactly as you performed it.',
 
     /**
      * The Musician area.
@@ -284,12 +264,11 @@ export const en = {
     analysis: {
       range: 'Range',
       detectedTempo: 'Speed heard',
-      yourTempo: 'Your speed',
+      yourTempo: 'Written at',
       octaveFixes: 'Octave slips removed',
       snapped: 'Notes nudged into key',
       merged: 'Fragments merged',
       stepwise: 'Stepwise movement',
-      tempoMismatch: 'That differs from your tapped speed. If the result feels off, retap.',
       melodyConfidence: 'Melody confidence',
     },
     empty: 'No notes were found in that take.',

@@ -10,20 +10,24 @@
  * Musician was asked for a passage at 103, the versions played at 103, and the
  * exported MIDI was stamped 103. Nothing in the product ever said so.
  *
- * The metronome is a recording guide. A performance hummed at 88.5 is at 88.5
- * whether or not the estimator is sure of the number, and uncertainty about a
- * measurement is not evidence for a different measurement.
+ * That was fixed once by making the arbitration correct. It is fixed again here
+ * by removing the arbitration: there is no second candidate any more, because
+ * the product no longer asks anyone for a tempo. A user reported the residue of
+ * the old design plainly — the app saying "heard at 85, but you selected 120",
+ * and the music coming out worse than when they had happened to select 85
+ * before singing the same phrase.
  *
- * So the rule under test is: **a measured pulse is used at any confidence**; the
- * tapped value is only reached for when there was nothing to measure at all, or
- * when the user explicitly asks for it.
+ * So the rule under test is now: **the tempo is whatever was measured from the
+ * performance, at any confidence, and when nothing could be measured the answer
+ * is free timing rather than a substitute number.**
  */
 
 import { describe, expect, it } from 'vitest';
 import type { NoteEvent } from '@contracts';
 import {
   analyzeMelodyRhythm,
-  compareTempos,
+  encodingBpm,
+  FREE_TIMING_ENCODING_BPM,
   planVersions,
   resolveVersionTempo,
   TEMPO_CONFIDENCE_FLOOR,
@@ -31,8 +35,15 @@ import {
 import { buildMusicianRequest } from '@musician-client';
 import type { VersionNoteSources } from '@versions';
 
-/** The metronome value for the take these tests reconstruct. */
-const TAPPED_BPM = 103;
+/**
+ * The metronome value from the original take.
+ *
+ * Kept as a number in this file for one reason: to assert that nothing the app
+ * produces resembles it. There is no longer any input through which it could
+ * reach the pipeline, which is what the type of `TempoResolutionInput` says and
+ * what these tests confirm behaviourally.
+ */
+const ONCE_TAPPED_BPM = 103;
 /** Roughly where the performance actually sat. */
 const PERFORMED_BPM = 88.5;
 const SOURCE_DURATION_SEC = 10.14;
@@ -92,35 +103,33 @@ describe('a measured but uncertain tempo', () => {
   const notes = looselyHummedNotes();
   const rhythm = analyzeMelodyRhythm(notes, SOURCE_DURATION_SEC);
 
-  it('stays the musical interpretation rather than becoming the metronome', () => {
-    const tempo = resolveVersionTempo({ rhythm, tappedBpm: TAPPED_BPM });
-    expect(tempo.source).toBe('detected');
+  it('is the musical interpretation, and nothing resembles the old tapped value', () => {
+    const tempo = resolveVersionTempo({ rhythm });
+    expect(tempo.freeTiming).toBe(false);
     expect(tempo.bpm).toBe(rhythm.tempo.bpm);
     // The failing assertion under the old behaviour.
-    expect(Math.abs(tempo.bpm - TAPPED_BPM)).toBeGreaterThan(5);
+    expect(Math.abs((tempo.bpm as number) - ONCE_TAPPED_BPM)).toBeGreaterThan(5);
   });
 
   it('reports its confidence as measured rather than rewriting it', () => {
-    const tempo = resolveVersionTempo({ rhythm, tappedBpm: TAPPED_BPM });
+    const tempo = resolveVersionTempo({ rhythm });
     expect(tempo.confidence).toBe(rhythm.tempo.confidence);
     expect(tempo.confidence).toBeLessThan(TEMPO_CONFIDENCE_FLOOR);
     // Uncertainty is preserved as uncertainty. It is what the picker hedges on.
     expect(tempo.reliable).toBe(false);
-    expect(tempo.fellBackForLackOfEvidence).toBe(false);
   });
 
   it('builds every version on it, including the Musician versions', () => {
     const plan = planVersions({
       rhythm,
-      tappedBpm: TAPPED_BPM,
       mode: 'melody',
       amount: 55,
       generated: ['musician-refined', 'musician-developed', 'musician-expanded'],
     });
     expect(plan.length).toBe(6);
     for (const version of plan) {
-      expect(version.tempoSource).toBe('detected');
-      expect(Math.abs(version.bpm - rhythm.tempo.bpm)).toBeLessThan(0.001);
+      expect(version.freeTiming).toBe(false);
+      expect(Math.abs((version.bpm as number) - rhythm.tempo.bpm)).toBeLessThan(0.001);
       // The hedge travels with the version so the picker can say "about".
       expect(version.tempoReliable).toBe(false);
       expect(version.tempoConfidence).toBe(rhythm.tempo.confidence);
@@ -128,10 +137,11 @@ describe('a measured but uncertain tempo', () => {
   });
 
   it('is what the Musician is asked for, at its real confidence', () => {
+    const tempo = resolveVersionTempo({ rhythm });
     const request = buildMusicianRequest({
       sourceId: 'sketch-1',
       versionNotes: sourcesFor(notes),
-      tempo: resolveVersionTempo({ rhythm, tappedBpm: TAPPED_BPM }),
+      tempo: { bpm: encodingBpm(tempo), confidence: tempo.confidence },
       meter: { beatsPerBar: 4, beatUnit: 4 },
       key: null,
       sourceDurationSec: SOURCE_DURATION_SEC,
@@ -140,70 +150,22 @@ describe('a measured but uncertain tempo', () => {
     // Both of these failed before: the bpm was 103, and the confidence was a
     // hard-coded 0.4 describing neither number.
     expect(request?.bpm).toBe(rhythm.tempo.bpm);
-    expect(request?.bpm).not.toBe(TAPPED_BPM);
+    expect(request?.bpm).not.toBe(ONCE_TAPPED_BPM);
     expect(request?.tempoConfidence).toBe(rhythm.tempo.confidence);
     expect(request?.tempoConfidence).not.toBe(0.4);
   });
 
   it('sends the source duration, not a length budget for the result', () => {
+    const tempo = resolveVersionTempo({ rhythm });
     const request = buildMusicianRequest({
       sourceId: 'sketch-1',
       versionNotes: sourcesFor(notes),
-      tempo: resolveVersionTempo({ rhythm, tappedBpm: TAPPED_BPM }),
+      tempo: { bpm: encodingBpm(tempo), confidence: tempo.confidence },
       meter: { beatsPerBar: 4, beatUnit: 4 },
       key: null,
       sourceDurationSec: SOURCE_DURATION_SEC,
     });
     expect(request?.durationSec).toBe(SOURCE_DURATION_SEC);
-  });
-
-  it('still says the two tempos disagree, hedged rather than hidden', () => {
-    // Previously suppressed entirely below the floor — in exactly the case where
-    // the app had quietly switched to the tapped value, so the user saw neither
-    // the substitution nor a reason to doubt it.
-    const disagreement = compareTempos(rhythm, TAPPED_BPM);
-    expect(disagreement.kind).not.toBe('none');
-    expect(disagreement.detectedIsReliable).toBe(false);
-    expect(Math.round(disagreement.tappedBpm)).toBe(TAPPED_BPM);
-  });
-});
-
-describe('the tapped tempo', () => {
-  const notes = looselyHummedNotes();
-  const rhythm = analyzeMelodyRhythm(notes, SOURCE_DURATION_SEC);
-
-  it('remains available beside the detected one', () => {
-    // It is never discarded: the metronome still needs it, and the picker shows
-    // both figures so the user can tell them apart.
-    const disagreement = compareTempos(rhythm, TAPPED_BPM);
-    expect(disagreement.tappedBpm).toBe(TAPPED_BPM);
-    expect(Math.abs(disagreement.detectedBpm - PERFORMED_BPM)).toBeLessThanOrEqual(4);
-  });
-
-  it('becomes the musical tempo when the user asks for it, and only then', () => {
-    const chosen = resolveVersionTempo({
-      rhythm,
-      tappedBpm: TAPPED_BPM,
-      tempoChoice: 'metronome',
-    });
-    expect(chosen.source).toBe('tapped');
-    expect(chosen.bpm).toBe(TAPPED_BPM);
-    // Not a fallback: there was a good measurement and the user overruled it.
-    expect(chosen.fellBackForLackOfEvidence).toBe(false);
-    // The estimator's confidence is still reported as what it measured.
-    expect(chosen.confidence).toBe(rhythm.tempo.confidence);
-
-    const plan = planVersions({
-      rhythm,
-      tappedBpm: TAPPED_BPM,
-      tempoChoice: 'metronome',
-      mode: 'melody',
-      amount: 55,
-    });
-    for (const version of plan) {
-      expect(version.bpm).toBe(TAPPED_BPM);
-      expect(version.tempoSource).toBe('tapped');
-    }
   });
 });
 
@@ -218,17 +180,29 @@ describe('a take with no measurable pulse', () => {
     expect(rhythm.tempo.confidence).toBe(0);
   });
 
-  it('is the one case where the tapped tempo is used without being asked for', () => {
-    const tempo = resolveVersionTempo({ rhythm, tappedBpm: TAPPED_BPM });
-    expect(tempo.source).toBe('tapped');
-    expect(tempo.bpm).toBe(TAPPED_BPM);
-    // Flagged, so the UI says "no pulse could be heard" rather than implying
-    // the app heard 103.
-    expect(tempo.fellBackForLackOfEvidence).toBe(true);
+  it('is free timing, not a substituted number', () => {
+    const tempo = resolveVersionTempo({ rhythm });
+    // The old behaviour reached for the metronome here — the one case where it
+    // did so without being asked. There is nothing to reach for now.
+    expect(tempo.bpm).toBeNull();
+    expect(tempo.freeTiming).toBe(true);
     expect(tempo.reliable).toBe(false);
   });
 
-  it('says nothing about a tempo disagreement it cannot have an opinion on', () => {
-    expect(compareTempos(rhythm, TAPPED_BPM).kind).toBe('none');
+  it('encodes at a constant that no version is allowed to quantize to', () => {
+    const tempo = resolveVersionTempo({ rhythm });
+    // A MIDI file must state a tempo and a bar ruler must space its lines, so a
+    // number still has to exist. What makes it harmless is that every version
+    // built on a free-timed take carries zero timing strength, so the grid this
+    // constant implies never moves a note.
+    expect(encodingBpm(tempo)).toBe(FREE_TIMING_ENCODING_BPM);
+
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 100 });
+    expect(plan.length).toBeGreaterThan(0);
+    for (const version of plan) {
+      expect(version.bpm).toBeNull();
+      expect(version.freeTiming).toBe(true);
+      expect(version.paramOverrides?.timingStrength).toBe(0);
+    }
   });
 });

@@ -33,8 +33,6 @@ export interface ResonantBodyProps {
   level: number;
   register: number;
   settled: number;
-  beatIndex: number;
-  beatSeconds: number;
   /** Overrides the automatic tier. Wired to the visual-detail control. */
   tier?: PerformanceTier;
   children?: ReactNode;
@@ -45,8 +43,6 @@ export function ResonantBody({
   level,
   register,
   settled,
-  beatIndex,
-  beatSeconds,
   tier,
   children,
 }: ResonantBodyProps) {
@@ -65,8 +61,6 @@ export function ResonantBody({
             level={level}
             register={register}
             settled={settled}
-            beatIndex={beatIndex}
-            beatSeconds={beatSeconds}
           />
         ) : (
           <StaticBody active={active} level={level} />

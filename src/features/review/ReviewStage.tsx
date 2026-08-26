@@ -20,13 +20,7 @@ import { useLocale } from '@/i18n/provider';
 import { PianoRoll } from './PianoRoll';
 import styles from './ReviewStage.module.css';
 
-import type {
-  PerformanceRhythm,
-  TempoChoice,
-  TempoDisagreement,
-  VersionId,
-  VersionRecipe,
-} from '@rhythm-extraction';
+import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
 import { MusicianPanel, type MusicianPanelProps } from '@/features/musician';
 import { VersionPicker } from './VersionPicker';
 
@@ -34,7 +28,6 @@ export interface ReviewStageProps {
   versions: readonly VersionRecipe[];
   activeVersionId: VersionId | null;
   rhythm: PerformanceRhythm | null;
-  tempoDisagreement: TempoDisagreement | null;
   judge: JudgeVerdict | null;
   lesson: TeacherResult | null;
   onVersionChange(id: VersionId): void;
@@ -52,15 +45,18 @@ export interface ReviewStageProps {
   diagnostics: ProcessingDiagnostics | null;
   melodyQuality: MelodyConfidence | null;
   mode: 'melody' | 'rhythm';
-  /** The tempo the music is built on. Not the metronome — see `tappedBpm`. */
+  /**
+   * The tempo the music is written down at.
+   *
+   * The performance's own pulse when it had one. When it did not, this is the
+   * encoding constant and `freeTiming` is true — the bar ruler still needs
+   * spacing, and the piano roll still has to draw something.
+   */
   bpm: number;
-  /** What the user tapped or set on the metronome. Null before they set one. */
-  tappedBpm: number | null;
-  /** Which of the two the versions are currently built on. */
-  tempoChoice: TempoChoice;
+  /** `true` when the performance had no measurable pulse. */
+  freeTiming: boolean;
   /** Where the material came from, so the version copy can stay honest. */
   sourceKind: SourceKind | undefined;
-  onTempoChoiceChange(choice: TempoChoice): void;
   onCorrectRoute(type: 'melody' | 'rhythm'): void;
   meter: Meter;
   /**
@@ -93,7 +89,6 @@ export function ReviewStage({
   activeVersionId,
   musician,
   rhythm,
-  tempoDisagreement,
   judge,
   lesson,
   onVersionChange,
@@ -103,9 +98,7 @@ export function ReviewStage({
   melodyQuality,
   mode,
   bpm,
-  tappedBpm,
-  tempoChoice,
-  onTempoChoiceChange,
+  freeTiming,
   onCorrectRoute,
   sourceKind,
   meter,
@@ -129,18 +122,6 @@ export function ReviewStage({
   const cleanupText = t.review.cleanupLevels[label];
   const analysis = refined.analysis;
   const mixedMaterial = diagnostics?.classification?.type === 'mixed';
-  // A tapped tempo that is half or double what the app heard is the single most
-  // common reason a result feels wrong, so it is surfaced rather than buried.
-  //
-  // Measured against the *tapped* value on purpose. `bpm` is now the tempo the
-  // music is built on, and comparing the detected tempo with itself would make
-  // this notice permanently silent.
-  const tempoMismatch =
-    mode === 'melody' &&
-    tappedBpm !== null &&
-    analysis.detectedBpm > 0 &&
-    Math.abs(analysis.detectedBpm - tappedBpm) / tappedBpm > 0.15 &&
-    refined.report.gridError < 0.2;
 
   return (
     <Stack gap={5}>
@@ -238,10 +219,6 @@ export function ReviewStage({
         versions={versions}
         activeId={activeVersionId}
         rhythm={rhythm}
-        disagreement={tempoDisagreement}
-        tappedBpm={tappedBpm}
-        tempoChoice={tempoChoice}
-        onTempoChoiceChange={onTempoChoiceChange}
         sourceKind={sourceKind}
         mode={mode}
         judge={judge}
@@ -280,12 +257,6 @@ export function ReviewStage({
           <Text variant="micro" muted>
             {t.review.cleanupHelp}
           </Text>
-
-          {tempoMismatch ? (
-            <Text variant="micro" muted>
-              {t.review.analysis.tempoMismatch}
-            </Text>
-          ) : null}
         </Stack>
       </Well>
 
@@ -319,7 +290,10 @@ export function ReviewStage({
                 </Bdi>
               }
             />
-            <DetailRow label={t.review.analysis.yourTempo} value={<Readout value={bpm} small />} />
+            <DetailRow
+              label={t.review.analysis.yourTempo}
+              value={freeTiming ? t.versions.freeTiming : <Readout value={bpm} small />}
+            />
             {melodyQuality ? (
               <DetailRow
                 label={t.review.analysis.melodyConfidence}

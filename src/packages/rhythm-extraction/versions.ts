@@ -51,46 +51,85 @@ export type VersionId = MusicalVersionId;
 
 export const VERSION_IDS: readonly VersionId[] = VERSION_ORDER;
 
-export type TempoSource = 'detected' | 'tapped';
-
 /**
- * Which tempo the *user* has asked the musical versions to be built on.
+ * The tempo of a performance, as an observation rather than a setting.
  *
- * `'performance'` is the default and the product's position: the metronome is a
- * recording guide, so the music is played back at the tempo it was performed at.
- * `'metronome'` exists because a person is allowed to overrule that — someone
- * who tapped 103 deliberately and drifted may well want 103 back. It is only
- * ever set by an explicit action, never by a confidence score.
+ * ## What changed, and why it had to
+ *
+ * There used to be a second tempo in this file: the number the user set on the
+ * metronome before recording. `resolveVersionTempo` arbitrated between the two,
+ * and the whole product hung off that arbitration — the grid every version was
+ * quantized to, the tempo the Musician was asked for, the exported MIDI.
+ *
+ * A user reported it plainly: the app said "heard at 85, but you selected 120",
+ * and the music came out worse than when they had happened to select 85 before
+ * singing the same phrase. That is a setup choice — made before there was any
+ * music to have an opinion about — reaching into the interpretation of a
+ * performance it could not possibly know anything about.
+ *
+ * There is no arbitration now because there is no second candidate. Tempo is
+ * measured from the recording or it is not known, and "not known" is a real,
+ * representable answer rather than a cue to substitute a number.
+ *
+ * ## Free timing is an answer
+ *
+ * `bpm: null` means the performance had no measurable pulse. Someone humming
+ * rubato, hesitating, or singing four notes has not failed to provide a tempo;
+ * they have provided material without one. The correct response is to leave the
+ * timing exactly as performed, which is what `freeTiming` makes every consumer
+ * do — see `encodingBpm` for the one place a number still has to appear, and
+ * why appearing there does not make it musical truth.
  */
-export type TempoChoice = 'performance' | 'metronome';
-
-/** The tempo a version is built on, and everything needed to describe it honestly. */
 export interface PerformanceTempo {
-  bpm: number;
-  source: TempoSource;
+  /** The measured pulse, or `null` when the performance had no measurable one. */
+  bpm: number | null;
   /**
-   * The estimator's confidence in the *performance* tempo, 0..1.
+   * The estimator's confidence in the measurement, 0..1.
    *
-   * Reported as measured, whichever tempo won. It is never rewritten to justify
-   * the choice, and never replaced by a stand-in figure: a caller that needs to
-   * know how sure the app is gets the real number or nothing.
+   * Reported as measured. Uncertainty about a number is not evidence for a
+   * different number, so a low value here hedges the presentation and never
+   * nominates a substitute.
    */
   confidence: number;
-  /** Whether `confidence` clears `TEMPO_CONFIDENCE_FLOOR` *and* `source` is detected. */
+  /** Whether `confidence` clears `TEMPO_CONFIDENCE_FLOOR`. */
   reliable: boolean;
-  /** `true` when the performance had no measurable pulse at all. */
-  fellBackForLackOfEvidence: boolean;
+  /** `true` exactly when `bpm` is null: the material is timed freely. */
+  freeTiming: boolean;
+}
+
+/**
+ * The BPM written into a MIDI file, a bar ruler or a synthesis grid when the
+ * performance itself has none.
+ *
+ * A MIDI file must state a tempo; a piano roll draws bar lines somewhere. Those
+ * are encoding and drawing requirements, not musical claims, and the guide is
+ * explicit that a technically required tempo value is not automatically the
+ * musical truth. The value is a constant rather than a guess so that nothing
+ * can mistake it for a measurement: it is the same 100 for every free-timed
+ * take, it never varies with the audio, and every note keeps the absolute
+ * second it was performed at regardless of it.
+ *
+ * The protection that makes this safe is `freeTiming` itself: no version
+ * quantizes when it is set, so the grid this number implies is never applied to
+ * anything.
+ */
+export const FREE_TIMING_ENCODING_BPM = 100;
+
+/** The tempo to encode with, which is the measured one whenever there is one. */
+export function encodingBpm(tempo: PerformanceTempo | null): number {
+  return tempo?.bpm ?? FREE_TIMING_ENCODING_BPM;
 }
 
 export interface VersionRecipe {
   id: VersionId;
-  /** The tempo this version is built on. */
-  bpm: number;
-  tempoSource: TempoSource;
+  /** The measured tempo this version is played at; null when freely timed. */
+  bpm: number | null;
   /** See `PerformanceTempo.confidence`. Carried per version so the picker can hedge. */
   tempoConfidence: number;
   /** See `PerformanceTempo.reliable`. */
   tempoReliable: boolean;
+  /** See `PerformanceTempo.freeTiming`. */
+  freeTiming: boolean;
   /** Value for the single Raw-to-Clean control. */
   amount: number;
   gridOverride?: GridDivision;
@@ -100,89 +139,37 @@ export interface VersionRecipe {
 
 export interface TempoResolutionInput {
   rhythm: PerformanceRhythm | null;
-  /** What the user tapped or set on the metronome. */
-  tappedBpm: number;
-  /** Defaults to `'performance'`. Only an explicit user action sets `'metronome'`. */
-  tempoChoice?: TempoChoice;
 }
 
 /**
- * The one rule for which tempo a musical version is built on.
- *
- * ## The rule
+ * What the performance says its tempo is.
  *
  * ```
- * the user explicitly chose the metronome   -> tapped
- * a pulse was measured (at any confidence)  -> detected
- * no pulse could be measured at all         -> tapped, and said so
+ * a pulse was measured (at any confidence)  -> that pulse
+ * no pulse could be measured at all         -> free timing
  * ```
  *
- * ## Why confidence is not in that table
- *
- * It used to be. `reliable` — confidence >= 0.45 — chose between the detected
- * and the tapped tempo, and that is a category error with an audible
- * consequence. A real take measured 88.5 BPM at confidence 0.432 against a
- * metronome set to 103: two-hundredths of a confidence point below the floor,
- * and every musical version, the Musician request and the exported MIDI
- * silently moved onto a 103 grid. The performance was at 88.5 the whole time.
- *
- * Low confidence means *we are unsure what tempo this is*. It is not evidence
- * that some other number is right, and the metronome is not a second opinion —
- * it is a click track the person was asked to follow, which they are free to
- * drift from. So uncertainty is reported as uncertainty (`confidence`,
- * `reliable`) and the measurement is still used.
- *
- * The tapped value keeps every job it actually has: it drives the metronome and
- * count-in, it is shown beside the detected tempo, it powers the half/double
- * disagreement notice, and a user can select it outright. What it no longer
- * does is take over on its own.
+ * `measured`, not `reliable`, decides. A measured-but-uncertain estimate is
+ * still this performance's tempo; the only case where there is no performance
+ * tempo is the one where none could be measured. Confidence is reported beside
+ * the number so the interface can hedge, which is a different job from choosing.
  */
 export function resolveVersionTempo(input: TempoResolutionInput): PerformanceTempo {
-  const { rhythm, tappedBpm, tempoChoice = 'performance' } = input;
+  const { rhythm } = input;
   const confidence = rhythm?.tempo.confidence ?? 0;
 
-  if (tempoChoice === 'metronome') {
-    return {
-      bpm: tappedBpm,
-      source: 'tapped',
-      confidence,
-      reliable: false,
-      fellBackForLackOfEvidence: false,
-    };
-  }
-
-  // `measured`, not `reliable`. See the note above.
   if (rhythm !== null && rhythm.measured) {
-    return {
-      bpm: rhythm.tempo.bpm,
-      source: 'detected',
-      confidence,
-      reliable: rhythm.reliable,
-      fellBackForLackOfEvidence: false,
-    };
+    return { bpm: rhythm.tempo.bpm, confidence, reliable: rhythm.reliable, freeTiming: false };
   }
 
-  // Genuinely nothing to measure — too few onsets, or no take at all. The
-  // tapped tempo is the only number in the room, and the UI says so rather than
-  // implying the app heard it.
-  return {
-    bpm: tappedBpm,
-    source: 'tapped',
-    confidence,
-    reliable: false,
-    fellBackForLackOfEvidence: true,
-  };
+  return { bpm: null, confidence, reliable: false, freeTiming: true };
 }
 
 export interface VersionPlanInput {
   rhythm: PerformanceRhythm;
-  /** What the user tapped. Never discarded, always available as an explicit choice. */
-  tappedBpm: number;
   mode: CreationMode;
   /** The user's cleanup position, which still scales every version. */
   amount: number;
-  /** The user's explicit tempo choice, if they made one. Defaults to the performance. */
-  tempoChoice?: TempoChoice;
   /**
    * Which Musician versions actually have notes on this device.
    *
@@ -201,15 +188,28 @@ export interface VersionPlanInput {
  * what makes the whole thing testable.
  */
 export function planVersions(input: VersionPlanInput): VersionRecipe[] {
-  const { rhythm, tappedBpm, amount, mode, tempoChoice, generated = [] } = input;
+  const { rhythm, amount, mode, generated = [] } = input;
   // One rule, resolved once, applied to every version. Previously each recipe
   // read `rhythm.reliable` through a local ternary, which is how the tempo the
   // Musician was asked for and the tempo the versions played at could differ.
-  const tempo = resolveVersionTempo({ rhythm, tappedBpm, tempoChoice });
+  const tempo = resolveVersionTempo({ rhythm });
   const performanceBpm = tempo.bpm;
-  const tempoSource: TempoSource = tempo.source;
   const tempoConfidence = tempo.confidence;
   const tempoReliable = tempo.reliable;
+  const { freeTiming } = tempo;
+
+  /**
+   * Quantization strength, with free timing able to veto it.
+   *
+   * A take with no measurable pulse has no grid to be pulled onto. Applying one
+   * anyway would mean inventing a tempo and then moving the person's notes to
+   * fit it — the exact substitution this module was rewritten to remove, just
+   * arriving through the encoding tempo instead of through the metronome.
+   * `FREE_TIMING_ENCODING_BPM` still gets written into MIDI files and drawn as
+   * bar lines, because those need a number; it never moves a note, because of
+   * this.
+   */
+  const timing = (strength: number): number => (freeTiming ? 0 : strength);
 
   // How loose the performance actually was decides how much the Teacher has to
   // do. A steady performer barely needs pulling in; applying the same fixed
@@ -242,9 +242,9 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
       // is judged against.
       id: 'unprocessed',
       bpm: performanceBpm,
-      tempoSource,
       tempoConfidence,
       tempoReliable,
+      freeTiming,
       amount: 0,
       paramOverrides: {
         timingStrength: 0,
@@ -258,12 +258,12 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
       // here would start answering a different question.
       id: 'judge' as VersionId,
       bpm: performanceBpm,
-      tempoSource,
       tempoConfidence,
       tempoReliable,
+      freeTiming,
       amount: Math.min(amount, 30),
       paramOverrides: {
-        timingStrength: 0.15,
+        timingStrength: timing(0.15),
         scaleSnapStrength: 0,
         velocitySmoothing: 0.1,
       },
@@ -278,12 +278,12 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
       // an unexplained grid.
       id: 'teacher',
       bpm: performanceBpm,
-      tempoSource,
       tempoConfidence,
       tempoReliable,
+      freeTiming,
       amount: Math.min(amount, 40),
       paramOverrides: {
-        timingStrength: Math.min(0.35, teacherTiming * 0.4),
+        timingStrength: timing(Math.min(0.35, teacherTiming * 0.4)),
         scaleSnapStrength: 0,
         velocitySmoothing: 0.35,
       },
@@ -302,9 +302,9 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
     ...MUSICIAN_RECIPE_IDS.filter((id) => generated.includes(id)).map<VersionRecipe>((id) => ({
       id,
       bpm: performanceBpm,
-      tempoSource,
       tempoConfidence,
       tempoReliable,
+      freeTiming,
       amount: 0,
       paramOverrides: {
         timingStrength: 0,
@@ -336,43 +336,6 @@ export function defaultVersion(
   // is still recognisably the take. An imported file gets there too, and now
   // arrives with every one of its events intact.
   return mode === 'rhythm' ? 'teacher' : 'judge';
-}
-
-/**
- * Whether the detected and tapped tempos disagree enough to be worth saying.
- *
- * A half- or double-time relationship is the most common and the most
- * interesting: it usually means the user tapped eighths while singing quarters,
- * and telling them that is more useful than silently picking one.
- */
-export interface TempoDisagreement {
-  kind: 'none' | 'half-or-double' | 'different';
-  detectedBpm: number;
-  tappedBpm: number;
-  /**
-   * Whether the detected side of the comparison is certain.
-   *
-   * Carried so the notice can hedge instead of disappearing. Suppressing the
-   * whole comparison below the confidence floor hid the disagreement in exactly
-   * the case where the app had quietly switched to the tapped value — the user
-   * saw neither the substitution nor a reason to doubt it.
-   */
-  detectedIsReliable: boolean;
-}
-
-export function compareTempos(rhythm: PerformanceRhythm, tappedBpm: number): TempoDisagreement {
-  const detected = rhythm.tempo.bpm;
-  const base = { detectedBpm: detected, tappedBpm, detectedIsReliable: rhythm.reliable };
-  // Gated on whether a pulse was measured, not on how sure we are of it. An
-  // uncertain 88 against a tapped 103 is still worth saying.
-  if (!rhythm.measured) return { ...base, kind: 'none' };
-
-  const ratio = detected / tappedBpm;
-  if (Math.abs(ratio - 1) < 0.06) return { ...base, kind: 'none' };
-  if (Math.abs(ratio - 0.5) < 0.08 || Math.abs(ratio - 2) < 0.12) {
-    return { ...base, kind: 'half-or-double' };
-  }
-  return { ...base, kind: 'different' };
 }
 
 function clamp01(value: number): number {

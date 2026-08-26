@@ -13,12 +13,12 @@ import { RecordStage } from '@/features/recording/RecordStage';
 import { SourceInput } from '@/features/recording/SourceInput';
 import { ReviewStage } from '@/features/review/ReviewStage';
 import { canExport, hasResult, isRecordingPhase, stageOf } from '@/features/state/machine';
-import { TempoPanel } from '@/features/tempo/TempoPanel';
 import { useCoreSupport } from '@/features/shell/useCapabilities';
 import { warmModel } from '@/features/transcription/client';
 import { ProcessStage } from '@/features/transcription/ProcessStage';
 import { ResonantBody } from '@/features/visual/ResonantBody';
 import { useLocale } from '@/i18n/provider';
+import { encodingBpm } from '@rhythm-extraction';
 import { useCreationFlow, MAX_RECORDING_SEC } from './useCreationFlow';
 import styles from './CreationPage.module.css';
 
@@ -30,13 +30,17 @@ export interface CreationPageProps {
 /**
  * The creation screen.
  *
- * The composition follows the PRD's sequence exactly, top to bottom, with no
- * hidden mandatory screens (D-0201). Stages appear as they become relevant and
- * earlier ones stay visible but recede - a user who wants to retap their tempo
- * mid-review can, without navigating anywhere.
+ * Stages appear as they become relevant and earlier ones stay visible but
+ * recede, with no hidden mandatory screens (D-0201).
  *
- * Only one thing is ever the focal object (design invariant 2): the tap pad
- * during setup, the record control during a take, the sketch during review.
+ * The first screen is the shortest it can be: record, or bring a file. There
+ * used to be a setup step above it — tempo, meter, a metronome, a tap pad — and
+ * it was not merely an extra click. It asked the user to state a fact about
+ * music that did not exist yet, and then let that statement reach the
+ * interpretation of the performance they went on to give.
+ *
+ * Only one thing is ever the focal object (design invariant 2): the record
+ * control before and during a take, the sketch during review.
  */
 export function CreationPage({ publishEnabled }: CreationPageProps) {
   const { locale, t } = useLocale();
@@ -47,7 +51,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
     versions,
     activeVersion,
     lesson,
-    tempoDisagreement,
     performanceTempo,
     musicalDurationSec,
     musician,
@@ -107,17 +110,17 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
     );
   }
 
-  const beatSeconds = state.bpm !== null ? 60 / state.bpm : 0.6;
   /**
-   * The tempo of the music, for everything downstream of the review screen.
+   * The tempo to write down, for everything downstream of the review screen.
    *
-   * `state.bpm` is the metronome: it belongs to the recording session, and it
-   * still drives the count-in, the click and the tempo controls above. What the
-   * piano roll rules bar lines at, what the exported MIDI is stamped with and
-   * what the published sketch reports is the tempo the version is actually
-   * built on — which is the performance's own, unless the user asked otherwise.
+   * The piano roll's bar lines, the exported MIDI's stamp and the published
+   * metadata all need a number. It is the performance's own pulse whenever
+   * there was one; for a freely-timed take it is the encoding constant, and
+   * `freeTiming` is carried alongside so the interface can say so rather than
+   * present the constant as something the app heard.
    */
-  const musicalBpm = activeVersion?.bpm ?? performanceTempo?.bpm ?? state.bpm ?? 100;
+  const musicalBpm = activeVersion?.bpm ?? encodingBpm(performanceTempo);
+  const freeTiming = activeVersion?.freeTiming ?? performanceTempo.freeTiming;
   // Register 0..1 from the current take's pitch range, used only to bias the
   // 3D object vertically. Falls back to the middle when there is nothing yet.
   const register =
@@ -157,42 +160,31 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
           />
         ) : null}
 
-        {/* --- Setup ------------------------------------------------------ */}
-        {!recording && !showReview ? (
-          <section aria-labelledby="setup-heading">
+        {/* --- Start ------------------------------------------------------ */}
+        {!recording && machineState !== 'armed' && !showReview ? (
+          <section aria-labelledby="start-heading">
             <Stack gap={5}>
-              <Row gap={3} justify="between">
-                <StageLabel>{t.landing.steps.tempo.title}</StageLabel>
-              </Row>
-
-              <Raised as="section" aria-labelledby="setup-heading">
-                <Text variant="heading" as="h2" id="setup-heading" className={styles.srHeading}>
-                  {t.tempo.label}
+              <Raised as="section">
+                <Text variant="heading" as="h2" id="start-heading" className={styles.srHeading}>
+                  {t.landing.steps.start.title}
                 </Text>
-                <TempoPanel
-                  bpm={state.bpm}
-                  tapCount={state.tapCount}
-                  meter={state.meter}
-                  metronomeMuted={state.metronomeMuted}
-                  beat={state.beat}
-                  onTap={actions.tap}
-                  onBpmChange={actions.setBpm}
-                  onMeterChange={actions.setMeter}
-                  onToggleMetronome={actions.toggleMetronome}
-                  onWarm={warmModel}
-                />
-              </Raised>
-
-              {state.bpm !== null ? (
                 <Row justify="center">
-                  <Button kind="accent" size="large" onClick={() => void actions.arm()}>
+                  <Button
+                    kind="accent"
+                    size="large"
+                    onClick={() => void actions.arm()}
+                    // Warming the model on hover costs nothing if the user never
+                    // presses, and buys back most of the load if they do. It used
+                    // to happen while they set a tempo; there is no such pause
+                    // left to hide it in.
+                    onPointerEnter={() => void warmModel()}
+                  >
                     {t.landing.start}
                   </Button>
                 </Row>
-              ) : null}
+              </Raised>
 
               <SourceInput
-                tempoReady={state.bpm !== null}
                 onUploadAudio={actions.uploadAudio}
                 onUploadMidi={actions.uploadMidi}
               />
@@ -207,13 +199,9 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             level={state.level?.rms ?? 0}
             register={register}
             settled={0}
-            beatIndex={state.beat?.index ?? 0}
-            beatSeconds={beatSeconds}
           >
             <RecordStage
-              phase={machineState as 'armed' | 'countdown' | 'recording'}
-              beat={state.beat}
-              beatsPerBar={state.meter.beatsPerBar}
+              phase={machineState as 'armed' | 'recording'}
               level={state.level}
               elapsedSec={state.elapsedSec}
               maxSec={MAX_RECORDING_SEC}
@@ -251,7 +239,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             versions={versions}
             activeVersionId={activeVersion?.id ?? null}
             rhythm={rhythm}
-            tempoDisagreement={tempoDisagreement}
             judge={state.judge}
             lesson={lesson}
             onVersionChange={actions.setVersion}
@@ -275,9 +262,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             melodyQuality={state.melodyQuality}
             mode={state.mode}
             bpm={musicalBpm}
-            tappedBpm={state.bpm}
-            tempoChoice={state.tempoChoice}
-            onTempoChoiceChange={actions.setTempoChoice}
+            freeTiming={freeTiming}
             onCorrectRoute={(type) => void actions.correctInputRoute(type)}
             sourceKind={state.source?.kind}
             meter={state.meter}

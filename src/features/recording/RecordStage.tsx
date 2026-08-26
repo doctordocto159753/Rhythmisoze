@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { BeatInfo, LevelSnapshot } from '@audio-core';
+import type { LevelSnapshot } from '@audio-core';
 import { Button } from '@/components/Button';
 import { Stack } from '@/components/Layout';
 import { LiveStatus, Text, VisuallyHidden } from '@/components/Text';
@@ -10,9 +10,8 @@ import { useMessages } from '@/i18n/provider';
 import styles from './RecordStage.module.css';
 
 export interface RecordStageProps {
-  phase: 'armed' | 'countdown' | 'recording';
-  beat: BeatInfo | null;
-  beatsPerBar: number;
+  /** `armed` is the brief moment between granting the microphone and capture. */
+  phase: 'armed' | 'recording';
   level: LevelSnapshot | null;
   elapsedSec: number;
   maxSec: number;
@@ -24,16 +23,17 @@ export interface RecordStageProps {
 /**
  * US-0206 / US-0207 - the recording lifecycle and its live feedback.
  *
- * Three things every state must show, because the accessibility skill requires
+ * Two things every state must show, because the accessibility skill requires
  * each of them not to be sound-only or canvas-only:
  *  - that the microphone is receiving (level, and a text status);
- *  - where the count-in is (a number, not only a click);
  *  - how much time is left (a figure, not only a bar).
+ *
+ * There used to be a third — where the count-in had got to. Recording now
+ * begins the moment the microphone opens, so there is no bar to wait through
+ * and nothing to count against.
  */
 export function RecordStage({
   phase,
-  beat,
-  beatsPerBar,
   level,
   elapsedSec,
   maxSec,
@@ -56,9 +56,6 @@ export function RecordStage({
   // ten seconds is roughly a musical phrase.
   const nearLimit = remaining <= 10;
 
-  const countInBeat =
-    beat !== null && beat.isCountIn ? beatsPerBar - (beat.index % beatsPerBar) : null;
-
   const guidance =
     level === null
       ? null
@@ -70,19 +67,6 @@ export function RecordStage({
 
   return (
     <div className={styles.stage}>
-      {phase === 'countdown' ? (
-        <div className={styles.countIn}>
-          <span className={styles.countNumber} aria-hidden="true">
-            {countInBeat ?? beatsPerBar}
-          </span>
-          <span className={styles.countLabel}>{t.record.countdown}</span>
-          {/* The count is announced, not only clicked and drawn. */}
-          <LiveStatus>
-            {beat ? t.a11y.beat(beat.beatInBar + 1, beatsPerBar) : t.record.countdown}
-          </LiveStatus>
-        </div>
-      ) : null}
-
       {phase === 'armed' ? (
         <Stack gap={4} align="center">
           <button
@@ -94,8 +78,9 @@ export function RecordStage({
             <span className={styles.recordGlyph} aria-hidden="true" />
           </button>
           <Text variant="label" as="p">
-            {t.record.arm}
+            {t.record.opening}
           </Text>
+          <LiveStatus>{t.record.opening}</LiveStatus>
         </Stack>
       ) : null}
 

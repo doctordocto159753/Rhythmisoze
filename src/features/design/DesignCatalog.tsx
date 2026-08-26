@@ -87,7 +87,7 @@ export function DesignCatalog() {
             <Text variant="title">Title — {t.review.title}</Text>
             <Text variant="heading">Heading — {t.instruments.title}</Text>
             <Text variant="body">Body — {t.app.description}</Text>
-            <Text variant="label">Label — {t.tempo.label}</Text>
+            <Text variant="label">Label — {t.review.play}</Text>
             <Text variant="micro">Micro — {t.exportPanel.noWatermark}</Text>
             <Row gap={4}>
               <Readout value={128} unit="BPM" />
@@ -167,35 +167,16 @@ export function DesignCatalog() {
               valueText="disabled"
               onChange={() => undefined}
             />
-            <Choice<'3' | '4' | '6'>
-              legend={t.tempo.meter}
-              compact
-              value="4"
-              options={[
-                { value: '3', title: '3' },
-                { value: '4', title: '4' },
-                { value: '6', title: '6' },
-              ]}
-              onChange={() => undefined}
-            />
           </Stack>
         </Section>
 
         <Section title="Recording states">
           <Stack gap={5}>
-            {(['armed', 'countdown', 'recording'] as const).map((phase) => (
+            {(['armed', 'recording'] as const).map((phase) => (
               <Well key={phase} padding="tight">
                 <StageLabel>{phase}</StageLabel>
                 <RecordStage
                   phase={phase}
-                  beat={{
-                    index: 2,
-                    beatInBar: 2,
-                    isDownbeat: false,
-                    isCountIn: phase === 'countdown',
-                    timeSec: 0,
-                  }}
-                  beatsPerBar={4}
                   level={{
                     rms: 0.22,
                     peak: 0.5,

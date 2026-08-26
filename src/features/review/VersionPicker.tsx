@@ -2,9 +2,7 @@
 
 import type { CreationMode, JudgeVerdict, SourceKind } from '@contracts';
 import type { TeacherResult } from '@music-teacher';
-import type { PerformanceRhythm, TempoChoice, VersionId, VersionRecipe } from '@rhythm-extraction';
-import type { TempoDisagreement } from '@rhythm-extraction';
-import { Button } from '@/components/Button';
+import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
 import { Row, Stack, Well } from '@/components/Layout';
 import { Bdi, Text } from '@/components/Text';
 import { useMessages } from '@/i18n/provider';
@@ -14,7 +12,6 @@ export interface VersionPickerProps {
   versions: readonly VersionRecipe[];
   activeId: VersionId | null;
   rhythm: PerformanceRhythm | null;
-  disagreement: TempoDisagreement | null;
   /**
    * Where the material came from.
    *
@@ -24,11 +21,6 @@ export interface VersionPickerProps {
   sourceKind: SourceKind | undefined;
   /** Rhythm names its two stages differently; see `rhythmNames`. */
   mode: CreationMode;
-  /** What the user tapped. Offered as an alternative, never applied on its own. */
-  tappedBpm: number | null;
-  /** Which tempo the versions are built on right now. */
-  tempoChoice: TempoChoice;
-  onTempoChoiceChange(choice: TempoChoice): void;
   /** The Judge's verdict, shown against the reading it produced. */
   judge: JudgeVerdict | null;
   /** The teacher's suggestions, shown against the reading they apply to. */
@@ -48,20 +40,18 @@ export interface VersionPickerProps {
  *
  *  - **The original is first and is never framed as the raw/broken one.** It is
  *    "As performed", not "unprocessed". It is a legitimate choice.
- *  - **Where each tempo came from is stated.** A version built on the detected
- *    pulse says so; one built on the tapped value says that instead. The app
- *    must never imply it heard a tempo it did not.
+ *  - **A tempo is only reported when one was heard.** There is no longer a
+ *    second candidate to have come from somewhere else, so the only two honest
+ *    statements left are "heard at N" — hedged when the estimate is uncertain —
+ *    and "timed freely", which is what a take with no measurable pulse gets.
+ *    The app must never imply it heard a tempo it did not.
  */
 export function VersionPicker({
   versions,
   activeId,
   rhythm,
-  disagreement,
   sourceKind,
   mode,
-  tappedBpm,
-  tempoChoice,
-  onTempoChoiceChange,
   judge,
   lesson,
   onSelect,
@@ -83,29 +73,9 @@ export function VersionPicker({
     return t.versions.hints[id];
   };
 
-  const notice =
-    disagreement && disagreement.kind === 'half-or-double'
-      ? t.versions.halfOrDouble(Math.round(disagreement.detectedBpm), Math.round(disagreement.tappedBpm))
-      : disagreement && disagreement.kind === 'different'
-        ? t.versions.different(Math.round(disagreement.detectedBpm), Math.round(disagreement.tappedBpm))
-        : // Only when there was genuinely no pulse to hear. An uncertain reading
-          // is still a reading, and saying "no tempo was heard" over one would
-          // misdescribe both what happened and what the versions are built on.
-          rhythm !== null && !rhythm.measured
-          ? t.versions.tempoNotHeard
-          : null;
-
-  /**
-   * The metronome value, offered rather than imposed.
-   *
-   * The app builds every version on the performance's own pulse. Someone who
-   * tapped 103 deliberately and drifted while humming may genuinely want 103
-   * back, and this is how they say so — an explicit choice with a visible
-   * effect, which is the only form in which the tapped tempo is allowed to
-   * become the musical tempo of a take that had a pulse of its own.
-   */
-  const canChooseMetronome = tappedBpm !== null && rhythm !== null && rhythm.measured;
-  const detectedBpm = rhythm !== null ? Math.round(rhythm.tempo.bpm) : null;
+  // Said once, above the list, when there was genuinely no pulse to hear. An
+  // uncertain reading is still a reading, so this is not shown over one.
+  const notice = rhythm !== null && !rhythm.measured ? t.versions.tempoNotHeard : null;
 
   return (
     <Well as="section" aria-labelledby="versions-heading">
@@ -151,16 +121,19 @@ export function VersionPicker({
                         : t.versions.teacherSuggestions(lesson.edits.length)}
                     </span>
                   ) : null}
-                  {/* Tempo and its provenance, isolated so the Latin BPM value
-                      cannot reorder the Persian sentence around it. */}
-                  {/* Three states, because there are three: heard clearly,
-                      heard but not certainly, and taken from the metronome.
-                      Collapsing the middle one into either neighbour is how the
-                      app either overclaims or hides which tempo it used. */}
+                  {/* Tempo, isolated so the Latin BPM value cannot reorder the
+                      Persian sentence around it.
+
+                      Three states, because there are three: heard clearly,
+                      heard but not certainly, and not heard at all. Collapsing
+                      the middle one into either neighbour is how the app either
+                      overclaims or hides how sure it is; collapsing the third
+                      into the first is how a constant needed for encoding gets
+                      presented as a measurement. */}
                   <span className={styles.tempo}>
                     <Bdi dir="auto">
-                      {version.tempoSource !== 'detected'
-                        ? t.versions.tappedTempo(Math.round(version.bpm))
+                      {version.bpm === null
+                        ? t.versions.freeTiming
                         : version.tempoReliable
                           ? t.versions.heardTempo(Math.round(version.bpm))
                           : t.versions.heardTempoUncertain(Math.round(version.bpm))}
@@ -188,20 +161,6 @@ export function VersionPicker({
             <Text variant="micro" muted>
               {notice}
             </Text>
-          </Row>
-        ) : null}
-
-        {canChooseMetronome && tappedBpm !== null && detectedBpm !== null ? (
-          <Row gap={2}>
-            {tempoChoice === 'metronome' ? (
-              <Button kind="quiet" size="small" onClick={() => onTempoChoiceChange('performance')}>
-                {t.versions.usePerformanceTempo(detectedBpm)}
-              </Button>
-            ) : (
-              <Button kind="quiet" size="small" onClick={() => onTempoChoiceChange('metronome')}>
-                {t.versions.useTappedTempo(Math.round(tappedBpm))}
-              </Button>
-            )}
           </Row>
         ) : null}
       </Stack>

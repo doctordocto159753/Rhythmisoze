@@ -40,20 +40,8 @@ const RESULT_TIMEOUT_MS =
     ? configuredResultTimeout
     : 60_000;
 
-/** Same technique as musician.spec.ts; duplicated to keep specs standalone. */
-async function setBpm(page: Page, bpm: number) {
-  const slider = page.getByRole('slider', { name: /Beats per minute|ضرب در دقیقه/i });
-  await slider.evaluate((element, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(element, String(value));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  }, bpm);
-}
-
 async function reachReview(page: Page) {
   await page.goto('/en');
-  await setBpm(page, 120);
   await page
     .getByLabel('Choose a recording to upload')
     .setInputFiles('tests/fixtures/audio/hum-melody.wav');

@@ -36,10 +36,7 @@ describe('MIDI source import', () => {
 
   it('lets MIDI enter review without pretending it was a restored sketch', () => {
     expect(run(['MIDI_IMPORTED'], INITIAL_CONTEXT).state).toBe('review');
-    expect(run(['TEMPO_SET', 'MIDI_IMPORTED'], INITIAL_CONTEXT).state).toBe('review');
-    expect(run(['TEMPO_SET', 'AUDIO_IMPORTED', 'PROCESS'], INITIAL_CONTEXT).state).toBe(
-      'processing',
-    );
+    expect(run(['AUDIO_IMPORTED', 'PROCESS'], INITIAL_CONTEXT).state).toBe('processing');
   });
 });
 

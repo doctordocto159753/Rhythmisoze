@@ -47,33 +47,17 @@ export const fa: Messages = {
     start: 'شروع یک اسکچ',
     howItWorks: 'چطور کار می‌کند',
     steps: {
-      tempo: { title: 'ضرب را تنظیم کن', body: 'با همان سرعتی که در ذهن داری تپ کن.' },
-      record: { title: 'ضبط کن', body: 'یک میزان شمارش می‌شنوی، بعد تا شصت ثانیه وقت داری.' },
+      start: { title: 'ضبط کن یا فایل بده', body: 'زمزمه، آواز، بیت‌باکس یا یک فایل. بدون تنظیم اولیه.' },
+      record: { title: 'ضبط کن', body: 'تا شصت ثانیه، با هر سرعتی که ایده می‌خواهد.' },
       hear: { title: 'گوش کن', body: 'یک ساز انتخاب کن و میزان تمیزی را تنظیم کن.' },
     },
-  },
-
-  tempo: {
-    label: 'سرعت',
-    tapPrompt: 'چهار بار با سرعت خودت تپ کن',
-    tapMore: (remaining: number) => `${remaining} تای دیگر`,
-    tapAgain: 'دوباره تپ کن',
-    unit: 'BPM',
-    sliderLabel: 'ضرب در دقیقه',
-    notSet: 'هنوز تنظیم نشده',
-    metronome: 'مترونوم',
-    metronomeOn: 'مترونوم روشن',
-    metronomeOff: 'مترونوم خاموش',
-    meter: 'ضرب در هر میزان',
-    why: 'صدای مترونوم زمان‌بندی‌ات را ثابت نگه می‌دارد. همه‌ی مراحل بعدی به آن وابسته‌اند.',
   },
 
   sourceInput: {
     title: 'یا با یک فایل شروع کن',
     audio: 'آپلود یک ضبط',
     audioInputLabel: 'انتخاب فایل صوتی برای آپلود',
-    audioNeedsTempo: 'برای تنظیم سرعت، اسلایدر را حرکت بده یا چهار بار تپ کن.',
-    audioReadyHint: 'با سرعتی که بالا تنظیم کردی پردازش می‌شود.',
+    audioReadyHint: 'هر زمزمه، خط آوازی، ریتم یا اجرای ساز.',
     midi: 'وارد کردن MIDI',
     midiInputLabel: 'انتخاب فایل MIDI برای وارد کردن',
     midiHint: 'سرعت داخل فایل همراه نت‌ها وارد می‌شود.',
@@ -82,8 +66,7 @@ export const fa: Messages = {
 
   record: {
     arm: 'ضبط',
-    countdown: 'آماده باش',
-    countIn: (beat: number) => `${beat}`,
+    opening: 'در حال باز کردن میکروفن',
     recording: 'در حال ضبط',
     stop: 'توقف',
     cancel: 'انصراف',
@@ -158,14 +141,8 @@ export const fa: Messages = {
     // حالت میانی: ضرب شنیده شده اما با اطمینان کامل نه. همان را به کار می‌بریم،
     // چون اجرا اجراست، ولی وانمود نمی‌کنیم که مطمئنیم.
     heardTempoUncertain: (bpm: number) => `شنیده‌شده حدود ${bpm} BPM`,
-    tappedTempo: (bpm: number) => `${bpm} BPM خودت`,
-    tempoNotHeard: 'در این اجرا هیچ ضربی شنیده نشد، پس سرعتی که تپ کردی استفاده می‌شود.',
-    useTappedTempo: (bpm: number) => `به‌جایش از ${bpm} BPM خودم استفاده کن`,
-    usePerformanceTempo: (bpm: number) => `برگرد به ${bpm} BPM شنیده‌شده`,
-    halfOrDouble: (heard: number, tapped: number) =>
-      `تو ${tapped} BPM تپ کردی و این شبیه ${heard} BPM است — احتمالاً دو برابر تند یا دو برابر کند شمرده‌ای.`,
-    different: (heard: number, tapped: number) =>
-      `تو ${tapped} BPM تپ کردی؛ این شبیه ${heard} BPM است.`,
+    freeTiming: 'زمان‌بندی آزاد',
+    tempoNotHeard: 'در این اجرا ضرب ثابتی نبود، پس زمان‌بندی دقیقاً همان‌طور که اجرا کردی نگه داشته می‌شود.',
 
     /**
      * بخش نوازنده.
@@ -252,12 +229,11 @@ export const fa: Messages = {
     analysis: {
       range: 'دامنه',
       detectedTempo: 'سرعت شنیده‌شده',
-      yourTempo: 'سرعت تو',
+      yourTempo: 'نوشته‌شده روی',
       octaveFixes: 'پرش‌های اکتاوی حذف‌شده',
       snapped: 'نت‌های منتقل‌شده به گام',
       merged: 'تکه‌های ادغام‌شده',
       stepwise: 'حرکت پله‌ای',
-      tempoMismatch: 'این با سرعتی که تپ کردی فرق دارد. اگر نتیجه درست حس نمی‌شود، دوباره تپ کن.',
       melodyConfidence: 'اطمینان ملودی',
     },
     empty: 'در این ضبط نتی پیدا نشد.',

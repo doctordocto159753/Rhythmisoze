@@ -18,7 +18,7 @@
  * | radial swell | input RMS            | 1.00 - 1.22        | 0.12 lerp     |
  * | vertical bias| detected register    | -0.25 - +0.25      | 0.06 lerp     |
  * | surface calm | retouch/settling     | noise 1.0 - 0.15   | 0.05 lerp     |
- * | ring phase   | metronome beat index | one pulse per beat | none (locked) |
+ * | ring phase   | the performer's own attacks | one pulse per attack | none (locked) |
  *
  * Every one of them is bounded, so a shout cannot make the object cover a
  * control, and every one is smoothed, so a transient cannot make it flicker.
@@ -49,11 +49,27 @@ export interface SceneProps {
   register: number;
   /** 0 while raw, 1 once settled. */
   settled: number;
-  /** Increments once per beat; drives the ring. */
-  beatIndex: number;
-  /** Seconds per beat, so the ring's decay is musical rather than arbitrary. */
-  beatSeconds: number;
 }
+
+/**
+ * How long a ring lives, in seconds.
+ *
+ * It used to be one beat of the metronome. With the click gone there is no beat
+ * to be one of, and the ring is now triggered by the performer's own attacks —
+ * so its life is a fixed, short visual decay rather than a musical duration
+ * that would have to be invented from a tempo nobody stated.
+ */
+const RING_LIFE_SEC = 0.55;
+
+/**
+ * How far above the running level an input has to jump to read as an attack.
+ *
+ * The ring exists to acknowledge that something was *played*, which the level
+ * alone cannot say: a held note is loud continuously. Comparing against a slow
+ * envelope of the level makes the trigger a rise rather than a value, so a
+ * steady hum pulses once at its start instead of shimmering throughout.
+ */
+const ATTACK_RISE = 0.035;
 
 export default function Scene(props: SceneProps) {
   const detail = props.tier === 'full' ? 3 : 1;
@@ -83,8 +99,7 @@ function Body({
   level,
   register,
   settled,
-  beatIndex,
-  beatSeconds,
+
   detail,
   tier,
 }: SceneProps & { detail: number }) {
@@ -93,7 +108,8 @@ function Body({
   const { invalidate } = useThree();
 
   const smoothed = useRef({ swell: 1, bias: 0, calm: 0, ringAge: Number.POSITIVE_INFINITY });
-  const lastBeat = useRef(beatIndex);
+  /** Slow envelope of the input level, so the ring triggers on rises. */
+  const levelFloor = useRef(0);
 
   // Geometry and material are created once and reused. Re-creating either on a
   // prop change is the usual cause of a stutter in an otherwise cheap scene.
@@ -128,14 +144,10 @@ function Body({
     body.rotation.y += delta * (0.28 - smoothed.current.calm * 0.22);
 
     if (ring.current) {
-      if (beatIndex !== lastBeat.current) {
-        lastBeat.current = beatIndex;
-        smoothed.current.ringAge = 0;
-      }
+      if (level - levelFloor.current > ATTACK_RISE) smoothed.current.ringAge = 0;
+      levelFloor.current = MathUtils.lerp(levelFloor.current, level, level > levelFloor.current ? 0.5 : 0.04);
       smoothed.current.ringAge += delta;
-      // The ring's life is exactly one beat: its decay is musical time, not a
-      // number chosen to look nice.
-      const age = MathUtils.clamp(smoothed.current.ringAge / Math.max(0.1, beatSeconds), 0, 1);
+      const age = MathUtils.clamp(smoothed.current.ringAge / RING_LIFE_SEC, 0, 1);
       ring.current.scale.setScalar(1.15 + age * 0.5);
       const ringMaterial = ring.current.material as { opacity: number; transparent: boolean };
       ringMaterial.transparent = true;
@@ -147,7 +159,7 @@ function Body({
       Math.abs(previous.swell - smoothed.current.swell) > 0.0005 ||
       Math.abs(previous.bias - smoothed.current.bias) > 0.0005 ||
       Math.abs(previous.calm - smoothed.current.calm) > 0.0005 ||
-      smoothed.current.ringAge < beatSeconds;
+      smoothed.current.ringAge < RING_LIFE_SEC;
     if (moving) invalidate();
   });
 

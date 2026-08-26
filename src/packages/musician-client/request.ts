@@ -18,9 +18,11 @@
  *     grid the person never sang. The confidence was then reported as a
  *     hard-coded 0.4, which described neither number.
  *
- *     This function does not decide the tempo — `resolveVersionTempo` does — and
- *     deliberately has no access to the tapped value, so it cannot reintroduce
- *     the substitution even by accident.
+ *     There is no metronome left to substitute, and this function still does
+ *     not decide the tempo — `resolveVersionTempo` does. What it receives for a
+ *     freely-timed take is the encoding constant paired with a confidence of
+ *     zero: the service needs a number to condition on, and zero is the honest
+ *     statement of how much that number means.
  */
 
 import { notesForVersion, type VersionNoteSources } from '@versions';

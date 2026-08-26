@@ -176,6 +176,7 @@ export async function saveSketch(sketch: LocalSketch): Promise<SaveResult> {
     title: sketch.title,
     locale: sketch.locale,
     bpm: sketch.bpm,
+    freeTiming: sketch.freeTiming,
     meter: sketch.meter,
     mode: sketch.mode,
     instrumentId: sketch.instrumentId,

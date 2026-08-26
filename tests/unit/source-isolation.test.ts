@@ -102,7 +102,7 @@ function apply(state: FlowState, ...actions: Action[]): FlowState {
 
 /** A flow that has finished one audio take and has a Judge verdict for it. */
 function afterAudioTake(): FlowState {
-  return apply(initialState('sketch-a'), { type: 'setBpm', bpm: 96 }, {
+  return apply(initialState('sketch-a'), {
     type: 'transcribed',
     notes: [note(60, 0), note(62, 0.5), note(64, 1)],
     judge: STALE_JUDGE,
@@ -297,7 +297,6 @@ describe('what a new source does not touch', () => {
       { type: 'setMaster', master: { volume: 0.5 } },
       { type: 'setTitle', title: 'My sketch' },
       { type: 'setRetouch', amount: 80 },
-      { type: 'toggleMetronome' },
     );
     const after = apply(before, importMidiAction(IMPORTED_NOTES, 'b.mid'));
 
@@ -306,7 +305,6 @@ describe('what a new source does not touch', () => {
     expect(after.master.volume).toBe(0.5);
     expect(after.title).toBe('My sketch');
     expect(after.retouchAmount).toBe(80);
-    expect(after.metronomeMuted).toBe(true);
   });
 
   it('keeps a recorded take’s instrument, because nothing about it changed', () => {

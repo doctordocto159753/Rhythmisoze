@@ -174,27 +174,9 @@ async function fakeMusician(page: Page, options: FakeOptions = {}) {
   });
 }
 
-/**
- * Same technique as source-import.spec.ts.
- *
- * `fill()` does not drive a range input the way React expects: the value has to
- * be set through the prototype setter so React's synthetic change handler sees
- * it, otherwise the app never learns the tempo moved.
- */
-async function setBpm(page: Page, bpm: number) {
-  const slider = page.getByRole('slider', { name: /Beats per minute|ضرب در دقیقه/i });
-  await slider.evaluate((element, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(element, String(value));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  }, bpm);
-}
-
 /** Gets to the review screen with a Teacher version present. */
 async function reachReview(page: Page) {
   await page.goto('/en');
-  await setBpm(page, 120);
   await page
     .getByLabel('Choose a recording to upload')
     .setInputFiles('tests/fixtures/audio/hum-melody.wav');
@@ -421,7 +403,6 @@ test.describe('accessibility', () => {
     await page.goto('/fa');
     await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
 
-    await setBpm(page, 120);
     await page
       .getByLabel('انتخاب فایل صوتی برای آپلود')
       .setInputFiles('tests/fixtures/audio/hum-melody.wav');

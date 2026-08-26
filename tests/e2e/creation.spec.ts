@@ -111,46 +111,39 @@ test.describe('landing and setup', () => {
   });
 });
 
-test.describe('tempo', () => {
-  test('four taps produce a BPM', async ({ page }) => {
+/**
+ * The start screen, and what is no longer on it.
+ *
+ * These tests are the inverse of the ones they replace. There used to be a tap
+ * pad, a BPM slider, a meter selector and a metronome toggle, and recording was
+ * illegal until one of them had been used. Every assertion here says that none
+ * of that is reachable and that the product opens on the thing it is for.
+ */
+test.describe('the start screen', () => {
+  test('offers recording immediately, with nothing to configure first', async ({ page }) => {
     await gotoSupportedCreation(page);
-    const pad = page.getByRole('button', { name: /Tap four times/i });
-    await expect(pad).toBeVisible();
+    await expect(page.getByRole('button', { name: /Start a sketch/i })).toBeEnabled();
+  });
 
-    // ~500 ms apart is 120 BPM. The exact value depends on real timing, so the
-    // assertion is that a tempo appeared and is inside the PRD's range.
-    for (let i = 0; i < 5; i += 1) {
-      await pad.click();
-      await page.waitForTimeout(500);
+  test('offers an upload immediately too', async ({ page }) => {
+    // This was disabled until a tempo existed, and said so in its hint.
+    await gotoSupportedCreation(page);
+    await expect(page.getByLabel(/Choose a recording to upload/i)).toBeEnabled();
+    await expect(page.getByLabel(/Choose a MIDI file to import/i)).toBeEnabled();
+  });
+
+  test('has no tempo control of any kind', async ({ page }) => {
+    await gotoSupportedCreation(page);
+    await expect(page.getByRole('slider')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Tap/i })).toHaveCount(0);
+    await expect(page.getByText(/BPM/i)).toHaveCount(0);
+  });
+
+  test('does not ask the user to understand meter', async ({ page }) => {
+    await gotoSupportedCreation(page);
+    for (const beats of ['3', '4', '6']) {
+      await expect(page.getByRole('radio', { name: beats, exact: true })).toHaveCount(0);
     }
-
-    const slider = page.getByRole('slider', { name: /Beats per minute/i });
-    const value = Number(await slider.inputValue());
-    expect(value).toBeGreaterThanOrEqual(40);
-    expect(value).toBeLessThanOrEqual(200);
-  });
-
-  test('the BPM slider is keyboard operable', async ({ page }) => {
-    await gotoSupportedCreation(page);
-    const slider = page.getByRole('slider', { name: /Beats per minute/i });
-    await slider.focus();
-    const before = Number(await slider.inputValue());
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('ArrowRight');
-    expect(Number(await slider.inputValue())).toBeGreaterThan(before);
-  });
-
-  test('recording cannot start before a tempo exists', async ({ page }) => {
-    await gotoSupportedCreation(page);
-    // The state machine forbids ARM from `idle`; the UI reflects that by not
-    // offering the action at all.
-    await expect(page.getByRole('button', { name: /Start a sketch/i })).toHaveCount(0);
-  });
-
-  test('the meter can be changed', async ({ page }) => {
-    await gotoSupportedCreation(page);
-    await page.getByRole('radio', { name: '3', exact: true }).check();
-    await expect(page.getByRole('radio', { name: '3', exact: true })).toBeChecked();
   });
 });
 

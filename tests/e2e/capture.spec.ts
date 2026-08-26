@@ -30,30 +30,20 @@ import { expect, test } from '@playwright/test';
  * roughly five notes per pass.
  */
 
-const COUNT_IN_MS = 2_400; // one bar at 120 BPM, plus the scheduling lead
 const TAKE_MS = 6_000;
 
 test.use({ permissions: ['microphone'] });
 
-/** Sets a range input the way a user's drag would, so React sees the change. */
-async function setBpm(page: import('@playwright/test').Page, bpm: number): Promise<void> {
-  // Located by role rather than by accessible name: the name is localized, and
-  // the setup stage has exactly one slider in both locales.
-  const slider = page.getByRole('slider').first();
-  await slider.evaluate((element, value) => {
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value',
-    )?.set;
-    setter?.call(element, String(value));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  }, bpm);
-}
-
+/**
+ * One take, from a cold page.
+ *
+ * Two things this used to do are gone. It no longer sets a tempo before it is
+ * allowed to press record, and it no longer waits out a count-in bar: capture
+ * begins when the microphone opens.
+ */
 async function recordATake(page: import('@playwright/test').Page): Promise<void> {
   await page.getByRole('button', { name: /Start a sketch/i }).click();
-  await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);
+  await page.waitForTimeout(TAKE_MS);
   await page.getByRole('button', { name: /Stop recording/i }).click();
 }
 
@@ -63,7 +53,6 @@ test.describe('melody', () => {
     page.on('pageerror', (error) => escaped.push(error.message));
 
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
 
     // The budget is the point of the assertion: before the fix this never
@@ -78,7 +67,6 @@ test.describe('melody', () => {
 
   test('the transcription is musically plausible', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
@@ -98,7 +86,6 @@ test.describe('melody', () => {
 
   test('the details panel names which engine produced the result', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
@@ -115,7 +102,6 @@ test.describe('melody', () => {
   test('the complete package contains the original recorder bytes', async ({ page }) => {
     test.setTimeout(150_000);
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
@@ -212,7 +198,6 @@ test.describe('recovery', () => {
    */
   test('a take too short to use is refused with a way forward', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
 
     await page.getByLabel('Choose a recording to upload').setInputFiles({
       name: 'far-too-short.wav',
@@ -236,7 +221,6 @@ test.describe('recovery', () => {
 
   test('a take just over the floor is accepted, so the floor is a floor', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
 
     // The negative case above only proves something was rejected. This proves
     // the boundary is where it is claimed to be, and that the rejection is not
@@ -254,7 +238,6 @@ test.describe('recovery', () => {
 
   test('a recording stopped early always reaches a coherent state', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await page.getByRole('button', { name: /Start a sketch/i }).click();
 
     const stop = page.getByRole('button', { name: /Stop recording/i });
@@ -314,7 +297,6 @@ test.describe('versions', () => {
    */
   test('a hummed take is offered as three interpretations', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
@@ -326,26 +308,27 @@ test.describe('versions', () => {
     }
   });
 
-  test('every version states which tempo it uses and where that came from', async ({ page }) => {
+  test('every version states the tempo it was heard at, or that there was none', async ({
+    page,
+  }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
     });
 
-    // Every option says where its tempo came from, so the app can never imply
-    // it heard a pulse it did not.
+    // Two honest statements remain, and every option makes one of them. There
+    // is no third — "your 120 BPM" cannot appear, because the app has no way to
+    // be told a tempo and therefore no way to attribute one to the user.
     for (const name of ['Unprocessed', 'What you played', 'Tidied up']) {
-      await expect(page.getByRole('button', { name: new RegExp(name, 'i') })).toContainText(
-        /your|heard/i,
-      );
+      const option = page.getByRole('button', { name: new RegExp(name, 'i') });
+      await expect(option).toContainText(/heard at|timed freely/i);
+      await expect(option).not.toContainText(/your \d+ BPM/i);
     }
   });
 
   test('choosing a version changes the result rather than only the label', async ({ page }) => {
     await page.goto('/en');
-    await setBpm(page, 120);
     await recordATake(page);
     await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
       timeout: 90_000,
@@ -374,9 +357,8 @@ test.describe('versions', () => {
 
   test('the Persian review screen offers the same interpretations', async ({ page }) => {
     await page.goto('/fa');
-    await setBpm(page, 120);
     await page.getByRole('button', { name: /شروع یک اسکچ/ }).click();
-    await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);
+    await page.waitForTimeout(TAKE_MS);
     await page.getByRole('button', { name: /توقف ضبط/ }).click();
 
     await expect(page.getByRole('heading', { name: /اسکچ تو/ })).toBeVisible({ timeout: 90_000 });

@@ -11,7 +11,6 @@ test('audio upload follows the real transcription path and packages the untouche
   await page.goto('/en');
   const audioInput = page.getByLabel('Choose a recording to upload');
   await expect(audioInput).toBeDisabled();
-  await setBpm(page, 120);
   await expect(audioInput).toBeEnabled();
   await audioInput.setInputFiles(AUDIO_FIXTURE);
 
@@ -87,11 +86,8 @@ test('audio upload follows the real transcription path and packages the untouche
   );
 });
 
-test('a rejected audio file can be replaced without losing the configured tempo', async ({
-  page,
-}) => {
+test('a rejected audio file can be replaced without losing the way back', async ({ page }) => {
   await page.goto('/en');
-  await setBpm(page, 120);
   const audioInput = page.getByLabel('Choose a recording to upload');
   await audioInput.setInputFiles({
     name: 'not-a-recording.txt',
@@ -110,7 +106,6 @@ test('a rejected audio file can be replaced without losing the configured tempo'
 
 test('audio routing is automatic and its decision is visible in review', async ({ page }) => {
   await page.goto('/en');
-  await setBpm(page, 120);
   await page.getByLabel('Choose a recording to upload').setInputFiles(AUDIO_FIXTURE);
 
   await expect(page.getByRole('heading', { name: /Your sketch/i })).toBeVisible({
@@ -123,9 +118,7 @@ test('audio routing is automatic and its decision is visible in review', async (
   await expect(page.getByText(/Classifier reasoning/i)).toBeVisible();
 });
 
-test('MIDI import works before tempo setup, persists its source and renders a package', async ({
-  page,
-}) => {
+test('MIDI import persists its source and renders a package', async ({ page }) => {
   const sourceMidi = makeMidiFixture();
   await page.goto('/en');
   await page.getByLabel('Choose a MIDI file to import').setInputFiles({
@@ -188,16 +181,6 @@ test('MIDI import works before tempo setup, persists its source and renders a pa
   expect(manifest.bpm).toBe(126);
   expect(manifest.source.kind).toBe('midi-upload');
 });
-
-async function setBpm(page: import('@playwright/test').Page, bpm: number): Promise<void> {
-  const slider = page.getByRole('slider', { name: /Beats per minute/i });
-  await slider.evaluate((element, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(element, String(value));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  }, bpm);
-}
 
 /**
  * The real failure, end to end.

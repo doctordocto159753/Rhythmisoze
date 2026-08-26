@@ -6,19 +6,8 @@ const TAKE_MS = 6_000;
 
 test.use({ permissions: ['microphone'] });
 
-async function setBpm(page: Page, bpm: number): Promise<void> {
-  const slider = page.getByRole('slider', { name: /Beats per minute/i });
-  await slider.evaluate((element, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(element, String(value));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  }, bpm);
-}
-
 async function reachReview(page: Page): Promise<void> {
   await page.goto('/en');
-  await setBpm(page, 120);
   await page.getByRole('button', { name: /Start a sketch/i }).click();
   await page.waitForTimeout(COUNT_IN_MS + TAKE_MS);
   await page.getByRole('button', { name: /Stop recording/i }).click();

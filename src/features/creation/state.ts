@@ -27,9 +27,9 @@ import {
   type TranscriptionInputMode,
   type TranscriptionProgress,
 } from '@contracts';
-import type { BeatInfo, LevelSnapshot } from '@audio-core';
+import type { LevelSnapshot } from '@audio-core';
 import { RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
-import type { TempoChoice, VersionId } from '@rhythm-extraction';
+import type { VersionId } from '@rhythm-extraction';
 import { DEFAULT_MASTER, resolveInstrument, type MasterSettings } from '@synthesis';
 import {
   INITIAL_CONTEXT,
@@ -60,13 +60,26 @@ export interface FlowState {
   title: string;
   mode: CreationMode;
   melodyInputMode: MelodyInputMode;
-  bpm: number | null;
+  /**
+   * The meter used for encoding — bar lines, MIDI time signature, the Musician
+   * request. Never asked for and never a precondition: it is `DEFAULT_METER`
+   * unless an imported MIDI file stated one, and it does not gate recording.
+   */
   meter: Meter;
-  metronomeMuted: boolean;
-  tapHistory: number[];
-  tapCount: number;
+  /**
+   * The tempo an imported MIDI file declared, in BPM.
+   *
+   * Source metadata, kept because a file that states its own tempo is stating a
+   * fact about the music rather than describing a click track someone was asked
+   * to follow. `null` for everything recorded or uploaded as audio, where the
+   * only tempo that exists is the one measured from the performance.
+   *
+   * It is deliberately not a general-purpose BPM field. Nothing writes to it
+   * except a MIDI import, so it cannot become the back door through which a
+   * chosen tempo returns.
+   */
+  sourceTempoBpm: number | null;
 
-  beat: BeatInfo | null;
   level: LevelSnapshot | null;
   elapsedSec: number;
 
@@ -98,14 +111,6 @@ export interface FlowState {
   retouchAmount: number;
   /** Which performance version the user is listening to; null means the default. */
   versionId: VersionId | null;
-  /**
-   * Which tempo the user has asked the musical versions to be built on.
-   *
-   * `'performance'` unless they explicitly asked for the metronome value. It is
-   * never set by the app: a confidence score is not a user decision, and letting
-   * one act like one is the whole of the bug this field exists to close.
-   */
-  tempoChoice: TempoChoice;
   keyOverride: { root: string; mode: 'major' | 'minor' } | null;
 
   instrumentId: string;
@@ -142,11 +147,6 @@ export interface FlowState {
 
 export type Action =
   | { type: 'machine'; event: CreationEvent; payload?: { code: AppError['code']; recovery: AppError['recovery'] } }
-  | { type: 'setBpm'; bpm: number }
-  | { type: 'setMeter'; meter: Meter }
-  | { type: 'tap'; history: number[]; bpm: number | null; tapCount: number }
-  | { type: 'toggleMetronome' }
-  | { type: 'beat'; beat: BeatInfo }
   | { type: 'level'; level: LevelSnapshot }
   | { type: 'elapsed'; seconds: number }
   | {
@@ -182,7 +182,6 @@ export type Action =
     }
   | { type: 'setRetouch'; amount: number }
   | { type: 'setVersion'; versionId: VersionId }
-  | { type: 'setTempoChoice'; choice: TempoChoice }
   | { type: 'setKey'; key: FlowState['keyOverride'] }
   | { type: 'setInstrument'; id: string }
   | { type: 'setMaster'; master: Partial<MasterSettings> }
@@ -236,7 +235,7 @@ export const SOURCE_DERIVED_FIELDS = [
   'progress',
   'versionId',
   'keyOverride',
-  'tempoChoice',
+  'sourceTempoBpm',
   'renderedAudio',
   'renderedKey',
   'renderRealtimeRatio',
@@ -247,12 +246,16 @@ export const SOURCE_DERIVED_FIELDS = [
 /**
  * The fields that are *not* cleared, and why they are not.
  *
- * `instrumentId`, `master`, `retouchAmount`, `metronomeMuted` and `title` belong
- * to the person, not the take: someone who chose a cello and turned the reverb
- * down did not choose it for one recording. `bpm`, `meter` and `mode` are
- * session settings that a new source may *replace* — a MIDI file states its own
- * tempo — but does not invalidate. `machine`, `sketchId`, `publishedId` and the
- * share fields describe the sketch rather than the evidence inside it.
+ * `instrumentId`, `master`, `retouchAmount` and `title` belong to the person,
+ * not the take: someone who chose a cello and turned the reverb down did not
+ * choose it for one recording. `meter` and `mode` are session settings that a
+ * new source may *replace* — a MIDI file states its own meter — but does not
+ * invalidate. `machine`, `sketchId`, `publishedId` and the share fields
+ * describe the sketch rather than the evidence inside it.
+ *
+ * `sourceTempoBpm` *is* cleared, and that is the whole point of it being on the
+ * list above: a tempo stated by one imported file must not still be sitting
+ * there describing the next recording.
  */
 export type SourceDerivedField = (typeof SOURCE_DERIVED_FIELDS)[number];
 
@@ -284,7 +287,7 @@ export function beginNewSource(state: FlowState): Pick<FlowState, SourceDerivedF
     progress: null,
     versionId: null,
     keyOverride: null,
-    tempoChoice: 'performance',
+    sourceTempoBpm: null,
     renderedAudio: null,
     renderedKey: null,
     renderRealtimeRatio: null,
@@ -302,12 +305,8 @@ export function initialState(sketchId: string, mode: CreationMode = 'melody'): F
     title: '',
     mode,
     melodyInputMode: 'voice',
-    bpm: null,
     meter: DEFAULT_METER,
-    metronomeMuted: false,
-    tapHistory: [],
-    tapCount: 0,
-    beat: null,
+    sourceTempoBpm: null,
     level: null,
     elapsedSec: 0,
     audio: null,
@@ -324,7 +323,6 @@ export function initialState(sketchId: string, mode: CreationMode = 'melody'): F
     progress: null,
     retouchAmount: RETOUCH_AMOUNT_DEFAULT,
     versionId: null,
-    tempoChoice: 'performance',
     keyOverride: null,
     instrumentId: resolveInstrument(undefined, mode).id,
     master: DEFAULT_MASTER,
@@ -348,21 +346,6 @@ export function reducer(state: FlowState, action: Action): FlowState {
       if (!result.accepted) return state;
       return { ...state, machine: result.context };
     }
-    case 'setBpm':
-      return { ...state, bpm: action.bpm };
-    case 'setMeter':
-      return { ...state, meter: action.meter };
-    case 'tap':
-      return {
-        ...state,
-        tapHistory: action.history,
-        tapCount: action.tapCount,
-        bpm: action.bpm ?? state.bpm,
-      };
-    case 'toggleMetronome':
-      return { ...state, metronomeMuted: !state.metronomeMuted };
-    case 'beat':
-      return { ...state, beat: action.beat };
     case 'level':
       return { ...state, level: action.level };
     case 'elapsed':
@@ -422,10 +405,8 @@ export function reducer(state: FlowState, action: Action): FlowState {
           melodyQuality: action.melodyQuality,
           progress: null,
           // A re-read of the take can move every note, so the previous choice of
-          // version described a reading that no longer exists. The same goes for a
-          // tempo override: it was a judgement about different notes.
+          // version described a reading that no longer exists.
           versionId: null,
-          tempoChoice: 'performance',
           renderedAudio: null,
           renderedKey: null,
           renderRealtimeRatio: null,
@@ -436,13 +417,12 @@ export function reducer(state: FlowState, action: Action): FlowState {
         ...state,
         ...beginNewSource(state),
         mode: action.mode,
-        bpm: action.bpm,
         // A MIDI file states its own tempo, and a stated tempo is a fact about
-        // the music rather than a click track the performer was free to drift
-        // from. Detection exists for performances; here there is nothing to
-        // detect that the file has not already said. The user can still switch
-        // to the detected pulse from the picker.
-        tempoChoice: 'metronome',
+        // the music rather than a click track a performer was free to drift
+        // from. Detection exists for performances; there is nothing here to
+        // detect that the file has not already said. It is kept as source
+        // metadata for encoding and never offered as a setting.
+        sourceTempoBpm: action.bpm,
         meter: action.meter,
         instrumentId: resolveInstrument(undefined, action.mode).id,
         source: action.source,
@@ -457,11 +437,6 @@ export function reducer(state: FlowState, action: Action): FlowState {
       return { ...state, retouchAmount: action.amount, renderedAudio: null };
     case 'setVersion':
       return { ...state, versionId: action.versionId, renderedAudio: null };
-    case 'setTempoChoice':
-      // Changes the grid every version is built on, so the render no longer
-      // matches. The render key would catch this anyway; clearing here keeps it
-      // consistent with every other input that moves the notes.
-      return { ...state, tempoChoice: action.choice, renderedAudio: null };
     case 'setKey':
       return { ...state, keyOverride: action.key, renderedAudio: null };
     case 'setInstrument':
@@ -496,5 +471,25 @@ export function reducer(state: FlowState, action: Action): FlowState {
       return { ...state, storageWarning: action.low };
     case 'reset':
       return initialState(action.id, state.mode);
+    default: {
+      /**
+       * An action this module does not declare.
+       *
+       * Unreachable for anything in the `Action` union — the cases above are
+       * exhaustive, and the `never` binding turns a newly added action into a
+       * compile error rather than a silent fall-through.
+       *
+       * It is reachable at *runtime*, and that is what this branch is for. The
+       * removal of the tempo step deleted five action types; anything still
+       * dispatching one — a stale bundle mid-deploy, a rehydrated record from
+       * before the change — used to fall off the end of the switch and get
+       * `undefined` back as the new state, which is every field lost rather
+       * than one action ignored. Ignoring it is the correct response to an
+       * action that no longer means anything.
+       */
+      const unknown: never = action;
+      void unknown;
+      return state;
+    }
   }
 }

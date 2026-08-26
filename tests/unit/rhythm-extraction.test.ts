@@ -18,7 +18,6 @@ import type { NoteEvent } from '@contracts';
 import {
   analyzeGroove,
   analyzeMelodyRhythm,
-  compareTempos,
   defaultVersion,
   estimateMeter,
   estimatePerformanceTempo,
@@ -191,14 +190,13 @@ describe('version planning', () => {
     // The Musician is optional and may never have run, so the default plan is
     // the three versions that can always be derived from the transcription.
     // Offering more would put an unplayable entry in the picker.
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 55 });
     expect(plan.map((version) => version.id)).toEqual(['unprocessed', 'judge', 'teacher']);
   });
 
   it('adds a Musician version only once its notes exist', () => {
     const plan = planVersions({
       rhythm,
-      tappedBpm: 120,
       mode: 'melody',
       amount: 55,
       generated: ['musician-refined'],
@@ -220,7 +218,6 @@ describe('version planning', () => {
     // the user never heard.
     const plan = planVersions({
       rhythm,
-      tappedBpm: 120,
       mode: 'melody',
       amount: 55,
       generated: ['musician-refined', 'musician-developed'],
@@ -233,15 +230,15 @@ describe('version planning', () => {
   });
 
   it('builds every version on the detected tempo when one was heard', () => {
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 55 });
     for (const version of plan) {
-      expect(version.tempoSource).toBe('detected');
-      expect(Math.abs(version.bpm - 96)).toBeLessThanOrEqual(3);
+      expect(version.freeTiming).toBe(false);
+      expect(Math.abs((version.bpm as number) - 96)).toBeLessThanOrEqual(3);
     }
   });
 
   it('never quantizes or re-pitches the unprocessed version', () => {
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 100 });
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 100 });
     const raw = plan.find((version) => version.id === 'unprocessed');
     // The whole promise: the original survives even at full cleanup.
     expect(raw?.paramOverrides?.timingStrength).toBe(0);
@@ -253,29 +250,30 @@ describe('version planning', () => {
     // The Judge answers "what did they play", not "what should it have been".
     // Snapping to a scale there would be the Teacher's job done in the wrong
     // place, and would make the faithfulness score unmeasurable.
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 100 });
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 100 });
     expect(plan.find((v) => v.id === 'judge')?.paramOverrides?.scaleSnapStrength).toBe(0);
   });
 
   it('increases timing correction monotonically across the versions', () => {
-    const plan = planVersions({ rhythm, tappedBpm: 120, mode: 'melody', amount: 55 });
+    const plan = planVersions({ rhythm, mode: 'melody', amount: 55 });
     const strengths = plan.map((version) => version.paramOverrides?.timingStrength ?? 0);
     for (let i = 1; i < strengths.length; i += 1) {
       expect(strengths[i] as number).toBeGreaterThanOrEqual(strengths[i - 1] as number);
     }
   });
 
-  it('falls back to the tapped tempo only when there was no pulse to measure', () => {
+  it('reports free timing when there was no pulse to measure', () => {
     // Two onsets cannot establish a tempo at all, which is a different state
     // from having measured one and being unsure of it. Low confidence keeps the
-    // measurement; no measurement is the one case that reaches for the tap. See
+    // measurement; no measurement used to be the one case that reached for the
+    // metronome, and is now the case that reports having heard nothing. See
     // `tests/unit/tempo-source.test.ts` for the distinction in full.
     const sparse = analyzeMelodyRhythm(notes.slice(0, 2), 2);
     expect(sparse.measured).toBe(false);
-    const plan = planVersions({ rhythm: sparse, tappedBpm: 132, mode: 'melody', amount: 55 });
+    const plan = planVersions({ rhythm: sparse, mode: 'melody', amount: 55 });
     for (const version of plan) {
-      expect(version.bpm).toBe(132);
-      expect(version.tempoSource).toBe('tapped');
+      expect(version.bpm).toBeNull();
+      expect(version.freeTiming).toBe(true);
     }
   });
 
@@ -283,33 +281,6 @@ describe('version planning', () => {
     // The most faithful account of what the person did is what they came to
     // hear; the Teacher is a step they take, not one taken for them.
     expect(defaultVersion(rhythm)).toBe('judge');
-  });
-});
-
-describe('tempo disagreement', () => {
-  const notes: NoteEvent[] = Array.from({ length: 16 }, (_, i) => ({
-    startSec: i * (60 / 80),
-    endSec: i * (60 / 80) + 0.4,
-    pitch: 62,
-    velocity: 90,
-  }));
-  const rhythm = analyzeMelodyRhythm(notes, 12);
-
-  it('recognises a half-or-double tap as the common mistake it is', () => {
-    expect(compareTempos(rhythm, 160).kind).toBe('half-or-double');
-  });
-
-  it('stays quiet when the tap agrees', () => {
-    expect(compareTempos(rhythm, 80).kind).toBe('none');
-  });
-
-  it('says nothing when there was no pulse to compare against', () => {
-    // It does still speak up for a measured-but-uncertain tempo: suppressing the
-    // comparison there hid the disagreement in exactly the case the user most
-    // needed to see it.
-    const sparse = analyzeMelodyRhythm(notes.slice(0, 2), 2);
-    expect(sparse.measured).toBe(false);
-    expect(compareTempos(sparse, 200).kind).toBe('none');
   });
 });
 

@@ -38,6 +38,7 @@ export interface PublishedRow {
   id: string;
   title: string;
   bpm: number;
+  free_timing: boolean;
   mode: CreationMode;
   key_root: string | null;
   key_mode: string | null;
@@ -59,6 +60,7 @@ export interface CreateInput {
   id: string;
   title: string;
   bpm: number;
+  freeTiming: boolean;
   mode: CreationMode;
   keyRoot: string | null;
   keyMode: string | null;
@@ -76,11 +78,11 @@ export async function createPublished(input: CreateInput): Promise<void> {
   const db = sql();
   await db`
     INSERT INTO published_sketches (
-      id, title, bpm, mode, key_root, key_mode, instrument_id,
+      id, title, bpm, free_timing, mode, key_root, key_mode, instrument_id,
       audio_key, audio_url, midi_key, midi_url, duration_sec, locale,
       manage_token_hash, schema_version
     ) VALUES (
-      ${input.id}, ${input.title}, ${input.bpm}, ${input.mode},
+      ${input.id}, ${input.title}, ${input.bpm}, ${input.freeTiming}, ${input.mode},
       ${input.keyRoot}, ${input.keyMode}, ${input.instrumentId},
       ${input.audioKey}, ${input.audioUrl}, ${input.midiKey}, ${input.midiUrl},
       ${input.durationSec}, ${input.locale}, ${input.manageTokenHash}, 1
@@ -161,6 +163,10 @@ export function toPublicSketch(row: PublishedRow): PublishedSketch {
     id: row.id,
     title: row.title,
     bpm: row.bpm,
+    // Rows written before the column existed default to false, which is the
+    // truthful reading: those sketches were published with a tempo somebody
+    // had actually stated.
+    freeTiming: row.free_timing === true,
     mode: row.mode,
     keyRoot: (row.key_root as PublishedSketch['keyRoot']) ?? null,
     keyMode: (row.key_mode as PublishedSketch['keyMode']) ?? null,

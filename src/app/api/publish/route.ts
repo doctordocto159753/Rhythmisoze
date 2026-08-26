@@ -81,6 +81,7 @@ export async function POST(request: Request): Promise<Response> {
       id: ticket.id,
       title: sanitizeTitle(input.title),
       bpm: input.bpm,
+      freeTiming: input.freeTiming,
       mode: input.mode,
       keyRoot: input.keyRoot,
       keyMode: input.keyMode,

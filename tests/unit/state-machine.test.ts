@@ -24,9 +24,7 @@ import {
 
 const ALL_STATES: CreationState[] = [
   'idle',
-  'tempo_ready',
   'armed',
-  'countdown',
   'recording',
   'captured',
   'processing',
@@ -39,11 +37,9 @@ const ALL_STATES: CreationState[] = [
 ];
 
 const ALL_EVENTS: CreationEvent[] = [
-  'TEMPO_SET',
   'MODE_CHANGED',
   'ARM',
   'DISARM',
-  'COUNT_IN_STARTED',
   'RECORDING_STARTED',
   'RECORDING_STOPPED',
   'AUDIO_IMPORTED',
@@ -64,11 +60,16 @@ const ALL_EVENTS: CreationEvent[] = [
   'RESTORE',
 ];
 
-/** The path a first-time user takes from landing to a published link. */
+/**
+ * The path a first-time user takes from landing to a published link.
+ *
+ * Two steps shorter than it was. `TEMPO_SET` used to be the first thing that
+ * had to happen before anything else was legal, and `COUNT_IN_STARTED` sat
+ * between arming and capture. Neither exists: the app opens on the record
+ * control, and capture begins when the microphone does.
+ */
 const HAPPY_PATH: CreationEvent[] = [
-  'TEMPO_SET',
   'ARM',
-  'COUNT_IN_STARTED',
   'RECORDING_STARTED',
   'RECORDING_STOPPED',
   'PROCESS',
@@ -102,9 +103,7 @@ describe('happy path', () => {
     }
     expect(seen).toEqual([
       'idle',
-      'tempo_ready',
       'armed',
-      'countdown',
       'recording',
       'captured',
       'processing',
@@ -118,19 +117,25 @@ describe('happy path', () => {
 });
 
 describe('invalid transitions', () => {
-  it('cannot record before a tempo exists', () => {
+  it('arms straight from idle, with nothing to configure first', () => {
+    // The inverse of the assertion that used to be here. Recording before a
+    // tempo existed was illegal; there is no tempo to exist, so the only thing
+    // standing between the app opening and a take is the microphone.
+    expect(transition(INITIAL_CONTEXT, 'ARM').accepted).toBe(true);
+  });
+
+  it('cannot capture before the microphone is open', () => {
     expect(transition(INITIAL_CONTEXT, 'RECORDING_STARTED').accepted).toBe(false);
-    expect(transition(INITIAL_CONTEXT, 'ARM').accepted).toBe(false);
   });
 
   it('cannot publish before a render exists', () => {
-    const review = run(['TEMPO_SET', 'ARM', 'COUNT_IN_STARTED', 'RECORDING_STARTED', 'RECORDING_STOPPED', 'PROCESS', 'PROCESS_DONE']);
+    const review = run(['ARM', 'RECORDING_STARTED', 'RECORDING_STOPPED', 'PROCESS', 'PROCESS_DONE']);
     expect(review.state).toBe('review');
     expect(transition(review, 'PUBLISH').accepted).toBe(false);
   });
 
   it('cannot process without a capture', () => {
-    const armed = run(['TEMPO_SET', 'ARM']);
+    const armed = run(['ARM']);
     expect(transition(armed, 'PROCESS').accepted).toBe(false);
   });
 
@@ -144,7 +149,7 @@ describe('invalid transitions', () => {
   });
 
   it('leaves the context untouched when an event is rejected', () => {
-    const context = run(['TEMPO_SET']);
+    const context = run(['ARM']);
     const result = transition(context, 'PUBLISH_DONE');
     expect(result.accepted).toBe(false);
     expect(result.context).toBe(context);
@@ -152,18 +157,16 @@ describe('invalid transitions', () => {
 });
 
 describe('cancellation', () => {
-  it('returns to armed from the count-in, not to the beginning', () => {
-    const counting = run(['TEMPO_SET', 'ARM', 'COUNT_IN_STARTED']);
-    expect(transition(counting, 'CANCEL').context.state).toBe('armed');
-  });
-
-  it('returns to armed from recording', () => {
-    const recording = run(['TEMPO_SET', 'ARM', 'COUNT_IN_STARTED', 'RECORDING_STARTED']);
-    expect(transition(recording, 'CANCEL').context.state).toBe('armed');
+  it('returns to the top from recording', () => {
+    // It used to return to `armed`, which was a distinct place to stand: the
+    // microphone was open and a count-in was waiting to be triggered. Arming
+    // now means recording, so cancelling a take leaves nothing in between.
+    const recording = run(['ARM', 'RECORDING_STARTED']);
+    expect(transition(recording, 'CANCEL').context.state).toBe('idle');
   });
 
   it('keeps the capture when processing is cancelled', () => {
-    const processing = run([...HAPPY_PATH.slice(0, 6)]);
+    const processing = run([...HAPPY_PATH.slice(0, 4)]);
     expect(processing.state).toBe('processing');
     expect(transition(processing, 'CANCEL').context.state).toBe('captured');
   });
@@ -171,7 +174,7 @@ describe('cancellation', () => {
 
 describe('failure and retry', () => {
   it('records where it failed', () => {
-    const processing = run(HAPPY_PATH.slice(0, 6));
+    const processing = run(HAPPY_PATH.slice(0, 4));
     const failed = transition(processing, 'FAIL', {
       code: 'model_load_failed',
       recovery: 'retry',
@@ -182,42 +185,43 @@ describe('failure and retry', () => {
   });
 
   it('retrying a processing failure keeps the take rather than re-recording', () => {
-    const processing = run(HAPPY_PATH.slice(0, 6));
+    const processing = run(HAPPY_PATH.slice(0, 4));
     const failed = transition(processing, 'FAIL').context;
     expect(transition(failed, 'RETRY').context.state).toBe('captured');
   });
 
-  it('keeps a configured tempo after a recoverable file-import failure', () => {
-    const tempoReady = run(['TEMPO_SET']);
-    const failed = transition(tempoReady, 'FAIL', {
+  it('returns to the start screen after a recoverable file-import failure', () => {
+    const failed = transition(INITIAL_CONTEXT, 'FAIL', {
       code: 'unsupported_file',
       recovery: 'retry',
     }).context;
 
-    expect(transition(failed, 'RETRY').context.state).toBe('tempo_ready');
+    // Nothing was configured, so there is nothing to preserve: the start screen
+    // is both where the failure happened and where the next attempt begins.
+    expect(transition(failed, 'RETRY').context.state).toBe('idle');
   });
 
   it('retrying a publish failure returns to the finished render', () => {
-    const publishing = run(HAPPY_PATH.slice(0, 10));
+    const publishing = run(HAPPY_PATH.slice(0, 8));
     expect(publishing.state).toBe('publishing');
     const failed = transition(publishing, 'FAIL').context;
     expect(transition(failed, 'RETRY').context.state).toBe('ready');
   });
 
   it('retrying a render failure returns to review, not to recording', () => {
-    const rendering = run(HAPPY_PATH.slice(0, 8));
+    const rendering = run(HAPPY_PATH.slice(0, 6));
     const failed = transition(rendering, 'FAIL').context;
     expect(transition(failed, 'RETRY').context.state).toBe('review');
   });
 
   it('cannot fail twice or retry from a healthy state', () => {
-    const failed = transition(run(['TEMPO_SET']), 'FAIL').context;
+    const failed = transition(run(['ARM']), 'FAIL').context;
     expect(transition(failed, 'FAIL').accepted).toBe(false);
-    expect(transition(run(['TEMPO_SET']), 'RETRY').accepted).toBe(false);
+    expect(transition(run(['ARM']), 'RETRY').accepted).toBe(false);
   });
 
   it('clears the error once it moves on', () => {
-    const failed = transition(run(['TEMPO_SET']), 'FAIL').context;
+    const failed = transition(run(['ARM']), 'FAIL').context;
     const recovered = transition(failed, 'RESET').context;
     expect(recovered.error).toBeNull();
     expect(recovered.failedFrom).toBeNull();
@@ -226,20 +230,20 @@ describe('failure and retry', () => {
 
 describe('iteration (US-0704)', () => {
   it('can re-record from review, ready and published', () => {
-    for (const upto of [7, 9, 11]) {
+    for (const upto of [5, 7, 9]) {
       const context = run(HAPPY_PATH.slice(0, upto));
       expect(transition(context, 'RERECORD').context.state).toBe('armed');
     }
   });
 
   it('re-entering review from ready when cleanup changes', () => {
-    const ready = run(HAPPY_PATH.slice(0, 9));
+    const ready = run(HAPPY_PATH.slice(0, 7));
     expect(ready.state).toBe('ready');
     expect(transition(ready, 'RETOUCH_CHANGED').context.state).toBe('review');
   });
 
   it('can reprocess the same source after a route correction', () => {
-    for (const upto of [7, 9, 11]) {
+    for (const upto of [5, 7, 9]) {
       const context = run(HAPPY_PATH.slice(0, upto));
       const corrected = transition(context, 'PROCESS');
       expect({ state: context.state, accepted: corrected.accepted }).toEqual({
@@ -251,7 +255,7 @@ describe('iteration (US-0704)', () => {
   });
 
   it('can reinterpret imported MIDI from review, ready or published', () => {
-    for (const upto of [7, 9, 11]) {
+    for (const upto of [5, 7, 9]) {
       const context = run(HAPPY_PATH.slice(0, upto));
       const corrected = transition(context, 'MIDI_IMPORTED');
       expect(corrected.accepted).toBe(true);
@@ -283,16 +287,19 @@ describe('derived predicates', () => {
     expect(canExport('review')).toBe(false);
   });
 
-  it('gives every state a stage', () => {
+  it('gives every state a stage, and none of them a setup stage', () => {
     for (const state of ALL_STATES) {
-      expect(['setup', 'record', 'process', 'shape', 'share']).toContain(stageOf(state));
+      expect(['record', 'process', 'shape', 'share']).toContain(stageOf(state));
     }
+    // The first thing the product asks for is the material itself, so an
+    // untouched app is already in the record stage rather than before it.
+    expect(stageOf('idle')).toBe('record');
   });
 
   it('reports RETRY as available only from a failure with a memory', () => {
-    const failed = transition(run(['TEMPO_SET']), 'FAIL').context;
+    const failed = transition(run(['ARM']), 'FAIL').context;
     expect(allowedEvents(failed)).toContain('RETRY');
-    expect(allowedEvents(run(['TEMPO_SET']))).not.toContain('RETRY');
+    expect(allowedEvents(run(['ARM']))).not.toContain('RETRY');
   });
 });
 

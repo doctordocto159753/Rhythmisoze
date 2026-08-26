@@ -10,15 +10,21 @@
  * Failure is a state with a memory: `failed` records where it came from, so
  * "try again" returns to the step that broke rather than to the beginning. That
  * is the difference between a recoverable error and a lost take.
+ *
+ * ## What the tempo removal took out of here
+ *
+ * `tempo_ready` and `countdown` are gone, along with `TEMPO_SET` and
+ * `COUNT_IN_STARTED`. They encoded a premise the product no longer holds — that
+ * a person must establish a tempo before they are allowed to make a sound, and
+ * then perform against a click. `idle` now accepts `ARM` directly, so the first
+ * screen offers recording and uploading and nothing else.
  */
 
 import type { AppErrorCode, RecoveryAction } from '@contracts';
 
 export type CreationState =
   | 'idle'
-  | 'tempo_ready'
   | 'armed'
-  | 'countdown'
   | 'recording'
   | 'captured'
   | 'processing'
@@ -30,11 +36,9 @@ export type CreationState =
   | 'failed';
 
 export type CreationEvent =
-  | 'TEMPO_SET'
   | 'MODE_CHANGED'
   | 'ARM'
   | 'DISARM'
-  | 'COUNT_IN_STARTED'
   | 'RECORDING_STARTED'
   | 'RECORDING_STOPPED'
   | 'AUDIO_IMPORTED'
@@ -63,14 +67,7 @@ export type CreationEvent =
 const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, CreationState>>>> =
   Object.freeze({
     idle: {
-      TEMPO_SET: 'tempo_ready',
-      MIDI_IMPORTED: 'review',
-      RESTORE: 'review',
-      RESET: 'idle',
-    },
-    tempo_ready: {
-      TEMPO_SET: 'tempo_ready',
-      MODE_CHANGED: 'tempo_ready',
+      MODE_CHANGED: 'idle',
       ARM: 'armed',
       AUDIO_IMPORTED: 'captured',
       MIDI_IMPORTED: 'review',
@@ -78,24 +75,19 @@ const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, 
       RESET: 'idle',
     },
     armed: {
-      COUNT_IN_STARTED: 'countdown',
-      DISARM: 'tempo_ready',
-      TEMPO_SET: 'tempo_ready',
-      MODE_CHANGED: 'tempo_ready',
+      // Recording begins as soon as the microphone is open. There is no
+      // count-in to wait through, because there is no click to come in against.
+      RECORDING_STARTED: 'recording',
+      DISARM: 'idle',
+      MODE_CHANGED: 'idle',
       AUDIO_IMPORTED: 'captured',
       MIDI_IMPORTED: 'review',
-      RESET: 'idle',
-    },
-    countdown: {
-      RECORDING_STARTED: 'recording',
-      // Cancelling during the count-in returns to armed, not to the top: the
-      // user has already committed to recording and only mistimed their entry.
-      CANCEL: 'armed',
+      CANCEL: 'idle',
       RESET: 'idle',
     },
     recording: {
       RECORDING_STOPPED: 'captured',
-      CANCEL: 'armed',
+      CANCEL: 'idle',
       RESET: 'idle',
     },
     captured: {
@@ -114,7 +106,6 @@ const TRANSITIONS: Readonly<Record<CreationState, Partial<Record<CreationEvent, 
       RETOUCH_CHANGED: 'review',
       RENDER: 'rendering',
       RERECORD: 'armed',
-      TEMPO_SET: 'review',
       RESET: 'idle',
     },
     rendering: {
@@ -170,15 +161,13 @@ export interface TransitionResult {
 
 /**
  * States a failure can interrupt without losing the user's take.
- * A failure in `recording` drops back to `armed`; one in `processing` keeps the
+ * A failure in `recording` drops back to the top; one in `processing` keeps the
  * capture so the user can retry without singing again (US-0305).
  */
 const RETRY_TARGET: Readonly<Partial<Record<CreationState, CreationState>>> = Object.freeze({
   idle: 'idle',
-  tempo_ready: 'tempo_ready',
-  armed: 'armed',
-  countdown: 'armed',
-  recording: 'armed',
+  armed: 'idle',
+  recording: 'idle',
   captured: 'captured',
   processing: 'captured',
   rendering: 'review',
@@ -232,8 +221,7 @@ export function allowedEvents(context: MachineContext): CreationEvent[] {
 // --- Derived UI predicates. Every component reads these rather than comparing
 // --- state strings, so adding a state does not mean auditing every screen.
 
-export const isRecordingPhase = (s: CreationState): boolean =>
-  s === 'countdown' || s === 'recording';
+export const isRecordingPhase = (s: CreationState): boolean => s === 'recording';
 
 export const isBusy = (s: CreationState): boolean =>
   s === 'processing' || s === 'rendering' || s === 'publishing';
@@ -252,14 +240,18 @@ export const hasResult = (s: CreationState): boolean =>
 
 export const canExport = (s: CreationState): boolean => s === 'ready' || s === 'published';
 
-/** The stage label the progress indicator shows, coarse enough to stay honest. */
-export function stageOf(state: CreationState): 'setup' | 'record' | 'process' | 'shape' | 'share' {
+/**
+ * The stage label the progress indicator shows, coarse enough to stay honest.
+ *
+ * There is no `setup` stage any more. It existed to cover the tempo step, and
+ * with that gone the first thing the product asks for is the material itself —
+ * so an untouched app is already *in* the record stage rather than in front of
+ * a gate before it.
+ */
+export function stageOf(state: CreationState): 'record' | 'process' | 'shape' | 'share' {
   switch (state) {
     case 'idle':
-    case 'tempo_ready':
     case 'armed':
-      return 'setup';
-    case 'countdown':
     case 'recording':
     case 'captured':
       return 'record';

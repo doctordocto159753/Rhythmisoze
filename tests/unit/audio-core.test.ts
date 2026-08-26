@@ -11,18 +11,13 @@ import { describe, expect, it } from 'vitest';
 import {
   analyzeAudio,
   bandEnergyRatio,
-  barSeconds,
-  bpmFromTaps,
   classifyOnset,
-  clampBpm,
-  countInSeconds,
   DEFAULT_YIN_OPTIONS,
   detectOnsets,
   encodeWav,
   fftInPlace,
   hzToMidi,
   magnitudeSpectrum,
-  measureDrift,
   midiToHz,
   peakNormalize,
   readWavHeader,
@@ -31,7 +26,6 @@ import {
   segmentNotes,
   spectralCentroid,
   strengthToVelocity,
-  tapTempo,
   toMonoAudio,
   trackPitch,
   validateAudio,
@@ -154,77 +148,6 @@ describe('peakNormalize / resample', () => {
   it('is a no-op when the rate already matches', () => {
     const input = sine(440, 0.2);
     expect(resample(input, SAMPLE_RATE)).toBe(input);
-  });
-});
-
-describe('tap tempo (US-0201)', () => {
-  it('reports nothing before four taps', () => {
-    expect(bpmFromTaps([0, 0.5, 1]).bpm).toBeNull();
-  });
-
-  it('computes BPM from four even taps', () => {
-    // 0.5 s apart is 120 BPM.
-    expect(bpmFromTaps([0, 0.5, 1, 1.5]).bpm).toBe(120);
-  });
-
-  it('clamps to the 40-200 range the PRD specifies', () => {
-    expect(bpmFromTaps([0, 0.1, 0.2, 0.3]).bpm).toBe(200);
-    expect(bpmFromTaps([0, 3, 6, 9]).bpm).toBe(40);
-    expect(clampBpm(5)).toBe(40);
-    expect(clampBpm(400)).toBe(200);
-  });
-
-  it('ignores a single stumbled tap', () => {
-    // One doubled gap in an otherwise steady 120 BPM.
-    const steady = bpmFromTaps([0, 0.5, 1, 1.5, 2, 2.5]);
-    const stumbled = bpmFromTaps([0, 0.5, 1, 2, 2.5, 3]);
-    expect(stumbled.bpm).toBe(steady.bpm);
-    expect(stumbled.outliersDropped).toBe(1);
-  });
-
-  it('starts a new phrase after a long pause', () => {
-    let history: number[] = [];
-    for (const time of [0, 0.5, 1, 1.5]) history = tapTempo(history, time).history;
-    const after = tapTempo(history, 10);
-    expect(after.result.didReset).toBe(true);
-    expect(after.result.bpm).toBeNull();
-    expect(after.history).toEqual([10]);
-  });
-
-  it('keeps only the most recent window of taps', () => {
-    let history: number[] = [];
-    for (let i = 0; i < 20; i += 1) history = tapTempo(history, i * 0.5).history;
-    expect(history.length).toBeLessThanOrEqual(8);
-  });
-
-  it('is deterministic for the same taps', () => {
-    const taps = [0, 0.48, 1.01, 1.49, 2.02];
-    expect(bpmFromTaps(taps)).toEqual(bpmFromTaps(taps));
-  });
-});
-
-describe('count-in and bar length (US-0204)', () => {
-  it('gives one bar of 4/4 at 120 BPM as two seconds', () => {
-    expect(barSeconds(120, { beatsPerBar: 4, beatUnit: 4 })).toBeCloseTo(2, 9);
-    expect(countInSeconds(120, { beatsPerBar: 4, beatUnit: 4 })).toBeCloseTo(2, 9);
-  });
-
-  it('handles a compound meter', () => {
-    // 6/8 at 120: six eighth notes, each 0.25 s.
-    expect(barSeconds(120, { beatsPerBar: 6, beatUnit: 8 })).toBeCloseTo(1.5, 9);
-  });
-});
-
-describe('measureDrift (US-0203)', () => {
-  it('reports zero for perfectly spaced beats', () => {
-    const beats = Array.from({ length: 120 }, (_, i) => i * 0.5);
-    expect(measureDrift(beats, 120).maxDriftMs).toBeCloseTo(0, 6);
-  });
-
-  it('reports accumulated drift', () => {
-    // 1 ms late per beat for 60 s at 120 BPM.
-    const beats = Array.from({ length: 120 }, (_, i) => i * 0.501);
-    expect(measureDrift(beats, 120).maxDriftMs).toBeGreaterThan(100);
   });
 });
 

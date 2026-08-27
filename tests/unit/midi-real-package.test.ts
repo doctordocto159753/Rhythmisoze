@@ -159,10 +159,36 @@ describe('imported while Rhythm is selected', () => {
     expect(cleaned.drums.length).toBeLessThanOrEqual(145);
   });
 
-  it('reads as a rhythm with a pulse of its own', () => {
+  it('reads as a rhythm, and reports its pulse as uncertain rather than asserting one', () => {
     const analysis = analyzeDrumRhythm(plan.drums, file.durationSec);
-    expect(analysis.measured).toBe(true);
     expect(analysis.onsetCount).toBe(145);
+
+    // All 145 hits are read, and a candidate pulse is found near 98 BPM. It is
+    // not asserted: this performance's groove steadiness is 0.51 and the
+    // estimator's confidence 0.42, under the floor at which a tempo is stated.
+    //
+    // This is a deliberate behaviour change and it has a cost — a rhythm that
+    // abstains is also a rhythm the Teacher will not tidy onto a grid. It is
+    // the honest reading of a performance that genuinely wanders, and a steady
+    // one still produces a tempo: see the sibling assertion below.
+    expect(analysis.tempo.bpm).toBeGreaterThan(0);
+    expect(analysis.measured).toBe(false);
+    expect(analysis.tempo.mode).toBe('uncertain');
+  });
+
+  it('still finds a pulse in a rhythm that actually keeps one', () => {
+    // The guard against over-abstention. If this ever fails, the floor has been
+    // set somewhere that makes the feature useless rather than careful.
+    const steady = Array.from({ length: 32 }, (_, index) => ({
+      timeSec: index * 0.5,
+      drum: 'kick' as const,
+      velocity: 100,
+      confidence: 1,
+    }));
+    const analysis = analyzeDrumRhythm(steady, 16);
+    expect(analysis.measured).toBe(true);
+    expect(analysis.tempo.bpm).toBeCloseTo(120, 0);
+    expect(analysis.tempo.mode).toBe('stable');
   });
 });
 

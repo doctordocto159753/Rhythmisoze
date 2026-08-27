@@ -17,9 +17,27 @@
  * and the music coming out worse than when they had happened to select 85
  * before singing the same phrase.
  *
- * So the rule under test is now: **the tempo is whatever was measured from the
- * performance, at any confidence, and when nothing could be measured the answer
- * is free timing rather than a substitute number.**
+ * ## The second correction, and why the rule below changed again
+ *
+ * "Use the measurement at any confidence" fixed the substitution, and left a
+ * different error in place: the estimator always returns a winner, because some
+ * BPM always fits better than the others. Treating that as evidence that the
+ * performance *has* a pulse gave every one of the nine benchmark recordings a
+ * precise tempo, while not one of them scored above 0.43 confidence — below the
+ * floor at which the interface is willing to state a tempo plainly. The product
+ * was asserting pulses it did not believe in, on freely-sung material.
+ *
+ * So the rule under test is now:
+ *
+ *   the source stated its own tempo        -> that tempo, with certainty
+ *   a pulse was found *and believed*       -> that pulse
+ *   a winner exists but is not believable  -> free timing, bpm null
+ *   nothing to measure at all              -> free timing, bpm null
+ *
+ * The original regression is unchanged and still asserted: uncertainty is not
+ * evidence for some *other* number. What is added is that uncertainty is not
+ * evidence for *this* number either — the honest response to "I am not sure
+ * there is a pulse here" is to say so, not to publish four significant figures.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -82,12 +100,18 @@ function sourcesFor(notes: readonly NoteEvent[]): VersionNoteSources {
 describe('the fixture this regression is built on', () => {
   const rhythm = analyzeMelodyRhythm(looselyHummedNotes(), SOURCE_DURATION_SEC);
 
-  it('measures a tempo near the performed one', () => {
+  it('finds a candidate near the performed tempo', () => {
     // Deliberately loose. The invariant under test is the *source* of the tempo,
     // not one magic number, and pinning 88.5 exactly would make a legitimate
     // estimator improvement look like a regression.
-    expect(rhythm.measured).toBe(true);
     expect(Math.abs(rhythm.tempo.bpm - PERFORMED_BPM)).toBeLessThanOrEqual(4);
+  });
+
+  it('does not believe it, because the performance is too loose', () => {
+    // The fixture was built to sit just under the floor, and that is now the
+    // difference between a candidate and an assertion.
+    expect(rhythm.measured).toBe(false);
+    expect(rhythm.tempo.mode).toBe('uncertain');
   });
 
   it('is confident about it only just below the floor', () => {
@@ -103,12 +127,18 @@ describe('a measured but uncertain tempo', () => {
   const notes = looselyHummedNotes();
   const rhythm = analyzeMelodyRhythm(notes, SOURCE_DURATION_SEC);
 
-  it('is the musical interpretation, and nothing resembles the old tapped value', () => {
+  it('is not asserted as the performance\'s tempo', () => {
     const tempo = resolveVersionTempo({ rhythm });
-    expect(tempo.freeTiming).toBe(false);
-    expect(tempo.bpm).toBe(rhythm.tempo.bpm);
-    // The failing assertion under the old behaviour.
-    expect(Math.abs((tempo.bpm as number) - ONCE_TAPPED_BPM)).toBeGreaterThan(5);
+    expect(tempo.bpm).toBeNull();
+    expect(tempo.freeTiming).toBe(true);
+    expect(tempo.mode).toBe('uncertain');
+  });
+
+  it('still resembles nothing like the old tapped value', () => {
+    // The original regression, and it must survive every later change: the
+    // estimator's candidate is near what was performed, not near what was once
+    // typed into a metronome. Abstaining is not a licence to drift back.
+    expect(Math.abs(rhythm.tempo.bpm - ONCE_TAPPED_BPM)).toBeGreaterThan(5);
   });
 
   it('reports its confidence as measured rather than rewriting it', () => {
@@ -119,7 +149,7 @@ describe('a measured but uncertain tempo', () => {
     expect(tempo.reliable).toBe(false);
   });
 
-  it('builds every version on it, including the Musician versions', () => {
+  it('leaves every version freely timed rather than on an unbelieved grid', () => {
     const plan = planVersions({
       rhythm,
       mode: 'melody',
@@ -128,15 +158,16 @@ describe('a measured but uncertain tempo', () => {
     });
     expect(plan.length).toBe(6);
     for (const version of plan) {
-      expect(version.freeTiming).toBe(false);
-      expect(Math.abs((version.bpm as number) - rhythm.tempo.bpm)).toBeLessThan(0.001);
-      // The hedge travels with the version so the picker can say "about".
-      expect(version.tempoReliable).toBe(false);
+      expect(version.bpm).toBeNull();
+      expect(version.freeTiming).toBe(true);
+      // And therefore nothing quantizes: the whole point of abstaining is that
+      // no note is pulled onto a grid nobody could hear.
+      expect(version.paramOverrides?.timingStrength).toBe(0);
       expect(version.tempoConfidence).toBe(rhythm.tempo.confidence);
     }
   });
 
-  it('is what the Musician is asked for, at its real confidence', () => {
+  it('reaches the Musician as the encoding constant, not as a claimed tempo', () => {
     const tempo = resolveVersionTempo({ rhythm });
     const request = buildMusicianRequest({
       sourceId: 'sketch-1',
@@ -147,9 +178,10 @@ describe('a measured but uncertain tempo', () => {
       sourceDurationSec: SOURCE_DURATION_SEC,
     });
     expect(request).not.toBeNull();
-    // Both of these failed before: the bpm was 103, and the confidence was a
-    // hard-coded 0.4 describing neither number.
-    expect(request?.bpm).toBe(rhythm.tempo.bpm);
+    // The service needs a number to condition on. It gets the free-timing
+    // constant, which is not a claim about this performance — and never the
+    // tapped 103, which is the regression this file was written for.
+    expect(request?.bpm).toBe(FREE_TIMING_ENCODING_BPM);
     expect(request?.bpm).not.toBe(ONCE_TAPPED_BPM);
     expect(request?.tempoConfidence).toBe(rhythm.tempo.confidence);
     expect(request?.tempoConfidence).not.toBe(0.4);
@@ -209,7 +241,9 @@ describe('a source that states its own tempo', () => {
     // normal case: everything recorded or uploaded as audio states no tempo.
     for (const stated of [undefined, null, Number.NaN]) {
       const tempo = resolveVersionTempo({ rhythm, statedBpm: stated });
-      expect({ stated, bpm: tempo.bpm }).toEqual({ stated, bpm: rhythm.tempo.bpm });
+      // This fixture is too loose to assert a tempo of its own, so "the source
+      // said nothing" resolves to free timing rather than to the estimate.
+      expect({ stated, bpm: tempo.bpm }).toEqual({ stated, bpm: null });
     }
   });
 });

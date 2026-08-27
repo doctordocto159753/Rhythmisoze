@@ -38,6 +38,7 @@ import type { CreationMode, GridDivision } from '@contracts';
 import type { RetouchParams } from '@retouch';
 import { VERSION_ORDER, type MusicalVersionId } from '@versions';
 import type { PerformanceRhythm } from './analyze';
+import type { TempoMode } from './tempo';
 
 /**
  * The id union now lives in `@versions`, which is the registry that knows what
@@ -95,6 +96,15 @@ export interface PerformanceTempo {
   reliable: boolean;
   /** `true` exactly when `bpm` is null: the material is timed freely. */
   freeTiming: boolean;
+  /**
+   * What kind of timing this is.
+   *
+   * `freeTiming` is the boolean the rest of the product acts on; this says
+   * *why* it is set, which is a different and more useful thing to show a
+   * person. "No steady pulse here" and "there was nothing to measure" are both
+   * free timing and they are not the same observation.
+   */
+  mode: TempoMode;
 }
 
 /**
@@ -180,14 +190,29 @@ export function resolveVersionTempo(input: TempoResolutionInput): PerformanceTem
 
   if (statedBpm !== undefined && statedBpm !== null && Number.isFinite(statedBpm)) {
     // Certain, because it was not inferred. The file said so.
-    return { bpm: statedBpm, confidence: 1, reliable: true, freeTiming: false };
+    return { bpm: statedBpm, confidence: 1, reliable: true, freeTiming: false, mode: 'stable' };
   }
 
   if (rhythm !== null && rhythm.measured) {
-    return { bpm: rhythm.tempo.bpm, confidence, reliable: rhythm.reliable, freeTiming: false };
+    return {
+      bpm: rhythm.tempo.bpm,
+      confidence,
+      reliable: rhythm.reliable,
+      freeTiming: false,
+      mode: rhythm.tempo.mode,
+    };
   }
 
-  return { bpm: null, confidence, reliable: false, freeTiming: true };
+  // Either nothing was measurable, or a winning grid existed but was not
+  // distinguishable enough from its rivals to assert. Both are free timing as
+  // far as every consumer is concerned; `mode` keeps the difference legible.
+  return {
+    bpm: null,
+    confidence,
+    reliable: false,
+    freeTiming: true,
+    mode: rhythm === null ? 'free' : rhythm.tempo.mode,
+  };
 }
 
 export interface VersionPlanInput {

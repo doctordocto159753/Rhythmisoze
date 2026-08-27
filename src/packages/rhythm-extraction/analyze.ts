@@ -15,8 +15,19 @@ import {
   TEMPO_CONFIDENCE_FLOOR,
   type MeterEstimate,
   type TempoEstimate,
+  type TempoMode,
   type WeightedOnset,
 } from './tempo';
+
+/**
+ * Below this groove steadiness, a believable pulse is still not a *steady* one.
+ *
+ * A performance can have a pulse that is genuinely there and genuinely moving —
+ * accelerating into a phrase, relaxing at the end. Reporting that as `stable`
+ * invites a caller to treat one number as a grid, which is the failure this
+ * whole area is about, one level up.
+ */
+export const STEADY_GROOVE_FLOOR = 0.7;
 
 export interface PerformanceRhythm {
   tempo: TempoEstimate;
@@ -83,9 +94,16 @@ export function analyzePerformanceRhythm(
   const beatSec = 60 / Math.max(1, tempo.bpm);
   const meter = estimateMeter(onsets, tempo.beats, beatSec);
   const groove = analyzeGroove(onsets, tempo.bpm, tempo.phaseSec);
+  // Steadiness is a property of the performance, and the estimator does not see
+  // it — so the stable/variable distinction is settled here, where it does.
+  const mode: TempoMode = !tempo.measured
+    ? tempo.mode
+    : groove.steadiness >= STEADY_GROOVE_FLOOR
+      ? 'stable'
+      : 'variable';
 
   return {
-    tempo,
+    tempo: { ...tempo, mode },
     meter,
     groove,
     measured: tempo.measured,

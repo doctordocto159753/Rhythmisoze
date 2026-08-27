@@ -49,16 +49,25 @@ export interface TempoEstimate {
   bpm: number;
   phaseSec: number;
   /**
-   * Whether there was enough evidence to estimate a tempo *at all*.
+   * Whether a pulse was actually found — not merely whether notes were counted.
    *
-   * Separate from `confidence`, and the separation is the point. "We measured a
-   * pulse and are only somewhat sure of the number" and "there was nothing to
-   * measure" are different facts with different correct responses, and folding
-   * them into one low number is how the second answer — fall back to the
-   * metronome — silently got applied to the first. The second answer is now
-   * "this material is timed freely", which is a reading rather than a fallback.
+   * This used to be `true` for any take with four onsets and a positive
+   * duration, which made it a statement about arithmetic rather than about
+   * music. Every one of the nine benchmark recordings cleared that bar and was
+   * given a precise BPM, while every one of them scored between 0.32 and 0.43
+   * confidence — none reached the floor at which the interface is willing to
+   * say the tempo plainly. The product was asserting a pulse it did not believe
+   * in, on freely-sung material.
    *
-   * `false` means `bpm` is a placeholder, not a reading.
+   * It now requires `confidence >= TEMPO_CONFIDENCE_FLOOR`. Measured on
+   * synthesised material, that boundary separates cleanly: metronomic input
+   * scores 0.88–0.90, ±50 ms human jitter 0.77, ±90 ms 0.62, and the estimator
+   * begins returning the *wrong* tempo at around 0.46 — at ±150 ms it reports
+   * 81.5 BPM for a 100 BPM source. A performance with a pulse worth stating is
+   * far above the floor; freely-timed singing is far below it.
+   *
+   * `false` means `bpm` is a placeholder, not a reading — and callers turn it
+   * into free timing rather than into a number.
    */
   measured: boolean;
   /**
@@ -73,7 +82,29 @@ export interface TempoEstimate {
   beats: number[];
   /** Runners-up, so a half/double disagreement can be shown rather than hidden. */
   alternatives: TempoCandidate[];
+  /**
+   * What kind of timing this is, rather than only how sure we are of a number.
+   *
+   * `confidence` answers "how much do we believe this BPM", which cannot say
+   * the useful thing about a rubato performance: that a single global BPM is
+   * the wrong shape of answer, not merely an uncertain one.
+   */
+  mode: TempoMode;
 }
+
+/**
+ * How a performance is timed.
+ *
+ * - `free`     nothing periodic to measure — too few events, or no grid
+ *              explains the material. `bpm` is null downstream.
+ * - `uncertain` a candidate exists but is not distinguishable from its rivals
+ *              well enough to assert. Also `bpm` null: an uncertain number
+ *              presented as a tempo is worse than no tempo.
+ * - `variable` a pulse is present and believable, but it moves. The BPM is an
+ *              average, and callers should not treat it as a grid.
+ * - `stable`   a pulse is present, believable and steady.
+ */
+export type TempoMode = 'free' | 'uncertain' | 'variable' | 'stable';
 
 /**
  * Below this, the detected tempo is not certain enough to *present* as what the
@@ -162,9 +193,9 @@ export function estimatePerformanceTempo(
     .sort((a, b) => a.timeSec - b.timeSec);
 
   if (usable.length < MIN_ONSETS || durationSec <= 0) {
-    // Nothing was measured. `bpm` is a neutral placeholder so the field is
-    // never `NaN`, and `measured: false` is what stops any caller reading it as
-    // a reading of the performance.
+    // Nothing to measure. `bpm` is a neutral placeholder so the field is never
+    // `NaN`, and `measured: false` is what stops any caller reading it as a
+    // reading of the performance.
     return {
       bpm: PREFERRED_BPM,
       phaseSec: 0,
@@ -172,6 +203,7 @@ export function estimatePerformanceTempo(
       confidence: 0,
       beats: [],
       alternatives: [],
+      mode: 'free',
     };
   }
 
@@ -191,14 +223,27 @@ export function estimatePerformanceTempo(
 
   candidates.sort((a, b) => b.salience - a.salience);
   const best = candidates[0] as TempoCandidate;
+  const confidence = confidenceOf(candidates, usable.length);
+
+  // The grid always produces a winner — there is always some BPM that fits
+  // better than the others. That is not the same as the performance having a
+  // pulse, and treating it as such is how freely-sung material acquired a
+  // precise tempo it never had.
+  const measured = confidence >= TEMPO_CONFIDENCE_FLOOR;
+  const alternatives = distinctAlternatives(candidates, best);
 
   return {
     bpm: round1(best.bpm),
     phaseSec: best.phaseSec,
-    measured: true,
-    confidence: confidenceOf(candidates, usable.length),
+    measured,
+    confidence,
+    // The grid is still computed when the estimate is not assertable: callers
+    // that want to *show* a candidate pulse can, and the alternatives keep a
+    // half/double disagreement visible either way. What changes is that nothing
+    // downstream treats it as the performance's tempo.
     beats: beatGrid(best.bpm, best.phaseSec, durationSec),
-    alternatives: distinctAlternatives(candidates, best),
+    alternatives,
+    mode: measured ? 'stable' : 'uncertain',
   };
 }
 

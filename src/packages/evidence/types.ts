@@ -47,7 +47,7 @@
 import type { NoteEvent } from '@contracts';
 
 /** An engine that can produce evidence about a recording. */
-export type EvidenceEngineId = 'melody-contour' | 'basic-pitch' | 'game';
+export type EvidenceEngineId = 'melody-contour' | 'basic-pitch' | 'game' | 'harmonic-spectrum';
 
 /**
  * Which rendering of the source an engine read.
@@ -111,11 +111,22 @@ export interface EngineStrengths {
  *   onsets than either (10–20 ms against 20–30 ms), and worse than the contour
  *   engine on low register. Optional, so its strengths only matter when the
  *   adapter is actually configured.
+ * - `harmonic-spectrum`: reads the recording's own spectrum and answers exactly
+ *   one question — which octave carries the fundamental. It has no opinion
+ *   about boundaries, voicing or pitch class, and its entries below say so.
+ *   Its value is that it shares no code, model or failure mode with the other
+ *   three, so agreement with it is genuinely independent corroboration. It is
+ *   also the only second witness available in a default deployment, where GAME
+ *   is not running.
  */
 export const ENGINE_STRENGTHS: Readonly<Record<EvidenceEngineId, EngineStrengths>> = Object.freeze({
   'melody-contour': { boundaries: 0.9, register: 0.2, pitchClass: 0.85, voicing: 0.9 },
   'basic-pitch': { boundaries: 0.15, register: 0.85, pitchClass: 0.7, voicing: 0.4 },
   game: { boundaries: 0.95, register: 0.9, pitchClass: 0.9, voicing: 0.75 },
+  // Register only. The zeros are not modesty: this witness emits one pitch per
+  // span handed to it and would be actively wrong if consulted about anything
+  // else.
+  'harmonic-spectrum': { boundaries: 0, register: 0.75, pitchClass: 0, voicing: 0 },
 });
 
 /**

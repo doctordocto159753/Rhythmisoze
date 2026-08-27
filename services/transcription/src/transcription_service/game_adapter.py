@@ -175,8 +175,7 @@ def _run(*, source: Path, out_dir: Path, config: Config, started: float) -> Tran
         raise AdapterError(f"could not start inference: {error}") from error
 
     if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise AdapterError(detail[-1] if detail else f"exit {completed.returncode}")
+        raise AdapterError(_failure_detail(completed.returncode, completed.stderr))
 
     produced = sorted(out_dir.rglob("*.csv"))
     if not produced:
@@ -184,3 +183,32 @@ def _run(*, source: Path, out_dir: Path, config: Config, started: float) -> Tran
 
     notes = parse_csv(produced[0].read_text(encoding="utf-8"))
     return Transcription(notes=notes, elapsed_ms=int((time.monotonic() - started) * 1000))
+
+
+#: Exit codes a container runtime uses for a process it killed. 137 is the
+#: shell's 128+SIGKILL; `subprocess` reports the signal itself as a negative
+#: return code when it can see it.
+_KILLED_RETURN_CODES = {-9, 137}
+
+
+def _failure_detail(returncode: int, stderr: bytes) -> str:
+    """Why inference failed, in terms an operator can act on.
+
+    A killed child leaves nothing on stderr — the kernel does not give it the
+    chance to write one — so the previous message was `exit -9`, which reads
+    like a bug in this service. On a memory-limited host running the large
+    checkpoint it is almost always the OOM killer, and saying so is the
+    difference between a five-minute fix and an afternoon.
+    """
+    lines = stderr.decode("utf-8", "replace").strip().splitlines()
+    if returncode in _KILLED_RETURN_CODES and not lines:
+        return (
+            "GAME was killed before it finished, with no error output. On a "
+            "container this is almost always the out-of-memory killer: the "
+            "large checkpoint needs roughly 4 GB while transcribing. Raise the "
+            "container memory limit, or set GAME_MODEL_TIER=small with "
+            "TRANSCRIPTION_MODEL_DIR=/models/game to run the smaller model."
+        )
+    if not lines:
+        return f"GAME exited with code {returncode} and no error output"
+    return lines[-1]

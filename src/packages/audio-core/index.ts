@@ -8,4 +8,5 @@ export * from './wav';
 export * from './capabilities';
 export * from './recorder';
 export * from './decode';
+export * from './pcm-capture';
 export * from './transcribers';

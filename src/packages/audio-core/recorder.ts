@@ -20,6 +20,19 @@
 
 import { AppError } from '@contracts';
 import { pickRecordingMimeType } from './capabilities';
+import { createPcmCapture, isPcmCaptureReady } from './pcm-capture';
+import { encodeWav } from './wav';
+
+/**
+ * Bitrate for the fallback encoder.
+ *
+ * Only reached when uncompressed capture is unavailable. Browsers default Opus
+ * to a rate chosen for voice calls, and a psychoacoustic coder's whole job is to
+ * discard what a listener will not miss — which is not what a pitch model reads.
+ * 256 kbit/s mono is far above transparency and costs nothing on a clip this
+ * short.
+ */
+const FALLBACK_AUDIO_BITS_PER_SECOND = 256_000;
 
 export const MUSIC_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: false,
@@ -112,26 +125,48 @@ export interface ActiveRecording {
  * the waveform is live rather than lagging a chunk behind. It reads at most 30
  * times a second: the visualisation must not compete with audio scheduling
  * (US-0207 acceptance criterion).
+ *
+ * ## What actually records
+ *
+ * Uncompressed, whenever the capture worklet registered — which is every
+ * current browser, and `unlockAudio` has already tried by the time this runs.
+ * The samples come off the audio graph before any encoder exists, so a
+ * recording made here carries the same signal an uploaded WAV would.
+ *
+ * `MediaRecorder` remains as the fallback, because a browser that cannot load
+ * the worklet must still be able to record. It encodes to Opus, which is lossy
+ * and is the reason this path exists, so it is deliberately second.
  */
 export function startRecording(
   context: AudioContext,
   capture: CaptureStream,
   options: RecorderOptions,
 ): ActiveRecording {
-  const mimeType = pickRecordingMimeType();
-  if (mimeType === null) {
-    throw new AppError('recording_failed', 'reload', 'MediaRecorder unavailable');
-  }
-
-  const chunks: BlobPart[] = [];
-  const recorder =
-    mimeType === '' ? new MediaRecorder(capture.stream) : new MediaRecorder(capture.stream, { mimeType });
-
   const source = context.createMediaStreamSource(capture.stream);
   const analyser = context.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.7;
   source.connect(analyser);
+
+  const uncompressed = isPcmCaptureReady(context) ? startUncompressed(context, source) : null;
+
+  const mimeType = uncompressed === null ? pickRecordingMimeType() : 'audio/wav';
+  if (mimeType === null) {
+    source.disconnect();
+    analyser.disconnect();
+    throw new AppError('recording_failed', 'reload', 'no recorder available');
+  }
+
+  const chunks: BlobPart[] = [];
+  const recorder =
+    uncompressed !== null
+      ? null
+      : new MediaRecorder(
+          capture.stream,
+          mimeType === ''
+            ? { audioBitsPerSecond: FALLBACK_AUDIO_BITS_PER_SECOND }
+            : { mimeType, audioBitsPerSecond: FALLBACK_AUDIO_BITS_PER_SECOND },
+        );
 
   const buffer = new Float32Array(analyser.fftSize);
   const startedAt = context.currentTime;
@@ -160,6 +195,7 @@ export function startRecording(
   };
 
   const finished = new Promise<Blob>((resolve, reject) => {
+    if (recorder === null) return;
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.push(event.data);
     };
@@ -176,7 +212,7 @@ export function startRecording(
   });
 
   // 250 ms timeslices, so a tab crash loses at most a quarter second.
-  recorder.start(250);
+  recorder?.start(250);
   frameHandle = requestAnimationFrame(tick);
 
   const teardown = (): void => {
@@ -191,18 +227,58 @@ export function startRecording(
   };
 
   return {
-    mimeType: recorder.mimeType || mimeType || 'audio/webm',
+    mimeType: recorder === null ? 'audio/wav' : recorder.mimeType || mimeType || 'audio/webm',
     async stop() {
       teardown();
-      if (recorder.state !== 'inactive') recorder.stop();
+      if (uncompressed !== null) {
+        const samples = await uncompressed.finish();
+        if (samples.length === 0) {
+          throw new AppError('recording_failed', 'rerecord', 'empty capture');
+        }
+        // A WAV rather than the raw samples, so a recording and an uploaded
+        // file are the same kind of thing everywhere downstream. 16-bit PCM at
+        // the graph's own rate: no codec, no resample, no gain.
+        return new Blob([encodeWav([samples], { sampleRate: context.sampleRate })], {
+          type: 'audio/wav',
+        });
+      }
+      if (recorder !== null && recorder.state !== 'inactive') recorder.stop();
       return finished;
     },
     cancel() {
       teardown();
       chunks.length = 0;
-      if (recorder.state !== 'inactive') recorder.stop();
+      uncompressed?.cancel();
+      if (recorder !== null && recorder.state !== 'inactive') recorder.stop();
     },
   };
+}
+
+/**
+ * Wires the capture worklet into the graph and keeps it being pulled.
+ *
+ * The silent gain node is not decoration. An `AudioWorkletNode` whose output
+ * reaches no destination is not guaranteed to be rendered, and a capture that
+ * quietly stops after a few hundred milliseconds is the worst failure available
+ * here. Routing it to the destination at zero gain keeps it in the render graph
+ * without putting the microphone into the speakers.
+ */
+function startUncompressed(
+  context: AudioContext,
+  source: AudioNode,
+): ReturnType<typeof createPcmCapture> | null {
+  try {
+    const capture = createPcmCapture(context);
+    const silence = context.createGain();
+    silence.gain.value = 0;
+    source.connect(capture.node);
+    capture.node.connect(silence);
+    silence.connect(context.destination);
+    return capture;
+  } catch {
+    // Returning null hands the take to `MediaRecorder` rather than losing it.
+    return null;
+  }
 }
 
 /** Reduces a time-domain frame to what the meter and waveform need. */

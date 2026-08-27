@@ -147,3 +147,31 @@ def test_reports_a_crash_rather_than_inventing_notes(config, monkeypatch) -> Non
 
     with pytest.raises(AdapterError):
         transcribe(b"RIFFfake", config)
+
+
+def test_reports_a_killed_process_as_out_of_memory(config, monkeypatch) -> None:
+    """A container-killed child leaves nothing on stderr.
+
+    The message it used to produce was `exit -9`, which reads like a defect in
+    this service. On a memory-limited host running the large checkpoint it is
+    almost always the OOM killer, and the operator needs to be told which of the
+    two fixes applies.
+    """
+    _spy(monkeypatch, returncode=-9, write_csv=False)
+
+    with pytest.raises(AdapterError) as raised:
+        transcribe(b"RIFFfake", config)
+
+    detail = str(raised.value)
+    assert "memory" in detail
+    assert "GAME_MODEL_TIER=small" in detail
+
+
+def test_keeps_upstreams_own_error_when_there_is_one(config, monkeypatch) -> None:
+    # A real traceback must not be replaced by a guess about memory.
+    _spy(monkeypatch, returncode=1, stderr=b"Traceback...\nRuntimeError: bad checkpoint\n", write_csv=False)
+
+    with pytest.raises(AdapterError) as raised:
+        transcribe(b"RIFFfake", config)
+
+    assert str(raised.value) == "RuntimeError: bad checkpoint"

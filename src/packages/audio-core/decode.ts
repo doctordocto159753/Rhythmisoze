@@ -7,6 +7,7 @@
 
 import { AppError, type MonoAudio } from '@contracts';
 import { toMonoAudio, type AudioBufferLike } from './normalize';
+import { ensurePcmCaptureModule } from './pcm-capture';
 
 /**
  * Decodes a recorded blob to mono float PCM.
@@ -60,10 +61,18 @@ export function getAudioContext(): AudioContext {
   return sharedContext;
 }
 
-/** Resumes the shared context. Must be called from inside a user gesture. */
+/**
+ * Resumes the shared context. Must be called from inside a user gesture.
+ *
+ * Also registers the uncompressed-capture worklet, because this is already
+ * awaited immediately before every recording starts and `startRecording` itself
+ * is synchronous. Best-effort: a browser that refuses the module records
+ * through `MediaRecorder` instead, which is lossy but not broken.
+ */
 export async function unlockAudio(): Promise<AudioContext> {
   const context = getAudioContext();
   if (context.state === 'suspended') await context.resume();
+  await ensurePcmCaptureModule(context);
   return context;
 }
 

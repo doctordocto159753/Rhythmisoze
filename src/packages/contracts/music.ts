@@ -84,7 +84,12 @@ export interface RawTranscriptionProvenance {
   transcriber: 'game' | 'midi-import' | 'rhythm-extraction';
   model: string;
   modelVersion: string;
-  backend: 'pytorch' | 'onnx' | 'midi-parser' | 'server-dsp';
+  /**
+   * How the transcriber ran. `upstream-cli` is GAME's own `infer.py`, which is
+   * the only way audio is transcribed now; `pytorch` and `onnx` remain readable
+   * because Raw already written under those names must keep parsing.
+   */
+  backend: 'upstream-cli' | 'pytorch' | 'onnx' | 'midi-parser' | 'server-dsp';
 }
 
 /** A note exactly as the authoritative transcriber supplied it. */

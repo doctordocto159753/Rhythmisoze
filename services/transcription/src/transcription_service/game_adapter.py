@@ -1,8 +1,32 @@
-"""Running GAME and returning Rhythmisoze transcription evidence.
+"""Running upstream GAME and reading its answer.
 
-The small development backend delegates to upstream GAME's PyTorch CLI. The
-production large backend uses the official v1.0.3 ONNX graph set through the
-local ONNX runner. Both return the same Transcription contract.
+## What this module is allowed to know
+
+Where the audio is, how to start GAME, and how to read the CSV it writes.
+Nothing else. In particular it does not know that GAME slices audio at
+silences, that its segmenter runs a D3PM sampling loop, that boundaries become
+durations, or that chunk results are stitched back with their offsets. Those
+are GAME's, and every previous attempt to reproduce them here made the
+transcription worse:
+
+- the first large ONNX runner pushed whole recordings through the graphs and
+  laid the regions end to end, deleting every rest;
+- the second reimplemented upstream's slicer and stitching faithfully enough to
+  pass a parity check, and still did not match the standalone CLI.
+
+The measured best result came from running upstream's own command. So that is
+what this does, and the surface between Rhythmisoze and GAME is now one
+subprocess call and one CSV parse.
+
+## Why CSV
+
+`--output-formats mid` is upstream's default and would round every pitch to an
+integer on the way out. CSV keeps GAME's continuous estimate, which the Raw
+contract requires. `--pitch-format number` keeps it as a decimal MIDI value
+rather than a note name with cents, which is the same number with three
+decimals instead of two and no spelling to parse back.
+
+Neither flag changes what GAME extracts. They select a writer.
 """
 
 from __future__ import annotations
@@ -38,6 +62,12 @@ class Note:
 
 
 def parse_pitch(raw: str) -> float | None:
+    """A decimal MIDI value, or a note name with cents.
+
+    The service asks for the first. The second is still understood because
+    upstream's default is note names, and a CSV produced by a hand-run
+    `infer.py` should be readable by the same parser that reads ours.
+    """
     raw = raw.strip()
     if raw == "":
         return None
@@ -59,6 +89,12 @@ def parse_pitch(raw: str) -> float | None:
 
 
 def parse_csv(text: str) -> list[Note]:
+    """GAME's `onset,offset,pitch` rows, in absolute source seconds.
+
+    The times are already absolute: upstream's combining callback added each
+    chunk's offset before writing. Nothing here shifts, scales, quantises or
+    reorders them beyond sorting by onset.
+    """
     notes: list[Note] = []
     for line in text.splitlines():
         parts = line.strip().split(",")
@@ -88,27 +124,32 @@ def transcribe(wav_bytes: bytes, config: Config) -> Transcription:
     if detail is not None:
         raise AdapterError(detail)
 
-    if config.backend == "onnx":
-        from .onnx_runner import transcribe as transcribe_onnx
-        return transcribe_onnx(wav_bytes, config)
-
     started = time.monotonic()
     run_dir = config.work_dir / uuid.uuid4().hex
-    audio_dir = run_dir / "in"
     out_dir = run_dir / "out"
-    audio_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    source = audio_dir / "take.wav"
+    # Upstream's CLI takes a file or a directory. A file is what a standalone
+    # run passes, and it removes the need for a `--glob` to pick one entry out
+    # of a directory this service just created.
+    source = run_dir / "take.wav"
     source.write_bytes(wav_bytes)
 
     try:
-        return _run_pytorch(source_dir=audio_dir, out_dir=out_dir, config=config, started=started)
+        return _run(source=source, out_dir=out_dir, config=config, started=started)
     finally:
+        # The take is the user's audio and has no reason to outlive the request.
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
-def _run_pytorch(*, source_dir: Path, out_dir: Path, config: Config, started: float) -> Transcription:
+def _run(*, source: Path, out_dir: Path, config: Config, started: float) -> Transcription:
+    """`infer.py extract`, with upstream's defaults for everything that decides notes.
+
+    Nothing is passed for batch size, workers, precision, language, the
+    segmentation thresholds, the decoding radius or the D3PM schedule. Those are
+    what the standalone runs used, and the way to keep using them is to not
+    mention them.
+    """
     try:
         completed = subprocess.run(
             [
@@ -116,13 +157,13 @@ def _run_pytorch(*, source_dir: Path, out_dir: Path, config: Config, started: fl
                 "-m",
                 "transcription_service.game_runner",
                 "extract",
-                str(source_dir),
+                str(source),
                 "-m",
                 str(config.model_file),
-                "--glob",
-                "*.wav",
                 "--output-formats",
                 "csv",
+                "--pitch-format",
+                "number",
                 "--output-dir",
                 str(out_dir),
             ],

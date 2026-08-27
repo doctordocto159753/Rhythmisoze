@@ -40,43 +40,53 @@ docker compose exec -T transcription python -c \
 Expected readiness includes:
 
 ```json
-{"ready":true,"engine":"game","backend":"pytorch","modelTier":"small","modelVersion":"1.0.0","detail":null}
+{"ready":true,"engine":"game","backend":"upstream-cli","modelTier":"large","modelVersion":"1.0.0","detail":null}
 ```
 
 Relevant configuration:
 
 ```text
-GAME_BACKEND=pytorch
-GAME_MODEL_TIER=small
+GAME_BACKEND=upstream-cli
+GAME_MODEL_TIER=large
 GAME_MODEL_VERSION=1.0.0
-GAME_RANDOM_SEED=0
-TRANSCRIPTION_MODEL_DIR=/models/game
+GAME_RANDOM_SEED=
+TRANSCRIPTION_MODEL_DIR=/models/game-large
 ```
 
-The seed fixes GAME's stochastic D3PM sampling so a source/model pair is
-reproducible. It does not tune a threshold or modify GAME note events.
+`GAME_MODEL_TIER` selects nothing in code. It is a label that travels into Raw
+provenance, and `TRANSCRIPTION_MODEL_DIR` decides which weights actually run.
+Because those two can disagree silently, the service reads the `config.yaml`
+upstream ships beside the weights and refuses readiness when the checkpoint is
+not the size the deployment claims. Running the small weights is a supported
+deployment; it means setting **both** variables.
 
-## Production target: GAME large 1.0.3 ONNX
+`GAME_RANDOM_SEED` is empty by default, which is upstream behaviour. Set an
+integer only to hold GAME's D3PM sampling still while comparing two builds —
+see below.
 
-The runtime selection boundary exists, but the ONNX runner does not. This is an
-explicit deployment blocker—not simulated support. The official graph set needs
-a real encoder -> D3PM segmentation -> estimator implementation and parity
-evidence before it can become ready.
+## There is one inference path, and it is upstream's
 
-The intended configuration is executable:
+`infer.py extract`, run as a subprocess against the checkout pinned in the
+Dockerfile. This service provides a WAV, invokes GAME, and parses the CSV it
+writes. It does not know how GAME slices audio, samples boundaries, converts
+them to durations, or stitches chunk results back together.
 
-```bash
-docker compose -f compose.yaml -f compose.game-large-onnx.yaml up -d transcription
-```
+That is the result of measurement rather than taste. Two backends that
+reimplemented GAME's extraction over the exported ONNX graphs were built and
+both were less musical than simply running the command — the second one even
+after its slicer was verified byte-identical to upstream's and its note
+reconstruction matched upstream's arithmetic exactly. Both are gone; the last
+commit containing them is `c49d8d5`.
 
-Today `/ready` truthfully returns 503 with
-`GAME large ONNX runner is not implemented`. Completing the handoff means:
+Two known deviations from a bare standalone run remain, and only two:
 
-1. load and validate the official 1.0.3 large graph/config files;
-2. implement the upstream preprocessing and D3PM sampling semantics;
-3. normalize output only at the shared Raw boundary;
-4. run standalone-large versus integrated-Raw parity;
-5. change ONNX readiness only after real inference passes.
+| Deviation | Why |
+|---|---|
+| MKLDNN disabled on CPU hosts | The deployment host takes SIGFPE in oneDNN under GAME's graph. See `game_runner`. Not threading, and the thread count is deliberately left alone. |
+| `--output-formats csv --pitch-format number` | Upstream's default writer is MIDI, which rounds every pitch to an integer. Both flags select a writer; neither changes what GAME extracts. |
+
+Everything that decides notes — thresholds, decoding radius, D3PM schedule,
+batch size, language — is left unsaid so upstream's defaults apply.
 
 ## HTTP boundary
 

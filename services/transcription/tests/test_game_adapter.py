@@ -49,8 +49,11 @@ def _spy(monkeypatch: pytest.MonkeyPatch, *, returncode: int = 0, stderr: bytes 
         seen["argv"] = list(argv)
         seen["cwd"] = kwargs.get("cwd")
         # The audio must still be on disk while inference is notionally running.
-        source_dir = Path(argv[argv.index("extract") + 1])
-        seen["audio_present_during_run"] = (source_dir / "take.wav").is_file()
+        # Upstream's CLI takes a file or a directory; this service passes the
+        # file, which is what a standalone run passes.
+        source = Path(argv[argv.index("extract") + 1])
+        seen["source"] = source
+        seen["audio_present_during_run"] = source.is_file()
         if write_csv:
             out_dir = Path(argv[argv.index("--output-dir") + 1])
             (out_dir / "take.csv").write_text(CSV, encoding="utf-8")
@@ -88,10 +91,25 @@ def test_passes_upstreams_arguments_through_unchanged(config, monkeypatch) -> No
     argv = seen["argv"]
     tail = argv[3:]
     assert tail[0] == "extract"
-    assert "--output-formats" in tail and tail[tail.index("--output-formats") + 1] == "csv"
+    assert tail[1] == str(seen["source"])
     # Upstream's own `-m`, which is the model path and must survive alongside
     # python's `-m` without either being confused for the other.
     assert tail[tail.index("-m") + 1] == str(config.model_file)
+
+    # CSV over upstream's default MIDI, and a decimal pitch over a note name:
+    # both keep GAME's continuous estimate, which MIDI output would round away.
+    assert tail[tail.index("--output-formats") + 1] == "csv"
+    assert tail[tail.index("--pitch-format") + 1] == "number"
+
+    # Everything that decides *notes* is left unsaid, so upstream's own
+    # defaults apply — which is what the standalone runs used. Naming any of
+    # these here would be this service having an opinion about GAME's
+    # extraction, which is the thing that kept making transcription worse.
+    for opinion in (
+        "--seg-threshold", "--seg-radius", "--est-threshold",
+        "--t0", "--nsteps", "--ts", "--batch-size", "--language", "--round-pitch",
+    ):
+        assert opinion not in tail
 
 
 def test_parses_what_upstream_wrote(config, monkeypatch) -> None:

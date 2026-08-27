@@ -128,8 +128,14 @@ services:
   # Authoritative GAME transcription service. A container that is up and
   # honestly reporting 503 is easier to diagnose than an implicit browser
   # fallback. It cannot transcribe melody until the weights are present:
-  # `scripts/models/bootstrap.sh game` fetches them, and will tell you their
-  # licence is CC BY-NC-SA 4.0 before it does.
+  # `scripts/models/bootstrap.sh game-large` fetches them, and will tell you
+  # their licence is CC BY-NC-SA 4.0 before it does.
+  #
+  # Defaults to the large v1.0.0 PyTorch checkpoint, driven through upstream
+  # GAME's own `infer.py extract`. A deployment still on the small weights at
+  # /models/game sets TRANSCRIPTION_MODEL_DIR and GAME_MODEL_TIER to match —
+  # both, or the service refuses to start rather than attributing large's
+  # transcription to small.
   transcription:
     build:
       context: ./services/transcription
@@ -137,12 +143,16 @@ services:
       args:
         GAME_REVISION: ${GAME_REVISION:-4ad815c90dfe2442730f3fdc866fd23e737cbc97}
     environment:
-      TRANSCRIPTION_MODEL_DIR: /models/game
+      TRANSCRIPTION_MODEL_DIR: ${TRANSCRIPTION_MODEL_DIR:-/models/game-large}
       TRANSCRIPTION_GAME_DIR: /opt/game
-      GAME_BACKEND: ${GAME_BACKEND:-pytorch}
-      GAME_MODEL_TIER: ${GAME_MODEL_TIER:-small}
+      GAME_BACKEND: ${GAME_BACKEND:-upstream-cli}
+      GAME_MODEL_TIER: ${GAME_MODEL_TIER:-large}
       GAME_MODEL_VERSION: ${GAME_MODEL_VERSION:-1.0.0}
-      GAME_RANDOM_SEED: ${GAME_RANDOM_SEED:-0}
+      # Empty on purpose. Upstream's CLI seeds nothing, and GAME's segmenter
+      # samples at every D3PM step; pinning it to 0 was a silent divergence
+      # from the standalone runs. Set an integer only to hold sampling still
+      # while comparing two builds.
+      GAME_RANDOM_SEED: ${GAME_RANDOM_SEED:-}
       TRANSCRIPTION_MAX_DURATION_SEC: ${TRANSCRIPTION_MAX_DURATION_SEC:-60}
       TRANSCRIPTION_LOG_LEVEL: ${TRANSCRIPTION_LOG_LEVEL:-INFO}
     expose: ["8083"]
@@ -155,8 +165,8 @@ services:
     deploy:
       resources:
         limits:
-          # The small model is ~51 MB of weights; the ceiling is for PyTorch's
-          # allocator and one clip's activations, not for the checkpoint.
+          # The large checkpoint is ~396 MB; the rest of the ceiling is for
+          # PyTorch's allocator and one clip's activations.
           memory: ${TRANSCRIPTION_MEMORY_LIMIT:-4g}
 
   redis:

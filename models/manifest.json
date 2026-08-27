@@ -9,8 +9,8 @@
     "block before you fetch one: not every model here is usable on every project."
   ],
   "version": 1,
-  "generatedAt": "2026-08-26",
-  "totalBytes": 1474857600,
+  "generatedAt": "2026-08-27",
+  "totalBytes": 1841155333,
   "models": [
     {
       "name": "melodyt5",
@@ -79,7 +79,7 @@
     },
     {
       "name": "game",
-      "role": "Authoritative initial melodic-audio transcriber for canonical Raw material.",
+      "role": "GAME small checkpoint. Valid deployment; the large one below is the default.",
       "optional": false,
       "upstream": {
         "kind": "github-release",
@@ -122,9 +122,56 @@
       },
       "runtimeAdapterVersion": "transcription/0.1.0",
       "notes": [
-        "~47 MB zipped, ~51 MB unpacked. This small PyTorch model is the validated development backend.",
-        "GAME large v1.0.3 ONNX is the production target, but remains an explicit /ready blocker until its real graph runner and parity gate exist.",
+        "~47 MB zipped, ~51 MB unpacked.",
+        "Run it by setting TRANSCRIPTION_MODEL_DIR=/models/game and GAME_MODEL_TIER=small together.",
         "Audio is sent to this service; product and privacy copy disclose that before recording."
+      ]
+    },
+    {
+      "name": "game-large",
+      "role": "Authoritative melodic-audio transcriber. Default production checkpoint.",
+      "optional": true,
+      "upstream": {
+        "kind": "github-release",
+        "repo": "openvpi/GAME",
+        "revision": "v1.0.0",
+        "url": "https://github.com/openvpi/GAME/releases/tag/v1.0.0"
+      },
+      "code": {
+        "repo": "https://github.com/openvpi/GAME",
+        "revision": "4ad815c90dfe2442730f3fdc866fd23e737cbc97",
+        "license": "MIT"
+      },
+      "artifact": {
+        "filename": "GAME-1.0-large.zip",
+        "destination": "game-large/",
+        "unpack": "zip",
+        "unpackStrip": "GAME-1.0-large/",
+        "expectedBytes": 366297733,
+        "sha256": "f45eac9fbb92b82fe67c00f29efad52954469897eb64e5bd5924a43dc5deb9b6",
+        "downloadUrl": "https://github.com/openvpi/GAME/releases/download/v1.0.0/GAME-1.0-large.zip",
+        "contains": {
+          "model.pt": {
+            "expectedBytes": 396393454,
+            "sha256": "1a286ae10cd460cbce46de1f96c2922d048d03dd88fbd089433787f8d8f97661"
+          }
+        }
+      },
+      "license": {
+        "code": "MIT",
+        "weights": "CC-BY-NC-SA-4.0",
+        "$comment": [
+          "Same split as the small checkpoint, and the same consequence: the weights are",
+          "not Rhythmisoze's licence, are never baked into an image, and a deployment that",
+          "uses them is a non-commercial one. Fetching is the operator's decision."
+        ]
+      },
+      "runtimeAdapterVersion": "transcription/0.2.0",
+      "notes": [
+        "~366 MB zipped, ~396 MB unpacked. ~100M parameters: embedding dim 256, layers 8+16+8.",
+        "Both sha256 values were computed from the downloaded artifact on 2026-08-27; the zip hash also matches the digest GitHub reports for the release asset.",
+        "Unpacks to model.pt, config.yaml and lang_map.json, which is what upstream's infer.py expects beside each other.",
+        "The service reads config.yaml to check that GAME_MODEL_TIER matches the checkpoint, so a mislabelled mount fails readiness instead of mislabelling Raw provenance."
       ]
     }
   ]

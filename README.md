@@ -197,7 +197,7 @@ audio ─► server router ─► spectral-flux onsets ─► kick/snare/hat ─
 | [docs/runbooks/](docs/runbooks/) | Deploying, rolling back, moderating |
 | [docs/architecture/evidence.md](docs/architecture/evidence.md) | Which engine is trusted for what, and how the register is decided |
 | [docs/architecture/musical-intent.md](docs/architecture/musical-intent.md) | Intent routing, tempo detection and versions |
-| [services/transcription/README.md](services/transcription/README.md) | GAME-first runtime, Raw contract, development path and ONNX blocker |
+| [services/transcription/README.md](services/transcription/README.md) | GAME-first runtime, Raw contract, and the one inference path |
 | [docs/musical-judge.md](docs/musical-judge.md) | Faithfulness scoring, repair operators, beam search |
 | [docs/music-teacher.md](docs/music-teacher.md) | Musical suggestions and the identity constraints on them |
 | [docs/status.md](docs/status.md) | Story-by-story implementation state |
@@ -208,10 +208,12 @@ Stated here rather than left to be discovered. The full list with detail is in
 `docs/product-decisions.md`; measured quality numbers live in
 [`evaluation/`](evaluation/README.md) and are gated in CI.
 
-- **GAME large 1.0.3 ONNX is an explicit production blocker.** The shared
-  contract and configuration boundary exist, but the encoder → D3PM → estimator
-  ONNX runner is not implemented. Selecting that backend returns `/ready` 503;
-  it never pretends the PyTorch CLI can consume an ONNX directory.
+- **Melodic transcription runs GAME's own CLI, at v1.0.0 rather than v1.0.3.**
+  v1.0.3 publishes ONNX graphs only, and driving those meant reimplementing
+  GAME's extraction here. That was built twice and was measurably less musical
+  than running upstream's command both times, so the integration follows the
+  code rather than the version number. The default checkpoint is the large
+  v1.0.0 PyTorch model; the small one remains a supported deployment.
 - **The old quality benchmark is historical evidence, not the GAME-first
   baseline.** Integration parity has been checked, but a new frozen quality
   baseline and blinded listening result have not been claimed.

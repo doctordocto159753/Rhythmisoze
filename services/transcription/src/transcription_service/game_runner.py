@@ -46,6 +46,23 @@ true only where it needs to be.
 
 Nothing about the model, the weights, the thread count or the rest of PyTorch
 changes.
+
+## Why there is no longer a forced seed
+
+There used to be one, applied unconditionally: `random`, `numpy` and `torch`
+were all seeded to 0 before handing over. The intention was reproducibility —
+the same take and model giving the same notes twice.
+
+It was also a silent divergence from the standalone runs. GAME's segmenter
+samples: `remove_boundaries` draws `torch.rand_like` at every D3PM step, so the
+boundaries are a draw rather than a computation, and seeding to 0 does not
+make that draw *better* — it makes it one particular draw, taken with a
+generator in a state no standalone run ever had. Running `python infer.py
+extract` seeds nothing.
+
+So the seed is now opt-in. `GAME_RANDOM_SEED` unset or empty is upstream
+behaviour, which is the default; setting it to an integer restores the fixed
+draw for anyone comparing two builds and needing the sampling held still.
 """
 
 from __future__ import annotations
@@ -54,7 +71,6 @@ import runpy
 import os
 import random
 
-import numpy as np
 import torch
 
 #: Upstream's entry point, resolved against the working directory.
@@ -76,15 +92,30 @@ def should_disable_mkldnn(*, cuda_available: bool) -> bool:
     return not cuda_available
 
 
+def requested_seed(raw: str | None) -> int | None:
+    """The seed an operator asked for, or None for upstream's own randomness.
+
+    Unset and empty both mean "do not seed", so a compose file can leave the
+    variable declared and empty without quietly pinning the sampler. A value
+    that is not an integer is ignored rather than fatal: a malformed seed is not
+    a reason to refuse a recording.
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def main() -> None:
-    # D3PM sampling is stochastic. A fixed, operator-visible seed makes the
-    # same source/model pair reproducible and lets the integrated Raw boundary
-    # be compared directly with standalone GAME rather than comparing two
-    # unrelated random samples.
-    seed = int(os.environ.get("GAME_RANDOM_SEED", "0"))
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    seed = requested_seed(os.environ.get("GAME_RANDOM_SEED"))
+    if seed is not None:
+        import numpy as np  # noqa: PLC0415 — only needed on the opt-in path
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
     if should_disable_mkldnn(cuda_available=torch.cuda.is_available()):
         torch.backends.mkldnn.enabled = False
 

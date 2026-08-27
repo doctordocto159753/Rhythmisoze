@@ -34,9 +34,19 @@ covers the Musician foundation and the optional transcription engine.
 | Licence (**weights**) | **CC BY-NC-SA 4.0** |
 | Role | A second opinion about which octave a note is in. Never a transcription in its own right. |
 | Integration | Cloned at the pinned SHA inside the `transcription` container image and driven through its own `infer.py`. Never a package dependency of the app, and not a `vendor/` submodule — see rule 7 below. |
-| Model artifact | `GAME-1.0-small.zip`, release `v1.0.0`, 46,886,125 bytes |
+| Model artifact (default) | `GAME-1.0-large.zip`, release `v1.0.0`, 366,297,733 bytes |
+| Checksum (zip) | `f45eac9fbb92b82fe67c00f29efad52954469897eb64e5bd5924a43dc5deb9b6` |
+| Checksum (`model.pt`) | `1a286ae10cd460cbce46de1f96c2922d048d03dd88fbd089433787f8d8f97661` |
+| Model artifact (alternative) | `GAME-1.0-small.zip`, release `v1.0.0`, 46,886,125 bytes |
 | Checksum (zip) | `3d3e1ac0a83234b2a163a3d43043455d15670765eaa25ef6285c399da1ccc576` |
 | Checksum (`model.pt`) | `7dd10022a4011938843249a31d9527691376c493d13687a7fc1dec88786b9691` |
+
+**Both are v1.0.0 PyTorch checkpoints, and that is deliberate.** v1.0.3 publishes
+ONNX graphs only, so the release with the newest number cannot be driven by
+upstream's own `infer.py`. Running it meant reimplementing GAME's extraction
+here, which was tried twice and was measurably less musical than the CLI both
+times. Executing upstream at v1.0.0 beats reimplementing it at v1.0.3, so the
+integration follows the code rather than the version number.
 
 **The licence split is the important line in this table.** The repository is MIT
 and can be built into an image. The v1.0.0 release notes state plainly: *"The
@@ -273,23 +283,12 @@ here.
    exchange for nothing. The pin is `GAME_REVISION`, a build argument, and it is
    the same SHA recorded above.
 
-   **GAME deviates a second time, and this one is a file copy.**
-   `services/transcription/src/transcription_service/game_slicer.py` is upstream's
-   `inference/slicer2.py` at the same pinned SHA, ported from its own numpy to
-   ours. Nothing about where a cut lands was changed; the frame arithmetic and
-   all three silence-width branches are upstream's, and a parity check against
-   the pinned file returns byte-identical chunks and offsets.
-
-   The reason for copying rather than importing is that the large ONNX backend
-   exists so that production does not need the PyTorch inference tree beside it,
-   and upstream's slicer lives inside that tree. Copying one numpy file is a
-   smaller dependency than the tree it sits in. Upstream is MIT and the notice
-   travels in the module's own header, per rule 6.
-
-   Copying it is not optional in the way it sounds. GAME never transcribes a
-   whole recording: `infer.py extract` slices at silences and stitches the
-   chunk results back with their offsets, and a backend that skips that step is
-   a different transcription engine wearing the same weights.
+   **There is no second deviation any more.** For a while there was: a copy of
+   upstream's `inference/slicer2.py`, taken so that a custom ONNX backend could
+   reproduce GAME's slicing without the PyTorch tree beside it. That backend and
+   that copy are both gone (last present at `c49d8d5`). Nothing upstream is
+   copied into this repository now — GAME is executed, not reimplemented, and
+   the reason is recorded under the GAME entry above.
 
 8. **A model's weights are licensed separately from its code, and the difference
    decides whether it can be a default.** Recording both is not paperwork: GAME

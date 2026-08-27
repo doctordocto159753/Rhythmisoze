@@ -97,9 +97,37 @@ class TestCpuHost:
         assert not hasattr(torch, "set_num_threads_called")
         assert vars(torch).keys() == {"cuda", "backends", "manual_seed_calls"}
 
-    def test_seeds_stochastic_inference_reproducibly(
+    def test_does_not_seed_by_default(
         self, torch_stub, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Upstream's CLI seeds nothing, and GAME's segmenter samples: every D3PM
+        # step draws `torch.rand_like`. Seeding to a fixed value does not make
+        # that draw better, it makes it one particular draw taken from a
+        # generator state no standalone run ever had. The service exists to
+        # reproduce the standalone result, so by default it does not seed.
+        torch = torch_stub(cuda_available=False)
+        monkeypatch.delenv("GAME_RANDOM_SEED", raising=False)
+        module, _ = _load(monkeypatch)
+        module.main()
+
+        assert torch.manual_seed_calls == []
+
+    def test_treats_an_empty_seed_as_unset(
+        self, torch_stub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # So a compose file can declare the variable without pinning the
+        # sampler, which is exactly how it is declared.
+        torch = torch_stub(cuda_available=False)
+        monkeypatch.setenv("GAME_RANDOM_SEED", "")
+        module, _ = _load(monkeypatch)
+        module.main()
+
+        assert torch.manual_seed_calls == []
+
+    def test_seeds_when_an_operator_asks(
+        self, torch_stub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Opt-in, for comparing two builds with the sampling held still.
         torch = torch_stub(cuda_available=False)
         monkeypatch.setenv("GAME_RANDOM_SEED", "17")
         module, _ = _load(monkeypatch)

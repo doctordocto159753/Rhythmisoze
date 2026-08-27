@@ -1,6 +1,6 @@
 /** Standard MIDI File import into Rhythmisoze's stable event contracts. */
 
-import { Midi } from '@tonejs/midi';
+import { parseMidi as parseSmf, type MidiEvent } from 'midi-file';
 import {
   AppError,
   BPM_MAX,
@@ -14,6 +14,10 @@ import {
   type JudgeVerdict,
   type Meter,
   type NoteEvent,
+  type RawNoteEvent,
+  type RawMidiTempoEvent,
+  type RawMidiTimeSignatureEvent,
+  type RawTranscription,
 } from '@contracts';
 import { classifyMidiInput } from '@intent';
 
@@ -32,48 +36,58 @@ export interface MidiImportResult {
   meter: Meter;
   durationSec: number;
   trackCount: number;
+  /** Complete immutable canonical Raw value, including source MIDI timing identity. */
+  rawTranscription: RawTranscription;
 }
 
 export function importMidi(data: Uint8Array): MidiImportResult {
-  let midi: Midi;
+  let parsed: ReturnType<typeof parseSmf>;
   try {
-    midi = new Midi(data);
+    parsed = parseSmf(data);
   } catch (error) {
     throw new AppError('midi_invalid', 'retry', 'parse failed', { cause: error });
   }
 
+  const canonical = parseCanonicalEvents(parsed);
   const notes: NoteEvent[] = [];
   const drums: DrumEvent[] = [];
-
-  for (const track of midi.tracks) {
-    const percussion = track.channel === GM_DRUM_CHANNEL;
-    for (const note of track.notes) {
-      const startSec = Math.max(0, note.time);
-      const endSec = Math.max(startSec + 0.01, startSec + note.duration);
-      const velocity = Math.max(1, Math.min(127, Math.round(note.velocity * 127)));
-      if (percussion) {
+  for (const raw of canonical.notes) {
+    const startSec = raw.startSec;
+    const endSec = Math.max(startSec + 0.01, raw.endSec);
+    const velocity = raw.velocity ?? 96;
+    if (raw.sourceChannel === GM_DRUM_CHANNEL) {
         drums.push({
           timeSec: startSec,
-          drum: gmDrumClass(note.midi),
+          drum: gmDrumClass(raw.pitchMidi),
           // General MIDI note numbers name instruments, so the number *is* the
           // identity and the app's three-slot kit is a coarser rendering of it.
           // A side stick and a snare are both played through `snare`; they are
           // not the same part, and nothing downstream may treat them as one.
-          voice: `gm:${Math.round(note.midi)}`,
-          sourcePitch: Math.round(note.midi),
+          voice: `gm:${Math.round(raw.pitchMidi)}`,
+          sourcePitch: Math.round(raw.pitchMidi),
           sourceChannel: GM_DRUM_CHANNEL,
+          sourceTrack: raw.sourceTrack,
+          sourceOrder: raw.sourceOrder,
+          sourceEndSec: endSec,
+          sourceStartTicks: raw.sourceStartTicks,
+          sourceEndTicks: raw.sourceEndTicks,
           velocity,
           confidence: 1,
         });
-      } else {
-        notes.push({
+    } else {
+        const imported: NoteEvent = {
           startSec,
           endSec,
-          pitch: Math.max(0, Math.min(127, Math.round(note.midi))),
+          pitch: raw.pitchMidi,
           velocity,
           confidence: 1,
-        });
-      }
+          sourceTrack: raw.sourceTrack,
+          sourceChannel: raw.sourceChannel,
+          sourceOrder: raw.sourceOrder,
+          sourceStartTicks: raw.sourceStartTicks,
+          sourceEndTicks: raw.sourceEndTicks,
+        };
+        notes.push(imported);
     }
   }
 
@@ -83,8 +97,8 @@ export function importMidi(data: Uint8Array): MidiImportResult {
     throw new AppError('midi_empty', 'retry', 'no note events');
   }
 
-  const tempo = midi.header.tempos[0]?.bpm ?? 100;
-  const signature = midi.header.timeSignatures[0]?.timeSignature;
+  const tempo = canonical.tempos[0]?.bpm ?? 120;
+  const signature = canonical.timeSignatures[0]?.timeSignature;
   const beatsPerBar = signature?.[0];
   const beatUnit = signature?.[1];
   const meter: Meter =
@@ -102,9 +116,157 @@ export function importMidi(data: Uint8Array): MidiImportResult {
     drums,
     bpm: Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(tempo))),
     meter,
-    durationSec: Math.max(eventDuration, midi.duration),
-    trackCount: midi.tracks.length,
+    durationSec: Math.max(eventDuration, canonical.durationSec),
+    trackCount: parsed.header.numTracks,
+    rawTranscription: {
+      version: 1,
+      sourceKind: 'midi',
+      notes: canonical.notes,
+      drums: drums.map((drum) => ({ ...drum })),
+      provenance: {
+        source: 'midi',
+        transcriber: 'midi-import',
+        model: 'standard-midi-file',
+        modelVersion: 'smf',
+        backend: 'midi-parser',
+      },
+      sourceDurationSec: Math.max(eventDuration, canonical.durationSec),
+      midi: {
+        format: parsed.header.format,
+        ppq: canonical.ppq,
+        trackCount: parsed.header.numTracks,
+        tempos: canonical.tempos,
+        timeSignatures: canonical.timeSignatures,
+      },
+    },
   };
+}
+
+interface AbsoluteTempo {
+  ticks: number;
+  microsecondsPerBeat: number;
+  sourceTrack: number;
+  sourceOrder: number;
+}
+
+function parseCanonicalEvents(parsed: ReturnType<typeof parseSmf>): {
+  notes: RawNoteEvent[];
+  tempos: RawMidiTempoEvent[];
+  timeSignatures: RawMidiTimeSignatureEvent[];
+  ppq: number;
+  durationSec: number;
+} {
+  const ppq = parsed.header.ticksPerBeat;
+  if (!ppq || ppq <= 0) {
+    throw new AppError('midi_invalid', 'retry', 'SMPTE time division is not supported');
+  }
+  const tempos: AbsoluteTempo[] = [];
+  const signatures: Array<{
+    ticks: number;
+    numerator: number;
+    denominator: number;
+    sourceTrack: number;
+    sourceOrder: number;
+  }> = [];
+  const absoluteTracks: Array<Array<{ event: MidiEvent; ticks: number; order: number }>> = [];
+  for (const [sourceTrack, track] of parsed.tracks.entries()) {
+    let ticks = 0;
+    const absolute = track.map((event, sourceOrder) => {
+      ticks += event.deltaTime;
+      if (event.type === 'setTempo') {
+        tempos.push({ ticks, microsecondsPerBeat: event.microsecondsPerBeat, sourceTrack, sourceOrder });
+      } else if (event.type === 'timeSignature') {
+        signatures.push({
+          ticks,
+          numerator: event.numerator,
+          denominator: event.denominator,
+          sourceTrack,
+          sourceOrder,
+        });
+      }
+      return { event, ticks, order: sourceOrder };
+    });
+    absoluteTracks.push(absolute);
+  }
+
+  const sortedTempos = [...tempos].sort(
+    (a, b) => a.ticks - b.ticks || a.sourceTrack - b.sourceTrack || a.sourceOrder - b.sourceOrder,
+  );
+  const tempoClock = (sourceTrack: number): AbsoluteTempo[] =>
+    parsed.header.format === 2
+      ? sortedTempos.filter((tempo) => tempo.sourceTrack === sourceTrack)
+      : sortedTempos;
+  const notes: RawNoteEvent[] = [];
+  let noteOrder = 0;
+
+  for (const [sourceTrack, events] of absoluteTracks.entries()) {
+    const active = new Map<string, Array<{ ticks: number; velocity: number; sourceOrder: number }>>();
+    const clock = tempoClock(sourceTrack);
+    for (const { event, ticks } of events) {
+      if (event.type !== 'noteOn' && event.type !== 'noteOff') continue;
+      const key = `${event.channel}:${event.noteNumber}`;
+      const noteOff = event.type === 'noteOff' || event.velocity === 0;
+      if (!noteOff) {
+        const queue = active.get(key) ?? [];
+        queue.push({ ticks, velocity: event.velocity, sourceOrder: noteOrder });
+        noteOrder += 1;
+        active.set(key, queue);
+        continue;
+      }
+      const queue = active.get(key);
+      const started = queue?.shift();
+      if (!started) continue;
+      notes.push({
+        startSec: ticksToSeconds(started.ticks, ppq, clock),
+        endSec: ticksToSeconds(ticks, ppq, clock),
+        pitchMidi: event.noteNumber,
+        velocity: Math.max(1, Math.min(127, started.velocity)),
+        confidence: 1,
+        sourceTrack,
+        sourceChannel: event.channel,
+        sourceOrder: started.sourceOrder,
+        sourceStartTicks: started.ticks,
+        sourceEndTicks: ticks,
+      });
+    }
+  }
+
+  const canonicalTempos: RawMidiTempoEvent[] = sortedTempos.map((tempo) => ({
+    ticks: tempo.ticks,
+    bpm: 60_000_000 / tempo.microsecondsPerBeat,
+    timeSec: ticksToSeconds(tempo.ticks, ppq, tempoClock(tempo.sourceTrack)),
+    sourceTrack: tempo.sourceTrack,
+    sourceOrder: tempo.sourceOrder,
+  }));
+  const canonicalSignatures: RawMidiTimeSignatureEvent[] = signatures
+    .sort((a, b) => a.ticks - b.ticks || a.sourceTrack - b.sourceTrack || a.sourceOrder - b.sourceOrder)
+    .map((signature) => ({
+      ticks: signature.ticks,
+      timeSignature: [signature.numerator, signature.denominator],
+      timeSec: ticksToSeconds(signature.ticks, ppq, tempoClock(signature.sourceTrack)),
+      sourceTrack: signature.sourceTrack,
+      sourceOrder: signature.sourceOrder,
+    }));
+  return {
+    notes: notes.sort((a, b) => (a.sourceOrder ?? 0) - (b.sourceOrder ?? 0)),
+    tempos: canonicalTempos,
+    timeSignatures: canonicalSignatures,
+    ppq,
+    durationSec: Math.max(0, ...notes.map((note) => note.endSec)),
+  };
+}
+
+function ticksToSeconds(ticks: number, ppq: number, tempos: readonly AbsoluteTempo[]): number {
+  let seconds = 0;
+  let previousTicks = 0;
+  let microsecondsPerBeat = 500_000;
+  for (const tempo of tempos) {
+    if (tempo.ticks > ticks) break;
+    seconds += ((tempo.ticks - previousTicks) * microsecondsPerBeat) / (ppq * 1_000_000);
+    previousTicks = tempo.ticks;
+    microsecondsPerBeat = tempo.microsecondsPerBeat;
+  }
+  return seconds + ((ticks - previousTicks) * microsecondsPerBeat) / (ppq * 1_000_000);
 }
 
 function gmDrumClass(note: number): DrumClass {
@@ -193,6 +355,10 @@ export function interpretNotesAsRhythm(notes: readonly NoteEvent[]): DrumEvent[]
         // anything else, and pretending otherwise would understate the evidence.
         confidence: 1,
         sourcePitch: note.pitch,
+        sourceChannel: note.sourceChannel,
+        sourceTrack: note.sourceTrack,
+        sourceOrder: note.sourceOrder,
+        sourceEndSec: note.endSec,
       };
     })
     .sort((a, b) => a.timeSec - b.timeSec || (a.sourcePitch ?? 0) - (b.sourcePitch ?? 0));

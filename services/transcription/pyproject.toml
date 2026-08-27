@@ -1,12 +1,13 @@
 [project]
 name = "rhythmisoze-transcription"
 version = "0.1.0"
-description = "Optional register-witness service. Wraps GAME as a second opinion about which octave a note is in."
+description = "Authoritative server-side GAME transcription and rhythm-routing service."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
   "python-multipart>=0.0.9",
+  "numpy<2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -16,7 +17,6 @@ dependencies = [
 real = [
   "torch>=2.4",
   "torchaudio>=2.4",
-  "numpy<2.0.0",
   "librosa>=0.10",
   "einops>=0.7.0",
   "omegaconf>=2.3",

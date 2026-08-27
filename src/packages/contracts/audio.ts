@@ -5,7 +5,7 @@
  * to Basic Pitch, a pitch tracker or a future server endpoint directly.
  */
 
-import type { DrumEvent, MusicalPhraseModel, NoteEvent, OnsetEvent } from './music';
+import type { DrumEvent, MusicalPhraseModel, NoteEvent, OnsetEvent, RawTranscription } from './music';
 
 /**
  * The single internal audio representation. Everything upstream (MediaRecorder
@@ -50,6 +50,7 @@ export interface AudioValidation {
 }
 
 export type TranscriberId =
+  | 'game'
   | 'melody-extraction'
   | 'basic-pitch'
   | 'basic-pitch-yin'
@@ -192,6 +193,8 @@ export interface JudgeVerdict {
 }
 
 export interface TranscriptionResult {
+  /** Immutable authoritative material. Derived stages must read, never replace, it. */
+  rawTranscription?: RawTranscription;
   notes: NoteEvent[];
   /**
    * Evidence-preserving interpretation of continuity for pitched material.

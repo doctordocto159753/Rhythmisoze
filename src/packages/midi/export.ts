@@ -1,22 +1,7 @@
-/**
- * US-0901 / US-0505 - Standard MIDI File export.
- *
- * ## Documented mapping
- *
- * **Melody** - one track, channel 1, General MIDI program taken from the chosen
- * instrument's registry entry. Notes carry their retouched time, pitch and
- * velocity, in seconds, converted by `@tonejs/midi` against the file tempo.
- *
- * **Rhythm** - one track on channel 10, the GM percussion channel, with
- * `kick -> 36`, `snare -> 38`, `hat -> 42`. An `unknown` stroke is voiced as a
- * closed hat rather than dropped, so the exported file and the in-app playback
- * agree note for note (US-0505 acceptance criterion).
- *
- * The file's tempo is the BPM the user tapped, so opening it in a DAW lands the
- * notes on that DAW's grid rather than somewhere near it.
- */
+/** Standard MIDI export with source timing/channel/track semantics retained. */
 
 import { Midi } from '@tonejs/midi';
+import { writeMidi, type MidiEvent } from 'midi-file';
 import {
   GM_DRUM_MAP,
   GM_DRUM_CHANNEL,
@@ -24,111 +9,230 @@ import {
   type DrumEvent,
   type Meter,
   type NoteEvent,
+  type RawMidiMetadata,
 } from '@contracts';
 
 export interface MidiExportOptions {
   bpm: number;
   meter: Meter;
   title: string;
-  /** General MIDI program number, 0..127. Ignored for the rhythm track. */
   program: number;
   instrumentName?: string;
+  /** Source clock and event map for MIDI-derived versions. */
+  rawMidiMetadata?: Readonly<RawMidiMetadata>;
 }
 
-/** GM percussion lives on channel 10, which is index 9. */
+interface AbsoluteEvent {
+  ticks: number;
+  priority: number;
+  event: { type: string; [key: string]: unknown };
+}
 
 export function melodyToMidi(notes: readonly NoteEvent[], options: MidiExportOptions): Uint8Array {
-  const midi = new Midi();
-  midi.header.setTempo(options.bpm);
-  midi.header.timeSignatures.push({
-    ticks: 0,
-    timeSignature: [options.meter.beatsPerBar, options.meter.beatUnit],
-  });
-  midi.header.name = options.title;
+  const metadata = options.rawMidiMetadata;
+  const trackCount = outputTrackCount(
+    metadata,
+    notes.map((note) => note.sourceTrack),
+  );
+  const tracks: AbsoluteEvent[][] = Array.from({ length: trackCount }, () => []);
+  addHeaderEvents(tracks, options);
 
-  const track = midi.addTrack();
-  track.name = options.instrumentName ?? options.title;
-  track.channel = 0;
-  track.instrument.number = clampProgram(options.program);
-
-  for (const note of notes) {
-    track.addNote({
-      midi: clampPitch(note.pitch),
-      time: Math.max(0, note.startSec),
-      duration: Math.max(0.01, note.endSec - note.startSec),
-      velocity: clampVelocity(note.velocity) / 127,
-    });
+  const programmed = new Set<string>();
+  for (const note of [...notes].sort(sourceOrder)) {
+    const trackIndex = resolveTrack(note.sourceTrack, trackCount);
+    const channel = clampChannel(note.sourceChannel ?? 0);
+    const programKey = `${trackIndex}:${channel}`;
+    if (!programmed.has(programKey)) {
+      programmed.add(programKey);
+      tracks[trackIndex]?.push({
+        ticks: 0,
+        priority: 2,
+        event: { type: 'programChange', channel, programNumber: clampProgram(options.program) },
+      });
+    }
+    const start = eventTicks(note.startSec, note.sourceStartTicks, metadata);
+    const end = Math.max(start + 1, eventTicks(note.endSec, note.sourceEndTicks, metadata));
+    tracks[trackIndex]?.push(
+      {
+        ticks: start,
+        priority: 4,
+        event: {
+          type: 'noteOn', channel, noteNumber: clampPitch(note.pitch),
+          velocity: clampVelocity(note.velocity),
+        },
+      },
+      {
+        ticks: end,
+        priority: 3,
+        event: { type: 'noteOff', channel, noteNumber: clampPitch(note.pitch), velocity: 0 },
+      },
+    );
   }
-
-  return midi.toArray();
+  return encodeTracks(tracks, options, metadata);
 }
 
 export function rhythmToMidi(drums: readonly DrumEvent[], options: MidiExportOptions): Uint8Array {
-  const midi = new Midi();
-  midi.header.setTempo(options.bpm);
-  midi.header.timeSignatures.push({
-    ticks: 0,
-    timeSignature: [options.meter.beatsPerBar, options.meter.beatUnit],
-  });
-  midi.header.name = options.title;
+  const metadata = options.rawMidiMetadata;
+  const trackCount = outputTrackCount(
+    metadata,
+    drums.map((event) => event.sourceTrack),
+  );
+  const tracks: AbsoluteEvent[][] = Array.from({ length: trackCount }, () => []);
+  addHeaderEvents(tracks, options);
+  for (const hit of [...drums].sort(sourceOrder)) {
+    const trackIndex = resolveTrack(hit.sourceTrack, trackCount);
+    const channel = clampChannel(hit.sourceChannel ?? GM_DRUM_CHANNEL);
+    const pitch = hit.sourcePitch === undefined ? drumToGmNote(hit.drum) : clampPitch(hit.sourcePitch);
+    const start = eventTicks(hit.timeSec, hit.sourceStartTicks, metadata);
+    const endSec = hit.sourceEndSec ?? hit.timeSec + 0.125;
+    const end = Math.max(start + 1, eventTicks(endSec, hit.sourceEndTicks, metadata));
+    tracks[trackIndex]?.push(
+      {
+        ticks: start,
+        priority: 4,
+        event: { type: 'noteOn', channel, noteNumber: pitch, velocity: clampVelocity(hit.velocity) },
+      },
+      {
+        ticks: end,
+        priority: 3,
+        event: { type: 'noteOff', channel, noteNumber: pitch, velocity: 0 },
+      },
+    );
+  }
+  return encodeTracks(tracks, options, metadata);
+}
 
-  const track = midi.addTrack();
-  track.name = options.instrumentName ?? 'Drums';
-
-  /**
-   * A rhythm is written back the way it arrived.
-   *
-   * Routing everything through `drumToGmNote` sends each hit through its *kit
-   * slot*, which is a playback assignment onto three sounds. A file with fifteen
-   * layers would come back with three, and the export would destroy on the way
-   * out exactly what the import was careful to keep.
-   *
-   * So a hit that carries its own source note is written as that note: on the
-   * percussion channel when the file declared it there, where the number really
-   * is an instrument and 37 and 38 are a side stick and a snare; on an ordinary
-   * channel otherwise, where the number is just the number somebody used.
-   *
-   * Detected audio has no source note at all, and channel 10 with a GM number is
-   * exactly right for it — a detected kick really is a kick.
-   */
-  const declaredPercussion = drums.every((event) => event.sourceChannel === GM_DRUM_CHANNEL);
-  const hasSourceNotes = drums.length > 0 && drums.every((event) => event.sourcePitch !== undefined);
-  track.channel = hasSourceNotes && !declaredPercussion ? 0 : GM_DRUM_CHANNEL;
-
-  for (const event of drums) {
-    track.addNote({
-      midi: hasSourceNotes ? clampPitch(event.sourcePitch as number) : drumToGmNote(event.drum),
-      time: Math.max(0, event.timeSec),
-      // Percussion is one-shot; the note length only has to be non-zero for a
-      // sequencer to draw it. An eighth of a second reads clearly in a piano roll.
-      duration: 0.125,
-      velocity: clampVelocity(event.velocity) / 127,
+function addHeaderEvents(tracks: AbsoluteEvent[][], options: MidiExportOptions): void {
+  const metadata = options.rawMidiMetadata;
+  const tempos = metadata?.tempos.length
+    ? metadata.tempos
+    : [{ ticks: 0, bpm: options.bpm, timeSec: 0, sourceTrack: 0 }];
+  for (const tempo of tempos) {
+    const track = resolveTrack(tempo.sourceTrack, tracks.length);
+    tracks[track]?.push({
+      ticks: tempo.ticks,
+      priority: 0,
+      event: { type: 'setTempo', meta: true, microsecondsPerBeat: Math.round(60_000_000 / tempo.bpm) },
     });
   }
+  const signatures = metadata?.timeSignatures.length
+    ? metadata.timeSignatures
+    : [{ ticks: 0, timeSignature: [options.meter.beatsPerBar, options.meter.beatUnit] as const, sourceTrack: 0 }];
+  for (const signature of signatures) {
+    const track = resolveTrack(signature.sourceTrack, tracks.length);
+    tracks[track]?.push({
+      ticks: signature.ticks,
+      priority: 1,
+      event: {
+        type: 'timeSignature', meta: true,
+        numerator: signature.timeSignature[0], denominator: signature.timeSignature[1],
+        metronome: 24, thirtyseconds: 8,
+      },
+    });
+  }
+}
 
-  return midi.toArray();
+function encodeTracks(
+  tracks: AbsoluteEvent[][],
+  options: MidiExportOptions,
+  metadata: Readonly<RawMidiMetadata> | undefined,
+): Uint8Array {
+  const encoded = tracks.map((events, trackIndex) => {
+    if (trackIndex === 0) {
+      events.push({ ticks: 0, priority: -1, event: { type: 'trackName', meta: true, text: options.title } });
+    }
+    events.sort((a, b) => a.ticks - b.ticks || a.priority - b.priority);
+    let previous = 0;
+    const relative = events.map(({ ticks, event }) => {
+      const deltaTime = Math.max(0, ticks - previous);
+      previous = ticks;
+      return { ...event, deltaTime } as MidiEvent;
+    });
+    relative.push({ type: 'endOfTrack', meta: true, deltaTime: 0 });
+    return relative;
+  });
+  return Uint8Array.from(writeMidi({
+    header: {
+      format: (metadata?.format ?? (tracks.length > 1 ? 1 : 0)) as 0 | 1 | 2,
+      numTracks: encoded.length,
+      ticksPerBeat: metadata?.ppq ?? 480,
+    },
+    tracks: encoded,
+  }));
+}
+
+function eventTicks(
+  seconds: number,
+  sourceTicks: number | undefined,
+  metadata: Readonly<RawMidiMetadata> | undefined,
+): number {
+  if (metadata && sourceTicks !== undefined) {
+    const originalSec = ticksToSeconds(sourceTicks, metadata);
+    if (Math.abs(originalSec - seconds) <= 1e-6) return sourceTicks;
+  }
+  return secondsToTicks(Math.max(0, seconds), metadata);
+}
+
+function secondsToTicks(seconds: number, metadata: Readonly<RawMidiMetadata> | undefined): number {
+  const ppq = metadata?.ppq ?? 480;
+  const tempos = metadata?.tempos.length
+    ? [...metadata.tempos].sort((a, b) => a.timeSec - b.timeSec)
+    : [{ timeSec: 0, ticks: 0, bpm: 120 }];
+  let active = tempos[0] as { timeSec: number; ticks: number; bpm: number };
+  for (const tempo of tempos) {
+    if (tempo.timeSec > seconds) break;
+    active = tempo;
+  }
+  return Math.max(0, Math.round(active.ticks + (seconds - active.timeSec) * ppq * active.bpm / 60));
+}
+
+function ticksToSeconds(ticks: number, metadata: Readonly<RawMidiMetadata>): number {
+  const tempos = metadata.tempos.length
+    ? [...metadata.tempos].sort((a, b) => a.ticks - b.ticks)
+    : [{ ticks: 0, bpm: 120, timeSec: 0 }];
+  let active = tempos[0] as { timeSec: number; ticks: number; bpm: number };
+  for (const tempo of tempos) {
+    if (tempo.ticks > ticks) break;
+    active = tempo;
+  }
+  return active.timeSec + ((ticks - active.ticks) * 60) / (metadata.ppq * active.bpm);
+}
+
+function outputTrackCount(
+  metadata: Readonly<RawMidiMetadata> | undefined,
+  sourceTracks: readonly (number | undefined)[],
+): number {
+  return Math.max(1, metadata?.trackCount ?? 0, ...sourceTracks.map((track) => (track ?? 0) + 1));
+}
+
+function resolveTrack(track: number | undefined, count: number): number {
+  return Math.max(0, Math.min(count - 1, Math.round(track ?? 0)));
+}
+
+function sourceOrder(a: { sourceOrder?: number; startSec?: number; timeSec?: number }, b: { sourceOrder?: number; startSec?: number; timeSec?: number }): number {
+  return (a.sourceOrder ?? Number.MAX_SAFE_INTEGER) - (b.sourceOrder ?? Number.MAX_SAFE_INTEGER) ||
+    (a.startSec ?? a.timeSec ?? 0) - (b.startSec ?? b.timeSec ?? 0);
 }
 
 export function drumToGmNote(drum: DrumEvent['drum']): number {
   const resolved = drum === 'unknown' ? UNKNOWN_DRUM_FALLBACK : drum;
-  // UNKNOWN_DRUM_FALLBACK is itself typed as DrumClass, so narrow once here
-  // rather than letting every call site deal with it.
   return GM_DRUM_MAP[resolved as Exclude<DrumEvent['drum'], 'unknown'>];
 }
 
 function clampProgram(program: number): number {
   return Math.max(0, Math.min(127, Math.round(program)));
 }
-
 function clampPitch(pitch: number): number {
   return Math.max(0, Math.min(127, Math.round(pitch)));
 }
-
+function clampChannel(channel: number): number {
+  return Math.max(0, Math.min(15, Math.round(channel)));
+}
 function clampVelocity(velocity: number): number {
   return Math.max(1, Math.min(127, Math.round(velocity)));
 }
 
-/** Reads a file back. Used by the export tests to prove what was written. */
+/** Reads a file back. Used by export tests to prove what was written. */
 export function parseMidi(data: Uint8Array): Midi {
   return new Midi(data);
 }

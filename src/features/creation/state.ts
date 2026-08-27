@@ -24,12 +24,14 @@ import {
   type MusicalPhraseModel,
   type NoteEvent,
   type ProcessingDiagnostics,
+  type RawTranscription,
   type TranscriptionInputMode,
   type TranscriptionProgress,
 } from '@contracts';
 import type { LevelSnapshot } from '@audio-core';
 import { RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
-import type { VersionId } from '@rhythm-extraction';
+import type { PerformanceRhythm, VersionId } from '@rhythm-extraction';
+import { freezeRawTranscription } from '@raw-transcription';
 import { DEFAULT_MASTER, resolveInstrument, type MasterSettings } from '@synthesis';
 import {
   INITIAL_CONTEXT,
@@ -98,6 +100,10 @@ export interface FlowState {
   validation: AudioValidation | null;
 
   rawNotes: NoteEvent[];
+  /** Immutable authoritative source material and provenance. */
+  rawTranscription: RawTranscription | null;
+  /** Server-computed analysis for audio; MIDI analysis is also stored here. */
+  rhythmAnalysis: PerformanceRhythm | null;
   /** Source evidence and its continuity interpretation; null for rhythm. */
   phraseModel: MusicalPhraseModel | null;
   /** The current source's Judge verdict. Null for rhythm-only material. */
@@ -159,6 +165,9 @@ export type Action =
   | { type: 'rerouteAudio' }
   | {
       type: 'transcribed';
+      /** Required by production callers; optional only for pre-Raw reducer fixtures. */
+      rawTranscription?: RawTranscription;
+      rhythmAnalysis?: PerformanceRhythm | null;
       judge: JudgeVerdict | null;
       notes: NoteEvent[];
       phraseModel?: MusicalPhraseModel | null;
@@ -169,6 +178,9 @@ export type Action =
     }
   | {
       type: 'midiImported';
+      /** Required by production callers; optional only for pre-Raw reducer fixtures. */
+      rawTranscription?: RawTranscription;
+      rhythmAnalysis?: PerformanceRhythm | null;
       mode: CreationMode;
       bpm: number;
       meter: Meter;
@@ -226,6 +238,8 @@ export const SOURCE_DERIVED_FIELDS = [
   'durationSec',
   'validation',
   'rawNotes',
+  'rawTranscription',
+  'rhythmAnalysis',
   'phraseModel',
   'judge',
   'referenceNotes',
@@ -278,6 +292,8 @@ export function beginNewSource(state: FlowState): Pick<FlowState, SourceDerivedF
     durationSec: 0,
     validation: null,
     rawNotes: [],
+    rawTranscription: null,
+    rhythmAnalysis: null,
     phraseModel: null,
     judge: null,
     referenceNotes: [],
@@ -314,6 +330,8 @@ export function initialState(sketchId: string, mode: CreationMode = 'melody'): F
     durationSec: 0,
     validation: null,
     rawNotes: [],
+    rawTranscription: null,
+    rhythmAnalysis: null,
     phraseModel: null,
     judge: null,
     referenceNotes: [],
@@ -389,6 +407,9 @@ export function reducer(state: FlowState, action: Action): FlowState {
         const mode: CreationMode = classification
           ? classification === 'rhythm' ? 'rhythm' : 'melody'
           : state.mode;
+        const rawTranscription = action.rawTranscription
+          ? freezeRawTranscription(action.rawTranscription)
+          : null;
         return {
           ...state,
           mode,
@@ -397,6 +418,8 @@ export function reducer(state: FlowState, action: Action): FlowState {
             : state.melodyInputMode,
           instrumentId: mode === state.mode ? state.instrumentId : resolveInstrument(undefined, mode).id,
           rawNotes: action.notes,
+          rawTranscription,
+          rhythmAnalysis: action.rhythmAnalysis ?? null,
           phraseModel: action.phraseModel ?? null,
           judge: action.judge,
           referenceNotes: action.referenceNotes,
@@ -428,6 +451,10 @@ export function reducer(state: FlowState, action: Action): FlowState {
         source: action.source,
         durationSec: action.durationSec,
         rawNotes: action.notes,
+        rawTranscription: action.rawTranscription
+          ? freezeRawTranscription(action.rawTranscription)
+          : null,
+        rhythmAnalysis: action.rhythmAnalysis ?? null,
         phraseModel: action.phraseModel ?? null,
         judge: action.judge ?? null,
         rawDrums: action.drums,

@@ -1,189 +1,99 @@
-/**
- * US-0303 / US-0305 - the main-thread side of transcription.
- *
- * Owns exactly one worker for the lifetime of the tab. Spawning one per take
- * would reload TensorFlow.js and the model every time; keeping a pool would be
- * pointless because a person records one thing at a time.
- *
- * Cancellation is real: the worker is told to stop, the promise rejects with
- * `transcription_cancelled`, and - the part that is easy to get wrong - the
- * pending entry is removed so a late `result` message from an abandoned run
- * cannot resolve the next one (US-0303: "cancel/retry does not leave orphan
- * workers or corrupted state").
- */
+/** Thin browser transport for authoritative server-side transcription. */
 
 import {
   AppError,
-  type AppErrorCode,
   type MonoAudio,
-  type RecoveryAction,
+  type RawTranscription,
   type TranscriptionInputMode,
   type TranscriptionProgress,
   type TranscriptionResult,
 } from '@contracts';
-import type { WorkerRequest, WorkerResponse } from '@/workers/transcription.worker';
+import type { PerformanceRhythm } from '@rhythm-extraction';
+import { encodeWav } from '@audio-core';
 
 export interface TranscribeOptions {
   mode: TranscriptionInputMode;
-  /** `false` forces the built-in tracker. */
-  allowModel?: boolean;
-  /**
-   * Where the worker may ask for a second opinion about register.
-   *
-   * Supplied by the caller rather than resolved here, because whether to ask is
-   * a decision about the user's recording leaving their machine, and that
-   * decision belongs with the code that told them it would.
-   */
-  remoteWitnessUrl?: string;
-  noteThreshold?: number;
-  onsetThreshold?: number;
-  minNoteLengthSec?: number;
   onProgress?(progress: TranscriptionProgress): void;
   signal?: AbortSignal;
 }
 
-/**
- * Defaults.
- *
- * `noteThreshold` and `onsetThreshold` are Basic Pitch's confidence gates for
- * Instrument Mode. Voice Melody Mode owns its thresholds inside the dedicated
- * extraction package; rhythm uses onsetThreshold only.
- */
-const DEFAULTS = {
-  noteThreshold: 0.3,
-  onsetThreshold: 0.5,
-  minNoteLengthSec: 0.12,
-} as const;
-
-export const MODEL_URL =
-  process.env.NEXT_PUBLIC_BASIC_PITCH_MODEL_URL || '/models/basic-pitch/model.json';
-
-interface Pending {
-  resolve(result: TranscriptionResult): void;
-  reject(error: AppError): void;
-  onProgress?(progress: TranscriptionProgress): void;
-}
-
-let worker: Worker | null = null;
-const pending = new Map<string, Pending>();
-let counter = 0;
-
-function ensureWorker(): Worker {
-  if (worker !== null) return worker;
-  if (typeof Worker === 'undefined') {
-    throw new AppError('worker_unavailable', 'reload', 'no Worker');
-  }
-
-  worker = new Worker(new URL('../../workers/transcription.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'rhythmisoze-transcription',
-  });
-
-  worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-    const message = event.data;
-    const entry = pending.get(message.id);
-    if (!entry) return;
-
-    if (message.type === 'progress') {
-      entry.onProgress?.({
-        stage: message.stage as TranscriptionProgress['stage'],
-        progress: message.progress,
-      });
-      return;
-    }
-    pending.delete(message.id);
-    if (message.type === 'result') entry.resolve(message.result);
-    else {
-      entry.reject(
-        new AppError(
-          message.code as AppErrorCode,
-          message.recovery as RecoveryAction,
-          message.detail,
-        ),
-      );
-    }
-  };
-
-  worker.onerror = () => {
-    // The worker itself died. Every waiting caller must hear about it, and the
-    // next call gets a fresh worker rather than a dead handle.
-    const error = new AppError('worker_unavailable', 'reload', 'worker error');
-    for (const entry of pending.values()) entry.reject(error);
-    pending.clear();
-    worker?.terminate();
-    worker = null;
-  };
-
-  return worker;
+export interface ServerTranscriptionResult extends TranscriptionResult {
+  rawTranscription: RawTranscription;
+  rhythmAnalysis: PerformanceRhythm | null;
 }
 
 export async function transcribe(
   audio: MonoAudio,
   options: TranscribeOptions,
-): Promise<TranscriptionResult> {
-  const instance = ensureWorker();
-  const id = `t${(counter += 1)}`;
+): Promise<ServerTranscriptionResult> {
+  options.onProgress?.({ stage: 'preparing_audio', progress: 0.05 });
+  const wav = encodeWav([audio.samples], { sampleRate: audio.sampleRate });
+  const body = new FormData();
+  body.append('audio', new Blob([wav], { type: 'audio/wav' }), 'take.wav');
+  body.append('mode', options.mode);
+  options.onProgress?.({ stage: 'inferring', progress: 0.2 });
 
-  return new Promise<TranscriptionResult>((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress: options.onProgress });
-
-    const abort = (): void => {
-      if (!pending.has(id)) return;
-      pending.delete(id);
-      instance.postMessage({ type: 'cancel', id } satisfies WorkerRequest);
-      reject(new AppError('transcription_cancelled', 'none', 'user cancelled'));
-    };
-    options.signal?.addEventListener('abort', abort, { once: true });
-
+  let response: Response;
+  try {
+    response = await fetch('/api/transcription/transcribe', {
+      method: 'POST',
+      body,
+      signal: options.signal,
+    });
+  } catch (error) {
     if (options.signal?.aborted === true) {
-      abort();
-      return;
+      throw new AppError('transcription_cancelled', 'none', 'user cancelled', { cause: error });
     }
+    throw new AppError(
+      'transcription_failed',
+      'retry',
+      'authoritative transcription service is unreachable',
+      { cause: error },
+    );
+  }
 
-    // The sample buffer is transferred rather than copied: a 60 s take at
-    // 44.1 kHz is 10 MB, and structured-cloning it doubles peak memory on
-    // exactly the low-end phones the performance gate cares about.
-    const samples = new Float32Array(audio.samples);
-    const request: WorkerRequest = {
-      type: 'transcribe',
-      id,
-      mode: options.mode,
-      samples,
-      sampleRate: audio.sampleRate,
-      durationSec: audio.durationSec,
-      modelUrl: MODEL_URL,
-      allowModel: options.allowModel !== false,
-      ...(options.remoteWitnessUrl === undefined
-        ? {}
-        : { remoteWitnessUrl: options.remoteWitnessUrl }),
-      noteThreshold: options.noteThreshold ?? DEFAULTS.noteThreshold,
-      onsetThreshold: options.onsetThreshold ?? DEFAULTS.onsetThreshold,
-      minNoteLengthSec: options.minNoteLengthSec ?? DEFAULTS.minNoteLengthSec,
-    };
-    instance.postMessage(request, [samples.buffer]);
-  });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    const detail = readDetail(payload);
+    throw new AppError(
+      response.status === 422
+        ? 'input_unrecognized'
+        : response.status === 503
+          ? 'transcription_unavailable'
+          : 'transcription_failed',
+      response.status === 422 ? 'rerecord' : 'retry',
+      detail,
+    );
+  }
+  if (!isServerResult(payload)) {
+    throw new AppError('transcription_failed', 'retry', 'invalid authoritative response');
+  }
+  options.onProgress?.({ stage: 'done', progress: 1 });
+  return payload;
 }
 
-/**
- * US-0302 - warm the model before it is needed.
- *
- * Called on hover/focus of the record control, so the download overlaps the
- * seconds a user spends setting their tempo. If it fails, nothing happens: the
- * real transcription will try again and report properly.
- */
-export function warmModel(): void {
-  if (typeof window === 'undefined') return;
+async function readPayload(response: Response): Promise<unknown> {
   try {
-    ensureWorker();
-    void fetch(MODEL_URL, { cache: 'force-cache' }).catch(() => undefined);
+    return await response.json();
   } catch {
-    // Warming is best-effort by definition.
+    return null;
   }
 }
 
-/** Tears the worker down. Used when the page unloads and by tests. */
-export function disposeTranscriber(): void {
-  worker?.terminate();
-  worker = null;
-  pending.clear();
+function readDetail(payload: unknown): string {
+  if (typeof payload !== 'object' || payload === null) return 'transcription request failed';
+  const detail = (payload as Record<string, unknown>).detail;
+  return typeof detail === 'string' ? detail : 'transcription request failed';
+}
+
+function isServerResult(payload: unknown): payload is ServerTranscriptionResult {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const value = payload as Record<string, unknown>;
+  return (
+    typeof value.rawTranscription === 'object' && value.rawTranscription !== null &&
+    Array.isArray(value.notes) && Array.isArray(value.drums) &&
+    typeof value.durationSec === 'number' &&
+    typeof value.diagnostics === 'object' && value.diagnostics !== null &&
+    ('rhythmAnalysis' in value)
+  );
 }

@@ -15,6 +15,7 @@ import type {
   MusicalPhraseModel,
   NoteEvent,
   PitchClassName,
+  RawTranscription,
 } from './music';
 
 /**
@@ -97,6 +98,8 @@ export interface LocalSketch {
   retouch: RetouchSettings;
   /** Raw transcriber output. Kept so retouch strength stays non-destructive. */
   rawNotes: NoteEvent[];
+  /** Canonical immutable Raw contract. Optional only for pre-cutover sketches. */
+  rawTranscription?: RawTranscription;
   /** Additive; absent on projects saved before phrase interpretation existed. */
   phraseModel?: MusicalPhraseModel;
   rawDrums: DrumEvent[];

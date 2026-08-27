@@ -95,7 +95,17 @@ class TestCpuHost:
         module.main()
 
         assert not hasattr(torch, "set_num_threads_called")
-        assert vars(torch).keys() == {"cuda", "backends"}
+        assert vars(torch).keys() == {"cuda", "backends", "manual_seed_calls"}
+
+    def test_seeds_stochastic_inference_reproducibly(
+        self, torch_stub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        torch = torch_stub(cuda_available=False)
+        monkeypatch.setenv("GAME_RANDOM_SEED", "17")
+        module, _ = _load(monkeypatch)
+        module.main()
+
+        assert torch.manual_seed_calls == [17]
 
 
 class TestCudaHost:

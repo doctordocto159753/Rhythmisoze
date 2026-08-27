@@ -7,6 +7,7 @@ import type {
   LocalSourceAsset,
   Meter,
   NoteEvent,
+  RawTranscription,
 } from '@contracts';
 import { toAppError } from '@contracts';
 import { melodyToMidi, rhythmToMidi, toSafeFilename, toSafeFilenameStem } from '@midi';
@@ -17,6 +18,7 @@ import { Bdi, Text } from '@/components/Text';
 import { track } from '@/features/analytics/track';
 import { useLocale } from '@/i18n/provider';
 import { createExportArchive } from '@/packages/export/archive';
+import { exactRawMidiArtifact } from '@raw-transcription';
 
 export interface ExportPanelProps {
   title: string;
@@ -28,6 +30,7 @@ export interface ExportPanelProps {
   drums: readonly DrumEvent[];
   renderedAudio: Blob | null;
   source: LocalSourceAsset | null;
+  rawTranscription: RawTranscription | null;
   cleanupLabel: string;
   /**
    * Every version that has notes, for the complete package.
@@ -65,6 +68,7 @@ export function ExportPanel({
   drums,
   renderedAudio,
   source,
+  rawTranscription,
   cleanupLabel,
   versionNotes,
   selectedVersionId,
@@ -97,16 +101,19 @@ export function ExportPanel({
   }, []);
 
   const createMidi = useCallback((): Blob => {
+    const rawMidi = exactRawMidiArtifact(source, rawTranscription);
+    if (rawMidi && (selectedVersionId ?? 'unprocessed') === 'unprocessed') return rawMidi;
     const options = {
       bpm,
       meter,
       title: effectiveTitle,
       program: gmProgram,
       instrumentName,
+      rawMidiMetadata: rawTranscription?.midi,
     };
     const bytes = mode === 'rhythm' ? rhythmToMidi(drums, options) : melodyToMidi(notes, options);
     return new Blob([new Uint8Array(bytes)], { type: 'audio/midi' });
-  }, [bpm, meter, effectiveTitle, gmProgram, instrumentName, mode, drums, notes]);
+  }, [bpm, meter, effectiveTitle, gmProgram, instrumentName, mode, drums, notes, source, rawTranscription, selectedVersionId]);
 
   const downloadPackage = useCallback(async () => {
     // State-driven disabled styling arrives on the next render. This ref closes
@@ -126,7 +133,9 @@ export function ExportPanel({
         .filter(([, versionNoteList]) => (versionNoteList?.length ?? 0) > 0)
         .map(([versionId, versionNoteList]) => ({
           name: `${versionId}.mid`,
-          data: new Blob(
+          data: versionId === 'unprocessed' && exactRawMidiArtifact(source, rawTranscription)
+            ? exactRawMidiArtifact(source, rawTranscription) as Blob
+            : new Blob(
             [
               new Uint8Array(
                 melodyToMidi(versionNoteList as readonly NoteEvent[], {
@@ -135,6 +144,7 @@ export function ExportPanel({
                   title: `${effectiveTitle} (${versionId})`,
                   program: gmProgram,
                   instrumentName,
+                  rawMidiMetadata: rawTranscription?.midi,
                 }),
               ),
             ],
@@ -227,6 +237,7 @@ export function ExportPanel({
     versionProvenance,
     analysis,
     gmProgram,
+    rawTranscription,
   ]);
 
   const downloadWav = useCallback(async () => {

@@ -37,19 +37,7 @@ export const en = {
 
   landing: {
     lead: 'Hum an idea. Hear it played back.',
-    // Was: "Nothing is uploaded. Everything happens on your device until you
-    // choose to publish." That stopped being universally true when the Musician
-    // began sending symbolic note data to a server. The replacement says what
-    // is still true and is specific about the exception rather than hedging --
-    // vague privacy copy is worse than none, because it cannot be checked.
-    body: 'Your recording is processed on your device. Only note data leaves it, and only if you ask the musician for extra versions.',
-    // The same sentence, made true for a deployment that has switched the
-    // second transcription engine on. It is a different claim, so it is a
-    // different string rather than the first one with a caveat bolted on:
-    // "processed on your device" and "sent to a service" cannot both describe
-    // the same recording, and the interface must not imply they do.
-    bodyWithWitness:
-      'Your recording is sent to the transcription service this site runs, so a second engine can check it, and is deleted there once it has been read. Note data goes to the musician only if you ask for extra versions.',
+    body: 'Your recording is sent to the transcription service to create the Raw version. MIDI imports are parsed directly and keep their source file unchanged.',
     start: 'Start a sketch',
     howItWorks: 'How it works',
     steps: {
@@ -425,6 +413,7 @@ export const en = {
     midi_empty: 'No playable notes were found in that MIDI file.',
     model_load_failed: 'The listener could not be downloaded.',
     transcription_failed: 'Your take could not be read as notes.',
+    transcription_unavailable: 'The transcription service is not available right now.',
     transcription_empty: 'No notes were found in that take.',
     input_unrecognized: 'Could not confidently identify a musical performance.',
     melody_unclear:
@@ -501,12 +490,13 @@ export const en = {
   },
 
   privacy: {
-    localTitle: 'Your recording stays on your device',
+    localTitle: 'Your recording is sent for transcription',
     localBody:
-      'Your audio is processed in this browser and is never uploaded. Asking the musician for extra versions sends note data — not your recording — to our server.',
+      'Audio is uploaded to the configured transcription service. The original source is still kept unchanged for Raw export.',
     uploadTitle: 'This step uploads audio',
     processedBy: (backend: string) => `Processed by: ${backend}`,
     backends: {
+      game: 'GAME on the transcription server',
       'melody-extraction': 'the human melody engine, in your browser',
       'basic-pitch': 'the note model, in your browser',
       'basic-pitch-yin': 'the note model with melody contour, in your browser',

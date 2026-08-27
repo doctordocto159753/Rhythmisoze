@@ -1,5 +1,5 @@
-# The register witness. Upstream's own inference code, at a pinned revision,
-# with the weights left outside.
+# Authoritative GAME transcription. Upstream's own inference code, at a pinned
+# revision, with the weights left outside.
 #
 # The split matters. GAME's *code* is MIT, so it can be built into an image.
 # GAME's *pretrained weights* are CC BY-NC-SA 4.0 — non-commercial, share-alike
@@ -56,10 +56,10 @@ COPY src /app/src
 RUN pip install --no-cache-dir .
 
 # Runs unprivileged, and owns only the scratch directory it writes takes into.
-RUN useradd --create-home --uid 10002 witness \
+RUN useradd --create-home --uid 10002 transcription \
     && mkdir -p /tmp/transcription \
-    && chown witness:witness /tmp/transcription
-USER witness
+    && chown transcription:transcription /tmp/transcription
+USER transcription
 
 ENV TRANSCRIPTION_MODEL_DIR=/models/game \
     TRANSCRIPTION_GAME_DIR=/opt/game \

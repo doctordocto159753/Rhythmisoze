@@ -66,6 +66,9 @@
       "@midi": [
         "./src/packages/midi/index.ts"
       ],
+      "@raw-transcription": [
+        "./src/packages/raw-transcription/index.ts"
+      ],
       "@synthesis": [
         "./src/packages/synthesis/index.ts"
       ]

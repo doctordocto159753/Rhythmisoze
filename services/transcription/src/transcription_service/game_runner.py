@@ -51,7 +51,10 @@ changes.
 from __future__ import annotations
 
 import runpy
+import os
+import random
 
+import numpy as np
 import torch
 
 #: Upstream's entry point, resolved against the working directory.
@@ -74,6 +77,14 @@ def should_disable_mkldnn(*, cuda_available: bool) -> bool:
 
 
 def main() -> None:
+    # D3PM sampling is stochastic. A fixed, operator-visible seed makes the
+    # same source/model pair reproducible and lets the integrated Raw boundary
+    # be compared directly with standalone GAME rather than comparing two
+    # unrelated random samples.
+    seed = int(os.environ.get("GAME_RANDOM_SEED", "0"))
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if should_disable_mkldnn(cuda_available=torch.cuda.is_available()):
         torch.backends.mkldnn.enabled = False
 

@@ -67,6 +67,80 @@ export interface NoteEvent {
   velocity: number;
   /** Model/tracker confidence 0..1 where the backend can supply one. */
   confidence?: number;
+  /** Original MIDI track/channel/order. Preserved through derived versions when present. */
+  sourceTrack?: number;
+  sourceChannel?: number;
+  sourceOrder?: number;
+  sourceStartTicks?: number;
+  sourceEndTicks?: number;
+}
+
+/** The immutable first musical reading of a source. */
+export type RawSourceKind = 'audio' | 'midi';
+
+/** Engine identity travels with Raw so a model change can never look like the same evidence. */
+export interface RawTranscriptionProvenance {
+  source: 'game' | 'midi' | 'rhythm-extraction';
+  transcriber: 'game' | 'midi-import' | 'rhythm-extraction';
+  model: string;
+  modelVersion: string;
+  backend: 'pytorch' | 'onnx' | 'midi-parser' | 'server-dsp';
+}
+
+/** A note exactly as the authoritative transcriber supplied it. */
+export interface RawNoteEvent {
+  startSec: number;
+  endSec: number;
+  /** Discrete MIDI note identity. GAME's fractional estimate remains beside it. */
+  pitchMidi: number;
+  continuousPitch?: number;
+  velocity?: number;
+  confidence?: number;
+  /** Source MIDI identity. Absent for audio-derived notes. */
+  sourceTrack?: number;
+  sourceChannel?: number;
+  sourceOrder?: number;
+  /** Exact source-MIDI clock positions. Seconds remain the common product clock. */
+  sourceStartTicks?: number;
+  sourceEndTicks?: number;
+}
+
+export interface RawMidiTempoEvent {
+  ticks: number;
+  bpm: number;
+  timeSec: number;
+  sourceTrack?: number;
+  sourceOrder?: number;
+}
+
+export interface RawMidiTimeSignatureEvent {
+  ticks: number;
+  timeSignature: readonly [number, number];
+  timeSec: number;
+  sourceTrack?: number;
+  sourceOrder?: number;
+}
+
+export interface RawMidiMetadata {
+  format: number;
+  ppq: number;
+  trackCount: number;
+  tempos: readonly RawMidiTempoEvent[];
+  timeSignatures: readonly RawMidiTimeSignatureEvent[];
+}
+
+/**
+ * The source-faithful boundary between transcription/import and every derived
+ * musical operation. Consumers may copy it; they may never rewrite it.
+ */
+export interface RawTranscription {
+  version: 1;
+  sourceKind: RawSourceKind;
+  notes: readonly RawNoteEvent[];
+  drums: readonly DrumEvent[];
+  provenance: Readonly<RawTranscriptionProvenance>;
+  sourceDurationSec: number;
+  midi?: Readonly<RawMidiMetadata>;
 }
 
 /** Where a phrase interpretation came from. */
@@ -245,6 +319,14 @@ export interface DrumEvent {
    * the source rather than something inferred from one.
    */
   sourceChannel?: number;
+  /** Original track and event order, when this hit came from MIDI. */
+  sourceTrack?: number;
+  sourceOrder?: number;
+  /** Original note-off time for a MIDI-encoded rhythmic event. */
+  sourceEndSec?: number;
+  /** Exact source-MIDI clock positions, when present. */
+  sourceStartTicks?: number;
+  sourceEndTicks?: number;
   /**
    * How far to shift the kit sound for this hit, in semitones.
    *

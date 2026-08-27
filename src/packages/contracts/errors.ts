@@ -20,6 +20,7 @@ export const APP_ERROR_CODES = [
   'midi_empty',
   'model_load_failed',
   'transcription_failed',
+  'transcription_unavailable',
   'transcription_empty',
   'input_unrecognized',
   'melody_unclear',

@@ -79,8 +79,8 @@
     },
     {
       "name": "game",
-      "role": "Optional register witness. A second opinion about which octave a note is in, used only where it corroborates another engine.",
-      "optional": true,
+      "role": "Authoritative initial melodic-audio transcriber for canonical Raw material.",
+      "optional": false,
       "upstream": {
         "kind": "github-release",
         "repo": "openvpi/GAME",
@@ -111,21 +111,20 @@
         "code": "MIT",
         "weights": "CC-BY-NC-SA-4.0",
         "$comment": [
-          "The two differ, and the difference is the reason this artifact is optional.",
+          "The two differ, so the artifact is fetched by the operator rather than redistributed.",
           "The repository is MIT. The release notes for v1.0.0 state plainly: 'The model",
           "files apply CC BY-NC-SA 4.0 license.' Non-commercial, attribution, share-alike.",
           "Rhythmisoze itself is MIT, so these weights are NOT redistributable with it and",
           "are never baked into an image. Fetching them is an operator's decision, and a",
           "deployment that uses them is a non-commercial one.",
-          "This is why the default configuration does not use this model, and why the",
-          "product is fully functional without it -- see docs/architecture/evidence.md."
+          "Melodic audio reports unavailable when these required runtime weights are absent."
         ]
       },
       "runtimeAdapterVersion": "transcription/0.1.0",
       "notes": [
-        "~47 MB zipped, ~51 MB unpacked. The small model; medium and large exist upstream and are unmeasured here.",
-        "v1.0.3 publishes ONNX exports which would remove the PyTorch dependency from the image. Not adopted: this project has measured the v1.0.0 PyTorch model and has not measured the ONNX one, and an unmeasured substitution in a transcription engine is exactly the change that looks like a quality regression later.",
-        "Sending audio to this service changes what the product can promise about the recording staying on the device. It is off unless TRANSCRIPTION_ENABLED is set."
+        "~47 MB zipped, ~51 MB unpacked. This small PyTorch model is the validated development backend.",
+        "GAME large v1.0.3 ONNX is the production target, but remains an explicit /ready blocker until its real graph runner and parity gate exist.",
+        "Audio is sent to this service; product and privacy copy disclose that before recording."
       ]
     }
   ]

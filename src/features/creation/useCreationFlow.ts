@@ -75,7 +75,8 @@ import {
   type VersionNoteSources,
 } from '@versions';
 import { buildMusicianRequest as assembleMusicianRequest, type MusicianRequest } from '@musician-client';
-import { importMidi, planMidiImport, type MidiImportResult } from '@midi';
+import type { ServerMidiImportResult } from '@/features/transcription/midi-client';
+import { importMidiOnServer } from '@/features/transcription/midi-client';
 import {
   DEFAULT_MASTER,
   musicalDurationSec,
@@ -86,8 +87,6 @@ import {
   type PlaybackHandle,
 } from '@synthesis';
 import { transcribe } from '@/features/transcription/client';
-import { witnessAvailability, WITNESS_URL } from '@/features/transcription/witness';
-import { buildMusicalPhraseModel } from '@/packages/musical-phrase';
 import { track } from '@/features/analytics/track';
 import {
   INITIAL_CONTEXT,
@@ -143,6 +142,7 @@ export function useCreationFlow(locale: Locale) {
    * of the choices made about it afterwards.
    */
   const rhythm = useMemo<PerformanceRhythm | null>(() => {
+    if (state.rhythmAnalysis) return state.rhythmAnalysis;
     if (state.durationSec <= 0) return null;
     if (state.mode === 'rhythm') {
       return state.rawDrums.length > 0
@@ -153,7 +153,7 @@ export function useCreationFlow(locale: Locale) {
     // are not attacks, and letting them vote on the tempo skews it.
     const notes = state.judge?.notes ?? state.rawNotes;
     return notes.length > 0 ? analyzeMelodyRhythm(notes, state.durationSec) : null;
-  }, [state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
+  }, [state.rhythmAnalysis, state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
 
   /**
    * The tempo the music is interpreted at, if it has one.
@@ -611,11 +611,6 @@ export function useCreationFlow(locale: Locale) {
       track('processing_started', { route: correction?.type ?? 'auto' });
 
       try {
-        // Asked at the moment of processing rather than cached in state: it is
-        // deployment configuration, the answer is memoised in the module, and
-        // reading it here keeps the decision to send audio next to the request
-        // that sends it.
-        const witness = await witnessAvailability();
         const result = await transcribe(audio, {
           mode: correction?.type === 'melody'
             ? 'voice'
@@ -624,7 +619,6 @@ export function useCreationFlow(locale: Locale) {
               : 'auto',
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
-          ...(witness.available ? { remoteWitnessUrl: WITNESS_URL } : {}),
         });
         if (correction) {
           result.diagnostics.classification = correctClassification(
@@ -635,6 +629,8 @@ export function useCreationFlow(locale: Locale) {
         }
         dispatch({
           type: 'transcribed',
+          rawTranscription: result.rawTranscription,
+          rhythmAnalysis: result.rhythmAnalysis,
           notes: result.notes,
           phraseModel: result.phraseModel ?? null,
           judge: result.judge ?? null,
@@ -764,26 +760,15 @@ export function useCreationFlow(locale: Locale) {
 
   const applyMidiImport = useCallback(
     (
-      result: MidiImportResult,
+      result: ServerMidiImportResult,
       source: LocalSourceAsset,
       correction?: 'melody' | 'rhythm',
     ) => {
-      const plan = planMidiImport(result, correction);
-      const classification = correction
-        ? correctClassification(plan.classification, correction)
-        : plan.classification;
-      const { mode, notes, drums } = plan;
-      const phraseModel = mode === 'melody'
-        ? buildMusicalPhraseModel(notes, {
-            sourceKind:
-              classification.type === 'polyphonic' || classification.type === 'mixed'
-                ? 'polyphonic'
-                : 'symbolic',
-            interpretationNotes: plan.judge?.notes ?? notes,
-          })
-        : null;
+      const { mode, notes, drums, classification, phraseModel } = result;
       dispatch({
         type: 'midiImported',
+        rawTranscription: result.rawTranscription,
+        rhythmAnalysis: result.rhythmAnalysis,
         mode,
         bpm: result.bpm,
         meter: result.meter,
@@ -798,18 +783,19 @@ export function useCreationFlow(locale: Locale) {
           elapsedMs: 0,
           modelLoadMs: 0,
           modelFromCache: true,
-          notesBeforeFilter: result.notes.length + result.drums.length,
+          notesBeforeFilter:
+            result.rawTranscription.notes.length + result.rawTranscription.drums.length,
           notesAfterFilter: notes.length + drums.length,
           warnings: [
-            ...(plan.pitchedNotesAsRhythm > 0
-              ? [`midi_pitched_notes_as_rhythm:${plan.pitchedNotesAsRhythm}`]
+            ...(result.pitchedNotesAsRhythm > 0
+              ? [`midi_pitched_notes_as_rhythm:${result.pitchedNotesAsRhythm}`]
               : []),
             `input_classified:${classification.type}:${classification.confidence.toFixed(3)}`,
             ...(correction ? [`input_route_corrected:${correction}`] : []),
           ],
           classification,
         },
-        judge: plan.judge,
+        judge: result.judge,
       });
       send('MIDI_IMPORTED');
     },
@@ -827,7 +813,7 @@ export function useCreationFlow(locale: Locale) {
         if (!/\.(?:mid|midi)$/i.test(file.name) && !/midi/i.test(file.type)) {
           throw new AppError('unsupported_file', 'retry', file.type || file.name.slice(-12));
         }
-        const result = importMidi(new Uint8Array(await file.arrayBuffer()));
+        const result = await importMidiOnServer(file);
         if (result.durationSec > MAX_RECORDING_SEC + 0.25) {
           throw new AppError('audio_too_long', 'retry', `${result.durationSec.toFixed(2)}s MIDI`);
         }
@@ -932,7 +918,7 @@ export function useCreationFlow(locale: Locale) {
       track('input_route_corrected', { from: classification.type, to: type });
       try {
         if (source.kind === 'midi-upload') {
-          const result = importMidi(new Uint8Array(await source.blob.arrayBuffer()));
+          const result = await importMidiOnServer(source.blob, type);
           applyMidiImport(result, source, type);
           return;
         }
@@ -1057,6 +1043,7 @@ export function useCreationFlow(locale: Locale) {
             : undefined,
         },
         rawNotes: state.rawNotes,
+        rawTranscription: state.rawTranscription ?? undefined,
         phraseModel: state.phraseModel ?? undefined,
         rawDrums: state.rawDrums,
         analysis: refined?.analysis ?? null,

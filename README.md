@@ -7,9 +7,11 @@ MIDI sketch. Rhythmisoze turns it into something musically usable, plays it back
 on an instrument, and gives you a complete ZIP (rendered WAV, MIDI and untouched
 source) plus individual downloads.
 
-Your recording is transcribed **on your device** and is never uploaded. Asking
-the AI Musician for its two extra versions sends symbolic note data — not audio
-— to the Musician service, which in this edition is a container you run.
+Audio is sent to the configured transcription service. GAME is the authoritative
+melodic transcriber; deliberately non-melodic rhythm uses the separate server
+rhythm route. MIDI is canonicalized on the server while its original source
+artifact remains unchanged for exact Raw export. Asking the AI Musician for
+extra versions sends the derived symbolic material to the Musician service.
 [`docs/privacy-dataflow.md`](docs/privacy-dataflow.md) records every operation
 and exactly what crosses a network boundary.
 
@@ -54,9 +56,9 @@ npm run dev          # http://localhost:3000 → redirects to /fa or /en
 > The architecture, and an explicit list of what is and is not verified, is in
 > [`docs/architecture/selfhosted-edition.md`](docs/architecture/selfhosted-edition.md).
 
-No environment variables are needed for the core product. The creation flow — record/import,
-transcribe, retouch, choose an instrument, render, download — works with an
-empty `.env`.
+MIDI import and the interface can run with the Next.js development server alone.
+Audio transcription requires `services/transcription`; compose configures it by
+default after the GAME small weights have been bootstrapped.
 
 Two things are configurable and both are optional:
 
@@ -82,9 +84,8 @@ src/
   packages/            pure domain, no DOM, testable in Node
     contracts/         the vocabulary: notes, onsets, audio, errors, sketches
     retouch/           the humtool.py port + the Raw→Clean macro
-    audio-core/        capture, YIN, onsets, drum classification, WAV
-    melody-extraction/ human-voice f0, contour, segmentation, confidence
-    evidence/          several engines' readings, and the register arbitration
+    raw-transcription/ immutable Raw ownership and source-artifact boundary
+    audio-core/        capture, playback transport and WAV
     rhythm-extraction/ tempo, phase, meter, groove, version planning
     intent/            voice / instrument / beat classification
     musical-judge/     faithfulness scoring and deterministic repair
@@ -93,12 +94,12 @@ src/
     synthesis/         sample + synth engines, registry, offline render
   features/            product behaviour, one directory per stage of the flow
   components/          design-system primitives
-  workers/             the transcription worker
+  workers/             retired diagnostic transcription worker (not production-reachable)
   i18n/                fa + en catalogs, typed so a missing key fails the build
   server/              config, database, publish security, rate limiting
   app/                 routes — two root layouts, creation and share
 services/musician/     the optional AI Musician (orchestrator + two model workers)
-services/transcription/ the optional register witness (GAME); off by default
+services/transcription/ authoritative GAME + rhythm transcription service
 docs/                  ADRs, design decisions, benchmarks, licences, runbooks
 evaluation/            production evaluation corpus, metrics and baseline
 reference/humtool.py   the Python source the retouch engine was ported from
@@ -108,23 +109,24 @@ tests/                 857 tests: unit, golden fixtures, evaluation gate, E2E sp
 ## The pipeline
 
 ```
-microphone ─► MonoAudio ─► intent classification ─┬─► voice melody engine ─┐
-                (mono float PCM)                  │      YIN → contour →   │
-                on-device only                    ├─► Basic Pitch (multi)  │
-                                                  ├─► rhythm path          │
-                                                  │                        ▼
-                              synth ◄─ versions ◄─ Musician ◄─ Teacher ◄─ Judge
-                                │        developed / expanded / shaped
-                                ▼
-                          OfflineAudioContext ─► WAV + MIDI + source ZIP
+browser recording ─► /api/transcription/transcribe ─► server router
+                                                    ├─► GAME (melody)
+                                                    └─► rhythm extractor
+                                                            │
+                                                            ▼
+                                                  immutable canonical Raw
+                                                            │
+MIDI source ─────► /api/transcription/midi ─────────────────┘
+                                                            ▼
+                                             retouch / Teacher / Musician
+                                                            ▼
+                                             WAV + MIDI + source ZIP
 ```
 
-The user does not choose a mode. `InputClassifier` internally routes melody to
-the existing YIN engine, pitched re-attacked/polyphonic audio to Basic Pitch,
-rhythm to its fidelity path, and mixed input to both pitched and rhythm streams.
-A mouth-melody guard keeps consonant-articulated singing out of the multipitch
-engine. The route, confidence and reasoning remain visible in Review diagnostics.
-See [`docs/architecture/musical-intent.md`](docs/architecture/musical-intent.md).
+The browser is a transport and interaction client. It encodes the decoded take
+as PCM WAV, uploads it, and renders the returned contract. It does not load a
+transcription model or silently fall back to the retired Worker. A missing GAME
+backend is an explicit service-unavailable error.
 
 Downstream, the candidate is never silently overwritten: the **Judge** scores it
 against measured frame evidence and repairs only what that evidence decisively
@@ -135,7 +137,7 @@ every stage's mechanical changes are recorded in per-note transformation history
 Rhythm remains a separate path, not melody with the pitch discarded:
 
 ```
-microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat ─► GM drums
+audio ─► server router ─► spectral-flux onsets ─► kick/snare/hat ─► GM drums
 ```
 
 ## Five things worth knowing before changing anything
@@ -172,26 +174,11 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
    Persian; the waveform, the piano roll, the cleanup slider and the playhead do
    not. Everything else uses logical CSS properties.
 
-4. **Audio never leaves the device, unless an operator turns on the one
-   service that needs it — and then the app says so.**
+4. **Audio transcription is server-side and disclosed before recording.**
 
-   By default there is no code path that sends unpublished audio anywhere. The
-   AI Musician did not change that: its request type has no field that can carry
-   a blob, and the proxy refuses any body that is not symbolic JSON under 1 MB.
-   Both are asserted by tests rather than promised.
-
-   `services/transcription` is the exception, and it is off unless
-   `TRANSCRIPTION_ENABLED` is set. When it is on, the landing copy switches to a
-   different sentence — one that says the recording goes to the transcription
-   service and is deleted there once read — shown on the entry screen, before a
-   take exists. A privacy notice that appears after the audio has been sent is
-   not a notice.
-
-   The broader claim this project used to make -- *nothing is uploaded* -- was
-   withdrawn when the Musician began sending note data to a server. Replacing a
-   claim that has stopped being true is not a detail; a false statement about
-   someone's data is worse than no statement, and that is why enabling a service
-   changes the sentence rather than adding a footnote to it.
+   The landing and privacy copy state that audio is uploaded. The service writes
+   a take only to a per-request scratch directory for GAME and deletes it in a
+   `finally` path. There is no optional-witness mode and no browser fallback.
 
 5. **One state machine.** `src/features/state/machine.ts` is a transition table,
    not a set of booleans. An invalid transition is a lookup miss, and 26 tests
@@ -210,7 +197,7 @@ microphone ─► MonoAudio ─► spectral-flux onsets ─► kick/snare/hat �
 | [docs/runbooks/](docs/runbooks/) | Deploying, rolling back, moderating |
 | [docs/architecture/evidence.md](docs/architecture/evidence.md) | Which engine is trusted for what, and how the register is decided |
 | [docs/architecture/musical-intent.md](docs/architecture/musical-intent.md) | Intent routing, tempo detection and versions |
-| [services/transcription/README.md](services/transcription/README.md) | The optional register witness, and its licence constraint |
+| [services/transcription/README.md](services/transcription/README.md) | GAME-first runtime, Raw contract, development path and ONNX blocker |
 | [docs/musical-judge.md](docs/musical-judge.md) | Faithfulness scoring, repair operators, beam search |
 | [docs/music-teacher.md](docs/music-teacher.md) | Musical suggestions and the identity constraints on them |
 | [docs/status.md](docs/status.md) | Story-by-story implementation state |
@@ -221,33 +208,13 @@ Stated here rather than left to be discovered. The full list with detail is in
 `docs/product-decisions.md`; measured quality numbers live in
 [`evaluation/`](evaluation/README.md) and are gated in CI.
 
-- **Pitch octave ambiguity is resolved only where a second engine agrees.**
-  The YIN tracker still locks onto confident subharmonics — its own frame
-  accuracy on the synthetic octave-leap case is unchanged at 33% octave error,
-  and always will be, because frames are never revised. What changed is that the
-  register is now arbitrated against independent engines before anything reads
-  the candidate: with the optional GAME service the *delivered* octave error on
-  that case is **0.0%** and note F1 is **1.00**; without it, a lone witness is
-  not enough to move a note, so disagreements are reported rather than acted on.
-  See [`docs/architecture/evidence.md`](docs/architecture/evidence.md).
-
-  The residue is real: a default deployment still transcribes that case wrongly,
-  and the fix currently depends on a model whose weights are CC BY-NC-SA 4.0.
-  A permissively-licensed second witness is the open problem.
-- **Continuous glides (glissando) transcribe frame-perfectly but produce no
-  usable note** — segmentation assumes stepped pitches.
-- **Whisper-level captures** (peaks below roughly −30 dBFS) remain marginal;
-  bounded capture gain helps but routing and tracking degrade gracefully
-  rather than excellently.
-- **The complete architecture quality gate has not been run** (ADR-001). The
-  checked-in human regressions cover the known failures, but the corpus is still
-  too small for a general accuracy claim or a blinded listening result.
-- **The register corrections on real takes are corroborated, not verified.**
-  On the pinned recordings the two witnesses agree against the tracker on
-  several notes, and the arbitration acts on that. Nobody has confirmed by ear
-  which is right, because those takes have no ground truth — only a performer's
-  memory. Two independent models agreeing is the best evidence available and it
-  is not the same thing as being correct.
+- **GAME large 1.0.3 ONNX is an explicit production blocker.** The shared
+  contract and configuration boundary exist, but the encoder → D3PM → estimator
+  ONNX runner is not implemented. Selecting that backend returns `/ready` 503;
+  it never pretends the PyTorch CLI can consume an ONNX directory.
+- **The old quality benchmark is historical evidence, not the GAME-first
+  baseline.** Integration parity has been checked, but a new frozen quality
+  baseline and blinded listening result have not been claimed.
 - **Recorded instruments still need a human listening panel** (ADR-002). Six
   licensed multisample packs now ship and the technical loading/rendering gates
   pass, but the documented subjective >=4/5 score has not been claimed without

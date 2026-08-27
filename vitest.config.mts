@@ -34,6 +34,7 @@ export default defineConfig({
       '@versions': r('./src/packages/versions/index.ts'),
       '@musician-client': r('./src/packages/musician-client/index.ts'),
       '@midi': r('./src/packages/midi/index.ts'),
+      '@raw-transcription': r('./src/packages/raw-transcription/index.ts'),
       '@synthesis': r('./src/packages/synthesis/index.ts'),
       '@': r('./src'),
     },

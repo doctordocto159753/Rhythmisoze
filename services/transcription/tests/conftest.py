@@ -50,6 +50,10 @@ class StubTorch:
     def __init__(self, *, cuda_available: bool) -> None:
         self.cuda = StubCuda(available=cuda_available)
         self.backends = StubBackends()
+        self.manual_seed_calls: list[int] = []
+
+    def manual_seed(self, seed: int) -> None:
+        self.manual_seed_calls.append(seed)
 
 
 @pytest.fixture

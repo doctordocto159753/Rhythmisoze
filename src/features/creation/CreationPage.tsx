@@ -14,8 +14,6 @@ import { SourceInput } from '@/features/recording/SourceInput';
 import { ReviewStage } from '@/features/review/ReviewStage';
 import { canExport, hasResult, isRecordingPhase, stageOf } from '@/features/state/machine';
 import { useCoreSupport } from '@/features/shell/useCapabilities';
-import { warmModel } from '@/features/transcription/client';
-import { useWitnessAvailability } from '@/features/transcription/witness';
 import { ProcessStage } from '@/features/transcription/ProcessStage';
 import { ResonantBody } from '@/features/visual/ResonantBody';
 import { useLocale } from '@/i18n/provider';
@@ -61,15 +59,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
   } =
     useCreationFlow(locale);
   const support = useCoreSupport();
-  /**
-   * Whether a recording made here leaves this device.
-   *
-   * Read on the entry screen, not after the fact. The landing copy states what
-   * happens to a recording, and it has to state the true one *before* the user
-   * makes one — a privacy notice that appears once the audio has already been
-   * sent is not a notice.
-   */
-  const witness = useWitnessAvailability();
+  // The entry copy discloses server transcription before a recording exists.
 
   useEffect(() => {
     track('landing_viewed');
@@ -148,7 +138,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               {t.landing.lead}
             </Text>
             <Text muted>
-              {witness.available ? t.landing.bodyWithWitness : t.landing.body}
+              {t.landing.body}
             </Text>
           </header>
         ) : null}
@@ -189,7 +179,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
                     // presses, and buys back most of the load if they do. It used
                     // to happen while they set a tempo; there is no such pause
                     // left to hide it in.
-                    onPointerEnter={() => void warmModel()}
                   >
                     {t.landing.start}
                   </Button>
@@ -319,6 +308,7 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
               drums={refined.drums}
               renderedAudio={state.renderedAudio}
               source={state.source}
+              rawTranscription={state.rawTranscription}
               cleanupLabel={t.review.cleanupLevels[retouchLabel(state.retouchAmount)]}
               versionNotes={versionNotes}
               selectedVersionId={activeVersion?.id ?? undefined}

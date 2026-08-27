@@ -109,8 +109,9 @@ def transcribe(wav_bytes: bytes, config: Config) -> Transcription:
     work accepted and then lost — to a service whose entire contract is that
     losing its answer costs nothing.
     """
-    if not config.model_present():
-        raise AdapterError("model weights are not present")
+    detail = config.readiness_detail()
+    if detail is not None:
+        raise AdapterError(detail)
 
     started = time.monotonic()
     run_dir = config.work_dir / uuid.uuid4().hex

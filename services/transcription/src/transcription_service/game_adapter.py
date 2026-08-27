@@ -1,24 +1,8 @@
-"""Running GAME, and turning what it says into Rhythmisoze evidence.
+"""Running GAME and returning Rhythmisoze transcription evidence.
 
-## Why this shells out
-
-GAME is a research repository, not a library: its entry point is ``infer.py``,
-a Click command that builds a Lightning predictor around a config file. Calling
-that machinery directly would mean importing half of it and reconstructing the
-wiring the CLI already does — which is a copy of upstream's inference path that
-would drift from it silently, and drift in a transcription engine looks like a
-quality regression rather than a bug.
-
-So the adapter runs the command upstream publishes, at a pinned revision, and
-parses its CSV. That is slower per request by the cost of a process start, and
-the cost is paid once per take on a path that already takes seconds.
-
-## What comes back
-
-``onset,offset,pitch`` in seconds, where pitch is scientific notation with a
-signed cent offset — ``A3+3``, ``C#4-45``. The cents are kept: GAME reports
-continuous pitch and rounding it here would discard a measurement in favour of
-a convention this project chose.
+The small development backend delegates to upstream GAME's PyTorch CLI. The
+production large backend uses the official v1.0.3 ONNX graph set through the
+local ONNX runner. Both return the same Transcription contract.
 """
 
 from __future__ import annotations
@@ -54,7 +38,6 @@ class Note:
 
 
 def parse_pitch(raw: str) -> float | None:
-    """A pitch column, in either notation the CLI might write it."""
     raw = raw.strip()
     if raw == "":
         return None
@@ -72,7 +55,6 @@ def parse_pitch(raw: str) -> float | None:
         return None
     octave = int(match.group(3))
     cents = float(match.group(4)) if match.group(4) else 0.0
-    # Scientific pitch notation puts C4 at MIDI 60, hence the octave offset.
     return (octave + 1) * 12 + pitch_class + cents / 100.0
 
 
@@ -86,7 +68,7 @@ def parse_csv(text: str) -> list[Note]:
             start = float(parts[0])
             end = float(parts[1])
         except ValueError:
-            continue  # the header row
+            continue
         pitch = parse_pitch(parts[2])
         if pitch is None or end <= start:
             continue
@@ -102,16 +84,13 @@ class Transcription:
 
 
 def transcribe(wav_bytes: bytes, config: Config) -> Transcription:
-    """One take, one inference.
-
-    Deliberately synchronous and unqueued. The clips are at most sixty seconds,
-    the caller already has a timeout, and a queue would add a failure mode —
-    work accepted and then lost — to a service whose entire contract is that
-    losing its answer costs nothing.
-    """
     detail = config.readiness_detail()
     if detail is not None:
         raise AdapterError(detail)
+
+    if config.backend == "onnx":
+        from .onnx_runner import transcribe as transcribe_onnx
+        return transcribe_onnx(wav_bytes, config)
 
     started = time.monotonic()
     run_dir = config.work_dir / uuid.uuid4().hex
@@ -124,25 +103,16 @@ def transcribe(wav_bytes: bytes, config: Config) -> Transcription:
     source.write_bytes(wav_bytes)
 
     try:
-        return _run(source_dir=audio_dir, out_dir=out_dir, config=config, started=started)
+        return _run_pytorch(source_dir=audio_dir, out_dir=out_dir, config=config, started=started)
     finally:
-        # The user's recording is on this disk, and it is here only for as long
-        # as one inference needs it. Deleting it is part of answering the
-        # request, not tidying afterwards, so it happens even when inference
-        # raised — which is exactly the path where a leftover file would sit
-        # unnoticed.
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
-def _run(*, source_dir: Path, out_dir: Path, config: Config, started: float) -> Transcription:
+def _run_pytorch(*, source_dir: Path, out_dir: Path, config: Config, started: float) -> Transcription:
     try:
         completed = subprocess.run(
             [
                 sys.executable,
-                # Not `infer.py` directly. The launcher disables the MKLDNN CPU
-                # path — which SIGFPEs under GAME's graph on the deployment
-                # host — and then runs upstream's own entry point unchanged.
-                # See `game_runner` for the isolation that identified it.
                 "-m",
                 "transcription_service.game_runner",
                 "extract",
@@ -158,12 +128,9 @@ def _run(*, source_dir: Path, out_dir: Path, config: Config, started: float) -> 
             ],
             cwd=str(config.game_dir),
             capture_output=True,
-            # No timeout here. The caller sets one and abandons the request; a
-            # second, shorter deadline in two places is how a slow take turns
-            # into two different errors depending on which fires first.
             check=False,
         )
-    except OSError as error:  # pragma: no cover - environment failure
+    except OSError as error:
         raise AdapterError(f"could not start inference: {error}") from error
 
     if completed.returncode != 0:

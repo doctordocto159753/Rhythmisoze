@@ -1,10 +1,4 @@
-"""Configuration for the authoritative GAME transcription service.
-
-Everything here is read once at import and never mutated. The service has no
-state beyond a lazily-loaded model, so configuration is the only thing that can
-make two deployments behave differently, and it is worth being able to read it
-in one place.
-"""
+"""Configuration for the authoritative GAME transcription service."""
 
 from __future__ import annotations
 
@@ -25,30 +19,11 @@ def _int(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Config:
-    """Where the model is, and what the service will accept."""
-
-    #: Directory holding the unpacked GAME release — ``model.pt`` and
-    #: ``config.yaml`` beside each other, exactly as the upstream zip lays them
-    #: out. Never baked into the image: the weights are CC BY-NC-SA 4.0 and this
-    #: project is MIT, so they are the operator's to fetch and to accept.
     model_dir: Path
-
-    #: Where the GAME source tree was cloned. The adapter runs upstream's own
-    #: inference code rather than reimplementing the paper.
     game_dir: Path
-
-    #: Longest clip accepted, in seconds. Matches the app's recording cap; a
-    #: longer request is a bug or an abuse rather than a use case.
     max_duration_sec: float
-
-    #: Largest upload accepted, in bytes. A 60 s 16-bit mono WAV at 44.1 kHz is
-    #: about 5.3 MB; the ceiling leaves room for a higher sample rate.
     max_upload_bytes: int
-
-    #: Where the adapter writes the temporary WAV it hands to upstream's CLI.
     work_dir: Path
-
-    #: Runtime/model selection is explicit and observable at the API boundary.
     backend: str = "pytorch"
     model_tier: str = "small"
     model_version: str = "1.0.0"
@@ -57,24 +32,34 @@ class Config:
     def model_file(self) -> Path:
         return self.model_dir / "model.pt"
 
-    def model_present(self) -> bool:
-        # ONNX is deliberately fail-closed until the encoder -> D3PM ->
-        # estimator runner is implemented and parity-tested. A directory full
-        # of graphs is not a working backend.
-        if self.backend == "onnx":
-            return False
-        return self.backend == "pytorch" and self.model_file.is_file()
+    @property
+    def onnx_required_files(self) -> tuple[str, ...]:
+        return (
+            "config.json",
+            "encoder.onnx",
+            "segmenter.onnx",
+            "estimator.onnx",
+            "dur2bd.onnx",
+            "bd2dur.onnx",
+        )
 
     def readiness_detail(self) -> str | None:
+        if self.backend == "pytorch":
+            if self.model_tier != "small":
+                return f"PyTorch backend supports only the small tier, got {self.model_tier}"
+            if not self.model_file.is_file():
+                return f"no model.pt under {self.model_dir}"
+            return None
+
         if self.backend == "onnx":
-            return "GAME large ONNX runner is not implemented"
-        if self.backend != "pytorch":
-            return f"unsupported GAME backend: {self.backend}"
-        if self.model_tier != "small":
-            return f"PyTorch backend supports only the small tier, got {self.model_tier}"
-        if not self.model_file.is_file():
-            return f"no model.pt under {self.model_dir}"
-        return None
+            if self.model_tier != "large":
+                return f"ONNX backend expects the large tier, got {self.model_tier}"
+            missing = [name for name in self.onnx_required_files if not (self.model_dir / name).is_file()]
+            if missing:
+                return f"missing GAME ONNX files under {self.model_dir}: {', '.join(missing)}"
+            return None
+
+        return f"unsupported GAME backend: {self.backend}"
 
 
 def load() -> Config:

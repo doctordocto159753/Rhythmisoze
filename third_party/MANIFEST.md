@@ -273,6 +273,24 @@ here.
    exchange for nothing. The pin is `GAME_REVISION`, a build argument, and it is
    the same SHA recorded above.
 
+   **GAME deviates a second time, and this one is a file copy.**
+   `services/transcription/src/transcription_service/game_slicer.py` is upstream's
+   `inference/slicer2.py` at the same pinned SHA, ported from its own numpy to
+   ours. Nothing about where a cut lands was changed; the frame arithmetic and
+   all three silence-width branches are upstream's, and a parity check against
+   the pinned file returns byte-identical chunks and offsets.
+
+   The reason for copying rather than importing is that the large ONNX backend
+   exists so that production does not need the PyTorch inference tree beside it,
+   and upstream's slicer lives inside that tree. Copying one numpy file is a
+   smaller dependency than the tree it sits in. Upstream is MIT and the notice
+   travels in the module's own header, per rule 6.
+
+   Copying it is not optional in the way it sounds. GAME never transcribes a
+   whole recording: `infer.py extract` slices at silences and stitches the
+   chunk results back with their offsets, and a backend that skips that step is
+   a different transcription engine wearing the same weights.
+
 8. **A model's weights are licensed separately from its code, and the difference
    decides whether it can be a default.** Recording both is not paperwork: GAME
    is MIT code with CC BY-NC-SA weights, and that single fact is why its service

@@ -138,7 +138,12 @@ def _run(*, source_dir: Path, out_dir: Path, config: Config, started: float) -> 
         completed = subprocess.run(
             [
                 sys.executable,
-                "infer.py",
+                # Not `infer.py` directly. The launcher disables the MKLDNN CPU
+                # path — which SIGFPEs under GAME's graph on the deployment
+                # host — and then runs upstream's own entry point unchanged.
+                # See `game_runner` for the isolation that identified it.
+                "-m",
+                "transcription_service.game_runner",
                 "extract",
                 str(source_dir),
                 "-m",

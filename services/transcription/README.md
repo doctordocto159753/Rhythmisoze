@@ -79,6 +79,35 @@ It is never published outside the internal compose network, for the same reason
 the model workers are not: it holds weights, it has no authentication, and its
 request shape is an implementation detail.
 
+## The MKLDNN workaround
+
+On the CPU-only deployment host every real `POST /witness` returned 502, and the
+inference underneath died with `Floating point exception (core dumped)` — SIGFPE
+from native code, which no Python handler can catch.
+
+Isolated on that host (Python 3.12.14, torch 2.13.0+cpu, x86_64/AVX2, no CUDA):
+
+| | result |
+|---|---|
+| plain torch CPU `scaled_dot_product_attention` | finite output, exit 0 |
+| GAME, MKLDNN on, 4 threads | Floating point exception |
+| GAME, MKLDNN on, 1 thread | Floating point exception |
+| GAME, MKLDNN off, 1 thread | success |
+| GAME, MKLDNN off, 4 threads | success |
+
+So the fault is the oneDNN/MKLDNN CPU path under GAME's graph, and it is **not**
+threading. `game_runner.py` disables that one backend in the inference child
+process only — not for Rhythmisoze generally, not for MelodyT5 or MIDI-RWKV
+(separate containers, unaffected), and not when CUDA is available. Thread count,
+model, weights and the rest of PyTorch are untouched: pinning the child to one
+thread would also have hidden the symptom, while costing every request most of
+its speed and leaving the cause unexplained.
+
+The torch version in the Dockerfile is pinned for the same reason. Both the
+crash and the workaround are properties of a specific build, so an unpinned
+rebuild could silently install a torch that the recorded evidence does not
+describe.
+
 ## Why it shells out to `infer.py`
 
 GAME is a research repository, not a library. Its entry point is a Click command

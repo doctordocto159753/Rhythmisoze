@@ -23,8 +23,23 @@ RUN apt-get update \
 # CPU wheels explicitly. The default index resolves to the CUDA build, which is
 # gigabytes of driver payload on a machine that has no GPU — the design target
 # for this stage is a CPU-only VPS.
+#
+# Pinned, and the pin is load-bearing. This service works around a SIGFPE in the
+# oneDNN/MKLDNN CPU path (see `game_runner`), and both the crash and the
+# workaround are properties of a specific PyTorch build. Leaving the version
+# open meant a rebuild months later could silently install a different torch —
+# one where the workaround is unnecessary, or where it is insufficient — and the
+# evidence recorded against 2.13.0+cpu would then describe nothing that was
+# installed. `third_party/MANIFEST.md` rule 1 already says this about upstream
+# code; the runtime is no different.
+#
+# These are the exact versions the crash was isolated on and the fix validated
+# against. Overridable at build time for a host that needs a different pair.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir --index-url ${TORCH_INDEX} torch torchaudio
+ARG TORCH_VERSION=2.13.0
+ARG TORCHAUDIO_VERSION=2.11.0
+RUN pip install --no-cache-dir --index-url ${TORCH_INDEX} \
+    "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}"
 
 # Pinned, not tracked. A transcription engine that changes underneath a
 # committed evaluation fixture turns a model update into an unexplained quality

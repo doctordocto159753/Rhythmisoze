@@ -50,8 +50,8 @@ export function melodyToMidi(notes: readonly NoteEvent[], options: MidiExportOpt
         event: { type: 'programChange', channel, programNumber: clampProgram(options.program) },
       });
     }
-    const start = eventTicks(note.startSec, note.sourceStartTicks, metadata);
-    const end = Math.max(start + 1, eventTicks(note.endSec, note.sourceEndTicks, metadata));
+    const start = eventTicks(note.startSec, note.sourceStartTicks, metadata, options.bpm);
+    const end = Math.max(start + 1, eventTicks(note.endSec, note.sourceEndTicks, metadata, options.bpm));
     tracks[trackIndex]?.push(
       {
         ticks: start,
@@ -83,9 +83,9 @@ export function rhythmToMidi(drums: readonly DrumEvent[], options: MidiExportOpt
     const trackIndex = resolveTrack(hit.sourceTrack, trackCount);
     const channel = clampChannel(hit.sourceChannel ?? GM_DRUM_CHANNEL);
     const pitch = hit.sourcePitch === undefined ? drumToGmNote(hit.drum) : clampPitch(hit.sourcePitch);
-    const start = eventTicks(hit.timeSec, hit.sourceStartTicks, metadata);
+    const start = eventTicks(hit.timeSec, hit.sourceStartTicks, metadata, options.bpm);
     const endSec = hit.sourceEndSec ?? hit.timeSec + 0.125;
-    const end = Math.max(start + 1, eventTicks(endSec, hit.sourceEndTicks, metadata));
+    const end = Math.max(start + 1, eventTicks(endSec, hit.sourceEndTicks, metadata, options.bpm));
     tracks[trackIndex]?.push(
       {
         ticks: start,
@@ -112,7 +112,13 @@ function addHeaderEvents(tracks: AbsoluteEvent[][], options: MidiExportOptions):
     tracks[track]?.push({
       ticks: tempo.ticks,
       priority: 0,
-      event: { type: 'setTempo', meta: true, microsecondsPerBeat: Math.round(60_000_000 / tempo.bpm) },
+      // `usableBpm` here and in `secondsToTicks` must stay the same call: the
+      // header and the tick arithmetic describe one clock, and the whole class
+      // of bug this guards against is the two of them disagreeing.
+      event: {
+        type: 'setTempo', meta: true,
+        microsecondsPerBeat: Math.round(60_000_000 / usableBpm(tempo.bpm)),
+      },
     });
   }
   const signatures = metadata?.timeSignatures.length
@@ -165,19 +171,40 @@ function eventTicks(
   seconds: number,
   sourceTicks: number | undefined,
   metadata: Readonly<RawMidiMetadata> | undefined,
+  fallbackBpm: number,
 ): number {
   if (metadata && sourceTicks !== undefined) {
-    const originalSec = ticksToSeconds(sourceTicks, metadata);
+    const originalSec = ticksToSeconds(sourceTicks, metadata, fallbackBpm);
     if (Math.abs(originalSec - seconds) <= 1e-6) return sourceTicks;
   }
-  return secondsToTicks(Math.max(0, seconds), metadata);
+  return secondsToTicks(Math.max(0, seconds), metadata, fallbackBpm);
 }
 
-function secondsToTicks(seconds: number, metadata: Readonly<RawMidiMetadata> | undefined): number {
+/**
+ * Seconds to ticks, on the clock this file is going to declare.
+ *
+ * `fallbackBpm` is `options.bpm`, and it has to be, because that is exactly
+ * what `addHeaderEvents` writes into the `setTempo` message when the source
+ * carried no tempo map of its own. This used to be hard-coded to 120 while the
+ * header went on saying whatever it liked, and the two disagreeing is not a
+ * rounding error — it is a linear time stretch of `120 / options.bpm` applied
+ * to every onset and every duration in the file.
+ *
+ * A freely timed hum is encoded at 100 BPM, so the factor was 1.2: on a 30 s
+ * recording the last note landed almost four seconds past the end of the audio,
+ * and every note in between was a fifth too late and a fifth too long. It reads
+ * as the app having transcribed the performance badly, which is why it survived
+ * so long — the notes themselves were right.
+ */
+function secondsToTicks(
+  seconds: number,
+  metadata: Readonly<RawMidiMetadata> | undefined,
+  fallbackBpm: number,
+): number {
   const ppq = metadata?.ppq ?? 480;
   const tempos = metadata?.tempos.length
     ? [...metadata.tempos].sort((a, b) => a.timeSec - b.timeSec)
-    : [{ timeSec: 0, ticks: 0, bpm: 120 }];
+    : [{ timeSec: 0, ticks: 0, bpm: usableBpm(fallbackBpm) }];
   let active = tempos[0] as { timeSec: number; ticks: number; bpm: number };
   for (const tempo of tempos) {
     if (tempo.timeSec > seconds) break;
@@ -186,10 +213,19 @@ function secondsToTicks(seconds: number, metadata: Readonly<RawMidiMetadata> | u
   return Math.max(0, Math.round(active.ticks + (seconds - active.timeSec) * ppq * active.bpm / 60));
 }
 
-function ticksToSeconds(ticks: number, metadata: Readonly<RawMidiMetadata>): number {
+/** Guards the reciprocal: a zero or absent tempo would put every note at tick 0. */
+function usableBpm(bpm: number): number {
+  return Number.isFinite(bpm) && bpm > 0 ? bpm : 120;
+}
+
+function ticksToSeconds(
+  ticks: number,
+  metadata: Readonly<RawMidiMetadata>,
+  fallbackBpm: number,
+): number {
   const tempos = metadata.tempos.length
     ? [...metadata.tempos].sort((a, b) => a.ticks - b.ticks)
-    : [{ ticks: 0, bpm: 120, timeSec: 0 }];
+    : [{ ticks: 0, bpm: usableBpm(fallbackBpm), timeSec: 0 }];
   let active = tempos[0] as { timeSec: number; ticks: number; bpm: number };
   for (const tempo of tempos) {
     if (tempo.ticks > ticks) break;

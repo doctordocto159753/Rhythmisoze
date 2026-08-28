@@ -63,6 +63,13 @@ export function mergeShortNotes(
 
   const floor = Math.min(options.minDurationSec, options.stepSec * 0.5);
   const gap = Math.min(options.maxGapSec, options.stepSec * 0.5);
+  // Zero means "do not fuse anything", and it has to be checked rather than
+  // left to the comparison below. A transcriber describes a held note as a run
+  // of touching notes — GAME emits 124 exactly-contiguous pairs in 128 — so
+  // `start - previousEnd` is 0 for almost every neighbour, and `0 <= 0` fused
+  // 47% of a real transcription at the setting whose entire purpose is to
+  // change nothing.
+  const fusing = gap > 0;
   const sorted = [...notes].sort((a, b) => a.startSec - b.startSec || a.pitch - b.pitch);
 
   const out: NoteEvent[] = [];
@@ -72,6 +79,7 @@ export function mergeShortNotes(
   for (const note of sorted) {
     const previous = out[out.length - 1];
     const isSamePitchContinuation =
+      fusing &&
       previous !== undefined &&
       previous.pitch === note.pitch &&
       note.startSec - previous.endSec <= gap;

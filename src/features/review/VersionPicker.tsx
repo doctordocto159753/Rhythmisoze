@@ -1,7 +1,6 @@
 'use client';
 
-import type { CreationMode, JudgeVerdict, SourceKind } from '@contracts';
-import type { TeacherResult } from '@music-teacher';
+import type { CreationMode, SourceKind } from '@contracts';
 import type { PerformanceRhythm, VersionId, VersionRecipe } from '@rhythm-extraction';
 import { Row, Stack, Well } from '@/components/Layout';
 import { Bdi, Text } from '@/components/Text';
@@ -19,22 +18,19 @@ export interface VersionPickerProps {
    * must not talk about what the person sang.
    */
   sourceKind: SourceKind | undefined;
-  /** Rhythm names its two stages differently; see `rhythmNames`. */
+  /** Rhythm names its stages differently; see `rhythmNames`. */
   mode: CreationMode;
-  /** The Judge's verdict, shown against the reading it produced. */
-  judge: JudgeVerdict | null;
-  /** The teacher's suggestions, shown against the reading they apply to. */
-  lesson: TeacherResult | null;
   onSelect(id: VersionId): void;
 }
 
 /**
- * The four readings of one performance.
+ * The readings of one performance.
  *
- * This is where the product stops being a transcriber. The user is not asked
- * "how much cleanup?" and given one answer — they are shown what their playing
- * actually was, and three increasingly tidy readings of it, and they choose by
- * ear.
+ * The transcription itself, and whatever the Musician has made from it. There
+ * were two tidied readings in between — a Judge repair and a Teacher
+ * suggestion — and they are gone: both removed notes the transcriber had found
+ * and flattened distinct pitches into one, and the Musician was fed the second
+ * of them rather than the take.
  *
  * Two things the copy has to get right:
  *
@@ -52,8 +48,6 @@ export function VersionPicker({
   rhythm,
   sourceKind,
   mode,
-  judge,
-  lesson,
   onSelect,
 }: VersionPickerProps) {
   const t = useMessages();
@@ -64,12 +58,10 @@ export function VersionPicker({
   const imported = sourceKind === 'midi-upload';
   const rhythm2 = mode === 'rhythm';
   const nameFor = (id: VersionId): string =>
-    rhythm2 && (id === 'unprocessed' || id === 'teacher')
-      ? t.versions.rhythmNames[id]
-      : t.versions.names[id];
+    rhythm2 && id === 'unprocessed' ? t.versions.rhythmNames[id] : t.versions.names[id];
   const hintFor = (id: VersionId): string => {
-    if (rhythm2 && (id === 'unprocessed' || id === 'teacher')) return t.versions.rhythmHints[id];
-    if (imported && (id === 'unprocessed' || id === 'judge')) return t.versions.importedHints[id];
+    if (rhythm2 && id === 'unprocessed') return t.versions.rhythmHints[id];
+    if (imported && id === 'unprocessed') return t.versions.importedHints[id];
     return t.versions.hints[id];
   };
 
@@ -104,23 +96,6 @@ export function VersionPicker({
                 >
                   <span className={styles.name}>{nameFor(version.id)}</span>
                   <span className={styles.hint}>{hintFor(version.id)}</span>
-                  {/* What the Judge actually did, against the reading it
-                      produced. A correction count with nothing behind it would
-                      be a claim; naming the repairs makes it checkable. */}
-                  {version.id === 'judge' && judge !== null ? (
-                    <span className={styles.repairs}>
-                      {judge.repairs.length === 0
-                        ? t.versions.judgeClean
-                        : t.versions.judgeRepaired(judge.repairs.length)}
-                    </span>
-                  ) : null}
-                  {version.id === 'teacher' && lesson !== null ? (
-                    <span className={styles.repairs}>
-                      {lesson.edits.length === 0
-                        ? t.versions.teacherNone
-                        : t.versions.teacherSuggestions(lesson.edits.length)}
-                    </span>
-                  ) : null}
                   {/* Tempo, isolated so the Latin BPM value cannot reorder the
                       Persian sentence around it.
 
@@ -145,16 +120,6 @@ export function VersionPicker({
           })}
         </ul>
 
-        {/* The suggestions in full, so a musician can disagree with a specific
-            decision rather than with a black box. Only while the Teacher's
-            reading is the one being heard. */}
-        {activeId === 'teacher' && lesson !== null && lesson.edits.length > 0 ? (
-          <ul className={styles.reasons}>
-            {lesson.edits.map((edit, index) => (
-              <li key={`${edit.kind}-${edit.noteIndex}-${index}`}>{edit.reason}</li>
-            ))}
-          </ul>
-        ) : null}
 
         {notice ? (
           <Row gap={2}>

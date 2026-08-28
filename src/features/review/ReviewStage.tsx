@@ -8,7 +8,6 @@ import type {
   ProcessingDiagnostics,
   SourceKind,
 } from '@contracts';
-import type { TeacherResult } from '@music-teacher';
 import { RETOUCH_AMOUNT_MAX, RETOUCH_AMOUNT_MIN, pitchName, retouchLabel, type RefineResult } from '@retouch';
 import { getAudioContext } from '@audio-core';
 import { Button } from '@/components/Button';
@@ -28,8 +27,6 @@ export interface ReviewStageProps {
   versions: readonly VersionRecipe[];
   activeVersionId: VersionId | null;
   rhythm: PerformanceRhythm | null;
-  judge: JudgeVerdict | null;
-  lesson: TeacherResult | null;
   onVersionChange(id: VersionId): void;
   /**
    * Everything the Musician area needs, passed through rather than reached for.
@@ -89,8 +86,6 @@ export function ReviewStage({
   activeVersionId,
   musician,
   rhythm,
-  judge,
-  lesson,
   onVersionChange,
   refined,
   rawNotes,
@@ -221,8 +216,6 @@ export function ReviewStage({
         rhythm={rhythm}
         sourceKind={sourceKind}
         mode={mode}
-        judge={judge}
-        lesson={lesson}
         onSelect={onVersionChange}
       />
 

@@ -210,7 +210,7 @@ describe('two MIDI imports in a row', () => {
     const first = apply(
       afterAudioTake(),
       importMidiAction(IMPORTED_NOTES, 'first.mid'),
-      { type: 'setVersion', versionId: 'teacher' },
+      { type: 'setVersion', versionId: 'unprocessed' },
       { type: 'setKey', key: { root: 'G', mode: 'major' } },
     );
     const second = apply(first, importMidiAction([note(80, 0), note(81, 1)], 'second.mid'));
@@ -231,7 +231,7 @@ describe('a second audio take after a first', () => {
     const first = apply(
       afterAudioTake(),
       { type: 'setKey', key: { root: 'A', mode: 'minor' } },
-      { type: 'setVersion', versionId: 'teacher' },
+      { type: 'setVersion', versionId: 'unprocessed' },
     );
     const second = apply(first, {
       type: 'captured',

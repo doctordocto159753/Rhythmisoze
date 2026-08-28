@@ -31,8 +31,6 @@ import type { NoteEvent } from '@contracts';
 
 export type MusicalVersionId =
   | 'unprocessed'
-  | 'judge'
-  | 'teacher'
   | 'musician-refined'
   | 'musician-developed'
   | 'musician-expanded';
@@ -40,8 +38,6 @@ export type MusicalVersionId =
 /** Every version, in the order they are offered. Order is the pipeline order. */
 export const VERSION_ORDER: readonly MusicalVersionId[] = [
   'unprocessed',
-  'judge',
-  'teacher',
   'musician-refined',
   'musician-developed',
   'musician-expanded',
@@ -111,38 +107,27 @@ const DESCRIPTORS: Readonly<Record<MusicalVersionId, VersionDescriptor>> = {
     sourceVersionId: null,
     alwaysAvailable: true,
   },
-  judge: {
-    id: 'judge',
-    origin: 'derived',
-    sourceVersionId: 'unprocessed',
-    alwaysAvailable: true,
-  },
-  teacher: {
-    id: 'teacher',
-    origin: 'derived',
-    sourceVersionId: 'judge',
-    alwaysAvailable: true,
-  },
   'musician-refined': {
     id: 'musician-refined',
     origin: 'generated',
-    // Teacher, and only Teacher (AC-02). Encoded here so the client can assert
-    // it rather than the assertion living in a comment next to the fetch call.
-    sourceVersionId: 'teacher',
+    // The transcription, and only the transcription. Encoded here so the client
+    // can assert it rather than the assertion living in a comment next to the
+    // fetch call.
+    sourceVersionId: 'unprocessed',
     alwaysAvailable: false,
   },
   'musician-developed': {
     id: 'musician-developed',
     origin: 'generated',
-    sourceVersionId: 'teacher',
+    sourceVersionId: 'unprocessed',
     alwaysAvailable: false,
   },
   'musician-expanded': {
     id: 'musician-expanded',
     origin: 'generated',
-    // Teacher, like its siblings. Expanded grows the material; it does not get
-    // a different source for doing so.
-    sourceVersionId: 'teacher',
+    // The transcription, like its siblings. Expanded grows the material; it
+    // does not get a different source for doing so.
+    sourceVersionId: 'unprocessed',
     alwaysAvailable: false,
   },
 };
@@ -225,8 +210,6 @@ export interface GeneratedVersion {
  */
 export interface VersionNoteSources {
   unprocessed: readonly NoteEvent[];
-  judge: readonly NoteEvent[];
-  teacher: readonly NoteEvent[];
   generated: Partial<Record<MusicalVersionId, GeneratedVersion>>;
 }
 
@@ -250,10 +233,6 @@ export function notesForVersion(
   switch (id) {
     case 'unprocessed':
       return sources.unprocessed;
-    case 'judge':
-      return sources.judge;
-    case 'teacher':
-      return sources.teacher;
     case 'musician-refined':
     case 'musician-developed':
     case 'musician-expanded':

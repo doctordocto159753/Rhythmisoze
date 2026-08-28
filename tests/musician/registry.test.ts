@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NoteEvent } from '@contracts';
+import { buildMusicianRequest } from '@musician-client';
 import {
   availableVersions,
   baseVersions,
@@ -43,59 +44,55 @@ function generated(
 
 const sources: VersionNoteSources = {
   unprocessed: [note(60, 0), note(62, 0.5)],
-  judge: [note(60, 0), note(62, 0.5), note(64, 1)],
-  teacher: [note(60, 0), note(62, 0.5), note(65, 1)],
   generated: {},
 };
 
 describe('the version registry', () => {
-  it('offers six versions in pipeline order', () => {
+  it('offers the transcription and the Musician readings, in pipeline order', () => {
     expect(VERSION_ORDER).toEqual([
       'unprocessed',
-      'judge',
-      'teacher',
       'musician-refined',
       'musician-developed',
       'musician-expanded',
     ]);
   });
 
-  it('keeps the three original versions available without the Musician', () => {
+  it('keeps the transcription available without the Musician', () => {
     // AC-01: the product predates this feature and must not depend on it.
-    expect(baseVersions()).toEqual(['unprocessed', 'judge', 'teacher']);
+    expect(baseVersions()).toEqual(['unprocessed']);
   });
 
   describe('source relationships', () => {
     it('records the pipeline each version came from', () => {
       expect(describeVersion('unprocessed').sourceVersionId).toBeNull();
-      expect(describeVersion('judge').sourceVersionId).toBe('unprocessed');
-      expect(describeVersion('teacher').sourceVersionId).toBe('judge');
     });
 
-    it('derives every Musician version from Teacher and nothing else', () => {
+    it('derives every Musician version from the transcription and nothing else', () => {
       // AC-02, as a property of the data rather than a promise in a comment.
-      // If either of these ever pointed at `judge` or `unprocessed`, the
-      // request builder would send the wrong material and no other test would
-      // notice.
-      // Expanded grows the material; that does not earn it a different source.
+      //
+      // There were two tidied readings between the take and the Musician, and
+      // the models were fed the second of them. Both dropped notes the
+      // transcriber had found and pulled distinct pitches together, so the
+      // material every generated version varied was not the performance. If any
+      // of these ever points at something derived again, the request builder
+      // sends that instead and no other test would notice.
       for (const id of ['musician-refined', 'musician-developed', 'musician-expanded'] as const) {
-        expect(describeVersion(id).sourceVersionId).toBe('teacher');
+        expect(describeVersion(id).sourceVersionId).toBe('unprocessed');
       }
     });
 
     it('marks only the Musician versions as conditionally available', () => {
-      expect(describeVersion('teacher').alwaysAvailable).toBe(true);
+      expect(describeVersion('unprocessed').alwaysAvailable).toBe(true);
       expect(describeVersion('musician-refined').alwaysAvailable).toBe(false);
       expect(isMusicianVersion('musician-developed')).toBe(true);
-      expect(isMusicianVersion('judge')).toBe(false);
+      expect(isMusicianVersion('unprocessed')).toBe(false);
     });
   });
 
   describe('resolving notes', () => {
-    it('returns the right notes for each derived version', () => {
+    it('returns the transcription for the derived version', () => {
       expect(notesForVersion('unprocessed', sources)).toHaveLength(2);
-      expect(notesForVersion('judge', sources)).toHaveLength(3);
-      expect(notesForVersion('teacher', sources)?.[2]?.pitch).toBe(65);
+      expect(notesForVersion('unprocessed', sources)?.[1]?.pitch).toBe(62);
     });
 
     it('returns null for a Musician version that has not been generated', () => {
@@ -119,22 +116,14 @@ describe('the version registry', () => {
   });
 
   describe('availability', () => {
-    it('offers only the three derived versions when the Musician is off', () => {
-      expect(availableVersions(sources, { musicianEnabled: false })).toEqual([
-        'unprocessed',
-        'judge',
-        'teacher',
-      ]);
+    it('offers only the transcription when the Musician is off', () => {
+      expect(availableVersions(sources, { musicianEnabled: false })).toEqual(['unprocessed']);
     });
 
     it('does not offer a Musician version that has no notes', () => {
       // Enabled but never run. Offering it would put a version in the picker
       // that cannot be played.
-      expect(availableVersions(sources, { musicianEnabled: true })).toEqual([
-        'unprocessed',
-        'judge',
-        'teacher',
-      ]);
+      expect(availableVersions(sources, { musicianEnabled: true })).toEqual(['unprocessed']);
     });
 
     it('offers a Musician version once its notes exist', () => {
@@ -146,7 +135,7 @@ describe('the version registry', () => {
           'musician-expanded': generated('musician-expanded'),
         },
       };
-      expect(availableVersions(withAll, { musicianEnabled: true })).toHaveLength(6);
+      expect(availableVersions(withAll, { musicianEnabled: true })).toHaveLength(4);
     });
 
     it('hides generated versions when the feature is switched off, even if notes exist', () => {
@@ -166,25 +155,29 @@ describe('the version registry', () => {
     const context = { instrumentId: 'piano', bpm: 120, retouchAmount: 40 };
 
     it('separates versions from each other', () => {
-      expect(renderCacheKey('judge', sources, context)).not.toBe(
-        renderCacheKey('teacher', sources, context),
+      const withGenerated: VersionNoteSources = {
+        ...sources,
+        generated: { 'musician-refined': generated('musician-refined', 'job-1') },
+      };
+      expect(renderCacheKey('unprocessed', withGenerated, context)).not.toBe(
+        renderCacheKey('musician-refined', withGenerated, context),
       );
     });
 
     it('changes when the instrument or tempo changes', () => {
-      expect(renderCacheKey('judge', sources, context)).not.toBe(
-        renderCacheKey('judge', sources, { ...context, instrumentId: 'guitar' }),
+      expect(renderCacheKey('unprocessed', sources, context)).not.toBe(
+        renderCacheKey('unprocessed', sources, { ...context, instrumentId: 'guitar' }),
       );
-      expect(renderCacheKey('judge', sources, context)).not.toBe(
-        renderCacheKey('judge', sources, { ...context, bpm: 121 }),
+      expect(renderCacheKey('unprocessed', sources, context)).not.toBe(
+        renderCacheKey('unprocessed', sources, { ...context, bpm: 121 }),
       );
     });
 
     it('is stable across calls with the same inputs', () => {
       // If it were not, the cache would never hit and every re-render would
       // re-render audio.
-      expect(renderCacheKey('teacher', sources, context)).toBe(
-        renderCacheKey('teacher', sources, context),
+      expect(renderCacheKey('unprocessed', sources, context)).toBe(
+        renderCacheKey('unprocessed', sources, context),
       );
     });
 
@@ -298,5 +291,38 @@ describe('the version registry', () => {
       );
       expect(Object.keys(kept)).toEqual(['musician-refined']);
     });
+  });
+});
+
+describe('what the Musician is given', () => {
+  // The models are asked to vary a performance. If they are handed a tidied
+  // reading of it instead, every generated version inherits whatever that
+  // reading removed before it starts — and the user hears a variation on
+  // something they never played.
+  it('sends the transcription, not a processed reading of it', () => {
+    const performed = [note(60, 0), note(60, 0.25), note(62, 0.5), note(64, 1)];
+    const request = buildMusicianRequest({
+      sourceId: 'source-1',
+      versionNotes: { unprocessed: performed, generated: {} },
+      tempo: { bpm: 100, confidence: 0.8 },
+      meter: { beatsPerBar: 4, beatUnit: 4 },
+      key: null,
+      sourceDurationSec: 2,
+    });
+
+    expect(request?.notes).toEqual(performed);
+  });
+
+  it('refuses rather than inventing material when there is nothing to send', () => {
+    expect(
+      buildMusicianRequest({
+        sourceId: 'source-1',
+        versionNotes: { unprocessed: [], generated: {} },
+        tempo: { bpm: 100, confidence: 0.8 },
+        meter: { beatsPerBar: 4, beatUnit: 4 },
+        key: null,
+        sourceDurationSec: 2,
+      }),
+    ).toBeNull();
   });
 });

@@ -285,8 +285,6 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
    * three stages when there are two is the picker claiming distinctions the
    * engine does not make.
    */
-  const rhythmMode = mode === 'rhythm';
-
   return [
     {
       // The transcription exactly as it arrived. No quantization, no scale
@@ -304,43 +302,7 @@ export function planVersions(input: VersionPlanInput): VersionRecipe[] {
         velocitySmoothing: 0,
       },
     },
-    ...(rhythmMode ? [] : [{
-      // The Judge's repair, played at the performance's own pulse. Timing is
-      // barely touched: the Judge fixed *what* was played, and imposing a grid
-      // here would start answering a different question.
-      id: 'judge' as VersionId,
-      bpm: performanceBpm,
-      tempoConfidence,
-      tempoReliable,
-      freeTiming,
-      amount: Math.min(amount, 30),
-      paramOverrides: {
-        timingStrength: timing(0.15),
-        scaleSnapStrength: 0,
-        velocitySmoothing: 0.1,
-      },
-    }]),
-    {
-      // What a teacher would hand back: the same idea, put in time and in key.
-      //
-      // The musical work is done by `@music-teacher`, which has already moved
-      // the notes it chose to move and recorded a reason for each. Retouch is
-      // therefore kept light here - quantising on top of the Teacher's own
-      // timing decisions would overwrite deliberate, explained choices with
-      // an unexplained grid.
-      id: 'teacher',
-      bpm: performanceBpm,
-      tempoConfidence,
-      tempoReliable,
-      freeTiming,
-      amount: Math.min(amount, 40),
-      paramOverrides: {
-        timingStrength: timing(Math.min(0.35, teacherTiming * 0.4)),
-        scaleSnapStrength: 0,
-        velocitySmoothing: 0.35,
-      },
-    },
-    // The Musician's two readings, offered only when their notes exist.
+    // The Musician's readings, offered only when their notes exist.
     //
     // Retouch is at its lightest here, and deliberately lighter than the
     // Teacher's. These notes are the output of a model that made explicit,
@@ -377,17 +339,18 @@ const MUSICIAN_RECIPE_IDS: readonly MusicalVersionId[] = [
 /** The version to select when the user has not chosen. */
 export function defaultVersion(
   _rhythm: PerformanceRhythm,
-  mode: CreationMode = 'melody',
+  _mode: CreationMode = 'melody',
 ): VersionId {
-  // The Judge's reading is the honest default: it is the most faithful account
-  // of what the person actually did, which is what they came to hear. The
-  // Teacher is a step they choose to take, not one taken for them.
+  // The transcription itself, because it is the most faithful account of what
+  // the person actually did, and that is what they came to hear.
   //
-  // Rhythm has no Judge stage, and its corrected reading is the same argument
-  // one step along: light timing tidying is what a beatboxed take wants, and it
-  // is still recognisably the take. An imported file gets there too, and now
-  // arrives with every one of its events intact.
-  return mode === 'rhythm' ? 'teacher' : 'judge';
+  // There used to be two tidied readings between this and the Musician — a
+  // Judge repair and a Teacher suggestion — and the default landed on the
+  // first of them. Both removed the transcriber's own notes and flattened
+  // pitches together, and because the Musician was fed the Teacher's output
+  // rather than the take, every generated version inherited that. What the
+  // model was asked to vary was no longer what the person sang.
+  return 'unprocessed';
 }
 
 function clamp01(value: number): number {

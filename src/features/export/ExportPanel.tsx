@@ -19,6 +19,7 @@ import { track } from '@/features/analytics/track';
 import { useLocale } from '@/i18n/provider';
 import { createExportArchive } from '@/packages/export/archive';
 import { exactRawMidiArtifact } from '@raw-transcription';
+import { describeVersion, VERSION_ORDER, type MusicalVersionId } from '@versions';
 
 export interface ExportPanelProps {
   title: string;
@@ -178,14 +179,15 @@ export function ExportPanel({
             file: entry.name,
             // The pipeline relationship, so a reader can reconstruct how each
             // version came to exist without knowing the product.
-            derivedFrom:
-              versionId === 'unprocessed'
-                ? null
-                : versionId === 'judge'
-                  ? 'unprocessed'
-                  : versionId === 'teacher'
-                    ? 'judge'
-                    : 'teacher',
+            //
+            // Read from the registry rather than restated here. This chain used
+            // to be written out as nested conditionals, and when two versions
+            // were removed from the pipeline it was the one place still
+            // describing them — a manifest confidently documenting a lineage
+            // that no longer existed.
+            derivedFrom: isVersionId(versionId)
+              ? describeVersion(versionId).sourceVersionId
+              : null,
             provenance: versionProvenance?.[versionId] ?? null,
           };
         }),
@@ -423,4 +425,9 @@ function toSafeOriginalFilename(filename: string): string {
   const extension = cleaned.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? '';
   const stem = extension ? cleaned.slice(0, -extension.length) : cleaned;
   return `${toSafeFilenameStem(stem, 'source')}${extension}`;
+}
+
+/** Narrows a filename stem back to a version id the registry knows. */
+function isVersionId(value: string): value is MusicalVersionId {
+  return (VERSION_ORDER as readonly string[]).includes(value);
 }

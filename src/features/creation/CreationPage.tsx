@@ -49,7 +49,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
     rhythm,
     versions,
     activeVersion,
-    lesson,
     performanceTempo,
     musicalDurationSec,
     musician,
@@ -240,8 +239,6 @@ export function CreationPage({ publishEnabled }: CreationPageProps) {
             versions={versions}
             activeVersionId={activeVersion?.id ?? null}
             rhythm={rhythm}
-            judge={state.judge}
-            lesson={lesson}
             onVersionChange={actions.setVersion}
             musician={{
               phase: musician.phase,

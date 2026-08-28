@@ -93,17 +93,13 @@ export const en = {
     title: 'Interpretations',
     help: 'Same performance, different readings of it. Your original is always the first.',
     names: {
-      unprocessed: 'Unprocessed',
-      judge: 'What you played',
-      teacher: 'Tidied up',
+      unprocessed: 'What you played',
       'musician-refined': 'Shaped',
       'musician-developed': 'Taken further',
       'musician-expanded': 'Grown',
     },
     hints: {
-      unprocessed: 'Straight from the listener, nothing corrected.',
-      judge: 'The closest reading of what you actually sang.',
-      teacher: 'The same idea, put in time and in key.',
+      unprocessed: 'The closest reading of what you actually sang.',
       'musician-refined': 'Your idea, professionally shaped.',
       'musician-developed': 'Your idea, taken one step further.',
       'musician-expanded': 'Your idea, grown into a longer passage.',
@@ -118,7 +114,6 @@ export const en = {
      */
     importedHints: {
       unprocessed: 'The file exactly as it arrived.',
-      judge: 'The same notes — an imported file needs no correcting.',
     },
     /**
      * The same two versions, named for a rhythm.
@@ -130,18 +125,10 @@ export const en = {
      */
     rhythmNames: {
       unprocessed: 'The pattern',
-      teacher: 'Tightened',
     },
     rhythmHints: {
       unprocessed: 'Every hit exactly where it landed.',
-      teacher: 'The same hits, pulled closer to the beat.',
     },
-    judgeRepaired: (count: number) =>
-      count === 1 ? '1 correction' : `${count} corrections`,
-    judgeClean: 'Nothing needed correcting.',
-    teacherSuggestions: (count: number) =>
-      count === 1 ? '1 suggestion' : `${count} suggestions`,
-    teacherNone: 'Nothing to suggest — this already works.',
     heardTempo: (bpm: number) => `heard at ${bpm} BPM`,
     // The middle state, and the reason it has its own string: the app measured
     // a pulse and is not certain of the number. It still uses it — the

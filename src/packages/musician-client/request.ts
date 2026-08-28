@@ -31,9 +31,9 @@ import type { MusicianPhraseSpan, MusicianRequest } from './client';
 export interface MusicianRequestInput {
   /** Identifies the sketch, so a result can be matched to it on return. */
   sourceId: string;
-  /** Every version's notes. Only the Teacher's are read. */
+  /** Every version's notes. Only the transcription's are read. */
   versionNotes: VersionNoteSources;
-  /** Phrase spans in Teacher note indices. Empty for legacy/polyphonic input. */
+  /** Phrase spans in transcription note indices. Empty for legacy/polyphonic input. */
   phrases?: readonly MusicianPhraseSpan[];
   /**
    * The tempo the music is interpreted at, with the estimator's own confidence.
@@ -47,7 +47,7 @@ export interface MusicianRequestInput {
   /**
    * How long the *recording* is.
    *
-   * Source evidence: the span the Teacher material occupies, and what the
+   * Source evidence: the span the transcription occupies, and what the
    * service's Identity Guard measures a candidate against. It is not a length
    * budget for the result — Expanded is meant to exceed it.
    */
@@ -65,9 +65,16 @@ export interface MusicianRequestInput {
  */
 const USER_SET_METER_CONFIDENCE = 0.8;
 
-/** Null when there is no Teacher material to send. */
+/**
+ * Null when there is no material to send.
+ *
+ * The Musician is given the transcription itself. It used to be given the
+ * Teacher's reading of it, which had already dropped notes and pulled pitches
+ * together — so the model was varying something the person never performed, and
+ * every generated version inherited that before it started.
+ */
 export function buildMusicianRequest(input: MusicianRequestInput): MusicianRequest | null {
-  const notes = notesForVersion('teacher', input.versionNotes);
+  const notes = notesForVersion('unprocessed', input.versionNotes);
   if (!notes || notes.length === 0) return null;
 
   return {

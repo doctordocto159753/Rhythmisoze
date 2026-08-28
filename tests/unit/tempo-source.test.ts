@@ -94,7 +94,7 @@ function almostNothing(): NoteEvent[] {
 }
 
 function sourcesFor(notes: readonly NoteEvent[]): VersionNoteSources {
-  return { unprocessed: notes, judge: notes, teacher: notes, generated: {} };
+  return { unprocessed: notes, generated: {} };
 }
 
 describe('the fixture this regression is built on', () => {
@@ -156,7 +156,7 @@ describe('a measured but uncertain tempo', () => {
       amount: 55,
       generated: ['musician-refined', 'musician-developed', 'musician-expanded'],
     });
-    expect(plan.length).toBe(6);
+    expect(plan.length).toBe(4);
     for (const version of plan) {
       expect(version.bpm).toBeNull();
       expect(version.freeTiming).toBe(true);

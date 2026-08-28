@@ -186,12 +186,12 @@ describe('version planning', () => {
   }));
   const rhythm = analyzeMelodyRhythm(notes, 10);
 
-  it('offers the three local versions without the Musician', () => {
+  it('offers only the transcription without the Musician', () => {
     // The Musician is optional and may never have run, so the default plan is
-    // the three versions that can always be derived from the transcription.
-    // Offering more would put an unplayable entry in the picker.
+    // what can always be derived from the take. Offering more would put an
+    // unplayable entry in the picker.
     const plan = planVersions({ rhythm, mode: 'melody', amount: 55 });
-    expect(plan.map((version) => version.id)).toEqual(['unprocessed', 'judge', 'teacher']);
+    expect(plan.map((version) => version.id)).toEqual(['unprocessed']);
   });
 
   it('adds a Musician version only once its notes exist', () => {
@@ -201,12 +201,7 @@ describe('version planning', () => {
       amount: 55,
       generated: ['musician-refined'],
     });
-    expect(plan.map((version) => version.id)).toEqual([
-      'unprocessed',
-      'judge',
-      'teacher',
-      'musician-refined',
-    ]);
+    expect(plan.map((version) => version.id)).toEqual(['unprocessed', 'musician-refined']);
     // Its partner was not generated, so it is not offered.
     expect(plan.map((version) => version.id)).not.toContain('musician-developed');
   });
@@ -246,12 +241,15 @@ describe('version planning', () => {
     expect(raw?.amount).toBe(0);
   });
 
-  it('leaves pitch alone in the Judge version', () => {
-    // The Judge answers "what did they play", not "what should it have been".
-    // Snapping to a scale there would be the Teacher's job done in the wrong
-    // place, and would make the faithfulness score unmeasurable.
+  it('leaves pitch alone in every version it plans', () => {
+    // Snapping to a scale answers "what should it have been" rather than "what
+    // did they play", and it made the faithfulness score unmeasurable. The two
+    // versions that did it are gone; this holds the line for the rest.
     const plan = planVersions({ rhythm, mode: 'melody', amount: 100 });
-    expect(plan.find((v) => v.id === 'judge')?.paramOverrides?.scaleSnapStrength).toBe(0);
+    expect(plan.length).toBeGreaterThan(0);
+    for (const version of plan) {
+      expect(version.paramOverrides?.scaleSnapStrength).toBe(0);
+    }
   });
 
   it('increases timing correction monotonically across the versions', () => {
@@ -277,10 +275,13 @@ describe('version planning', () => {
     }
   });
 
-  it('defaults to the Judge reading', () => {
+  it('defaults to the transcription', () => {
     // The most faithful account of what the person did is what they came to
-    // hear; the Teacher is a step they take, not one taken for them.
-    expect(defaultVersion(rhythm)).toBe('judge');
+    // hear. The two tidied readings that used to sit in front of it dropped
+    // notes and flattened pitches, and one of them was what the Musician was
+    // fed.
+    expect(defaultVersion(rhythm)).toBe('unprocessed');
+    expect(defaultVersion(rhythm, 'rhythm')).toBe('unprocessed');
   });
 });
 

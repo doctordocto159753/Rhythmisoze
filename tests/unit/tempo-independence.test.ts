@@ -166,7 +166,7 @@ function interpret(audio: MonoAudio, state: FlowState) {
   const rhythm = analyzeMelodyRhythm(settled.judge?.notes ?? settled.rawNotes, audio.durationSec);
   const tempo = resolveVersionTempo({ rhythm });
   const versions = planVersions({ rhythm, mode: settled.mode, amount: settled.retouchAmount });
-  const faithful = versions.find((version) => version.id === 'judge');
+  const faithful = versions.find((version) => version.id === 'unprocessed');
 
   return {
     candidate: extraction.notes,

@@ -87,13 +87,11 @@ describe('a refused variant', () => {
     );
     const sources: VersionNoteSources = {
       unprocessed: TEACHER_NOTES,
-      judge: TEACHER_NOTES,
-      teacher: TEACHER_NOTES,
       generated: offered,
     };
-    expect(notesForVersion('teacher', sources)).toEqual(TEACHER_NOTES);
+    expect(notesForVersion('unprocessed', sources)).toEqual(TEACHER_NOTES);
     // And the withheld version resolves to nothing rather than silently to the
-    // Teacher, which would play the refused material anyway.
+    // source material, which would play the refused material anyway.
     expect(notesForVersion('musician-developed', sources)).toBeNull();
   });
 

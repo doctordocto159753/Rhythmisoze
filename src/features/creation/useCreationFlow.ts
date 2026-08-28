@@ -45,7 +45,6 @@ import {
   type LevelSnapshot,
 } from '@audio-core';
 import { refine, RETOUCH_AMOUNT_DEFAULT, type RefineResult } from '@retouch';
-import { teach, type TeacherResult } from '@music-teacher';
 import {
   analyzeDrumRhythm,
   analyzeMelodyRhythm,
@@ -149,11 +148,14 @@ export function useCreationFlow(locale: Locale) {
         ? analyzeDrumRhythm(state.rawDrums, state.durationSec)
         : null;
     }
-    // Judged notes where available: a harmonic artifact and a fragmented note
-    // are not attacks, and letting them vote on the tempo skews it.
-    const notes = state.judge?.notes ?? state.rawNotes;
-    return notes.length > 0 ? analyzeMelodyRhythm(notes, state.durationSec) : null;
-  }, [state.rhythmAnalysis, state.mode, state.rawNotes, state.judge, state.rawDrums, state.durationSec]);
+    // The transcription's own notes. There used to be a judged reading
+    // preferred here, on the argument that its repairs made better tempo
+    // evidence; it is gone, and reading the take directly is what the rest of
+    // the pipeline now does too.
+    return state.rawNotes.length > 0
+      ? analyzeMelodyRhythm(state.rawNotes, state.durationSec)
+      : null;
+  }, [state.rhythmAnalysis, state.mode, state.rawNotes, state.rawDrums, state.durationSec]);
 
   /**
    * The tempo the music is interpreted at, if it has one.
@@ -182,27 +184,6 @@ export function useCreationFlow(locale: Locale) {
    * is moved toward the grid this implies.
    */
   const encodedBpm = useMemo(() => encodingBpm(performanceTempo), [performanceTempo]);
-
-  /**
-   * What a teacher would suggest, computed from the Judge's reading.
-   *
-   * Derived rather than stored, and keyed only on the judged notes, so it runs
-   * once per take. It deliberately receives no tempo at all: the Teacher works
-   * from the performance's own timing.
-   */
-  const lesson = useMemo<TeacherResult | null>(() => {
-    if (state.mode !== 'melody') return null;
-    const source = state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes;
-    if (source.length < 4 || state.durationSec <= 0) return null;
-    try {
-      return teach(source, state.durationSec);
-    } catch {
-      // The Teacher is pure; a throw means malformed input rather than a
-      // transient fault, and losing the suggestion is better than losing the
-      // sketch.
-      return null;
-    }
-  }, [state.mode, state.phraseModel, state.judge, state.rawNotes, state.durationSec]);
 
   const musicianAvailability = useMusicianAvailability();
 
@@ -249,18 +230,6 @@ export function useCreationFlow(locale: Locale) {
   });
 
   /**
-   * The Teacher material as it stands right now.
-   *
-   * Read out here rather than only inside `versionNoteSources` because it is
-   * what the Musician's stored versions are checked against, and the check has
-   * to happen before the picker is built.
-   */
-  const teacherNotes = useMemo<readonly NoteEvent[]>(
-    () => lesson?.notes ?? state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes,
-    [lesson, state.phraseModel, state.judge, state.rawNotes],
-  );
-
-  /**
    * The Musician's versions that may still be offered.
    *
    * Two filters, for two different lies the picker would otherwise tell.
@@ -285,13 +254,13 @@ export function useCreationFlow(locale: Locale) {
   const offerable = useMemo(
     () => offerableGenerated(
       musician.generated,
-      teacherNotes,
+      state.rawNotes,
       state.phraseModel?.phrases.map((phrase) => ({
         startIndex: phrase.startNoteIndex,
         endIndex: phrase.endNoteIndex,
       })) ?? [],
     ),
-    [musician.generated, teacherNotes, state.phraseModel],
+    [musician.generated, state.rawNotes, state.phraseModel],
   );
   const offeredGenerated = offerable.offered;
 
@@ -347,26 +316,23 @@ export function useCreationFlow(locale: Locale) {
    * the difference.
    */
   const versionNoteSources = useMemo<VersionNoteSources>(() => {
-    const judged = state.phraseModel?.interpretedNotes ?? state.judge?.notes ?? state.rawNotes;
     return {
       unprocessed: state.rawNotes,
-      judge: judged,
-      teacher: teacherNotes,
       // The filtered set, not the raw one. The picker and the note resolver have
       // to agree: offering a version the resolver would answer for, or resolving
       // one the picker withheld, is how a withheld version gets played anyway.
       generated: offeredGenerated,
     };
-  }, [state.rawNotes, state.phraseModel, state.judge, teacherNotes, offeredGenerated]);
+  }, [state.rawNotes, offeredGenerated]);
 
   /**
    * The payload for a Musician request.
    *
-   * **Teacher material only** (AC-02). The registry records that
-   * `musician-refined` and `musician-developed` both descend from `teacher`,
-   * and this reads the Teacher's notes through the same resolver every other
-   * version goes through -- so the claim is enforced by the same code path
-   * rather than by this function remembering to be careful.
+   * **The transcription only.** The registry records that every Musician
+   * version descends from `unprocessed`, and this reads those notes through the
+   * same resolver every other version goes through -- so the claim is enforced
+   * by the same code path rather than by this function remembering to be
+   * careful.
    *
    * There is no branch here that could reach `state.audio`, and
    * `MusicianRequest` has no field that could carry it (AC-03).
@@ -1198,8 +1164,6 @@ export function useCreationFlow(locale: Locale) {
         if (request) musician.regenerate(request);
       },
     },
-    /** What a teacher would suggest, and why. Null outside the pitched path. */
-    lesson,
     actions: {
       arm,
       uploadAudio,
